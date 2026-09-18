@@ -26,6 +26,11 @@ TEMPLATE_SPECIALIZATION
 void CStateGroupDragAbstract::initialize()
 {
 	inherited::initialize();
+	if (strstr(Core.Params, "-corpse_debug"))
+	{
+		Msg("[DEBUG-668] t=%u event=drag_enter monster=%u corpse=%p",
+			Device.dwTimeGlobal, u32(object->ID()), static_cast<const void*>(object->EatedCorpse));
+	}
 	IKinematics* K = object->EatedCorpse->Visual()->dcast_PKinematics();
 	VERIFY(K);
 	CInifile* ini = K->LL_UserData();

@@ -22,6 +22,11 @@ void CStateGroupEatingAbstract::initialize()
 {
 	inherited::initialize();
 	time_last_eat = 0;
+	if (strstr(Core.Params, "-corpse_debug"))
+	{
+		Msg("[DEBUG-668] t=%u event=eat_enter monster=%u corpse=%p",
+			Device.dwTimeGlobal, u32(object->ID()), static_cast<const void*>(object->EatedCorpse));
+	}
 }
 
 TEMPLATE_SPECIALIZATION
@@ -37,6 +42,11 @@ void CStateGroupEatingAbstract::execute()
 	{
 		object->ChangeSatiety(object->db().m_fEatSlice);
 		corpse->m_fFood -= object->db().m_fEatSliceWeight;
+		if (strstr(Core.Params, "-corpse_debug"))
+		{
+			Msg("[DEBUG-668] t=%u event=eat_slice monster=%u corpse=%p food=%.3f",
+				Device.dwTimeGlobal, u32(object->ID()), static_cast<const void*>(corpse), corpse->m_fFood);
+		}
 		time_last_eat = Device.dwTimeGlobal;
 	}
 }

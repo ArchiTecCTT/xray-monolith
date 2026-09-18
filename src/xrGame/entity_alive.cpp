@@ -680,6 +680,11 @@ void CEntityAlive::PHGetLinearVell(Fvector& velocity)
 
 void CEntityAlive::set_lock_corpse(bool b_l_corpse)
 {
+	if (strstr(Core.Params, "-corpse_debug"))
+	{
+		Msg("[DEBUG-668] t=%u event=lock_set corpse=%p id=%u from=%u to=%u cooldown_ms=%u",
+			Device.dwTimeGlobal, static_cast<const void*>(this), u32(ID()), u32(b_eating), u32(b_l_corpse), m_use_timeout);
+	}
 	if (b_eating && !b_l_corpse)
 	{
 		m_used_time = Device.dwTimeGlobal;

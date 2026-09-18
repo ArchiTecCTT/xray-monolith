@@ -132,6 +132,11 @@ void CStateManagerDog::execute()
 				{
 					object->EatedCorpse = object->CorpseMan.get_corpse();
 					const_cast<CEntityAlive *>(object->EatedCorpse)->set_lock_corpse(true);
+					if (strstr(Core.Params, "-corpse_debug"))
+					{
+						Msg("[DEBUG-668] t=%u event=selection_lock monster=%u corpse=%p",
+							Device.dwTimeGlobal, u32(object->ID()), static_cast<const void*>(object->EatedCorpse));
+					}
 				}
 			}
 			else
@@ -145,6 +150,16 @@ void CStateManagerDog::execute()
 		state_id = eStateControlled;
 	}
 
+	if (strstr(Core.Params, "-corpse_debug"))
+	{
+		if (current_substate != state_id)
+		{
+			Msg("[DEBUG-668] t=%u event=dog_state monster=%u from=%u to=%u eat=%u rest=%u selected=%p available=%p enemy=%p",
+				Device.dwTimeGlobal, u32(object->ID()), current_substate, state_id, u32(state_id == eStateEat),
+				u32(state_id == eStateRest), static_cast<const void*>(object->EatedCorpse),
+				static_cast<const void*>(object->CorpseMan.get_corpse()), static_cast<const void*>(enemy));
+		}
+	}
 	select_state(state_id);
 
 	if (prev_substate != current_substate && object->get_custom_anim_state())

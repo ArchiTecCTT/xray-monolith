@@ -61,6 +61,11 @@ void CMonsterCorpseMemory::add_corpse(const CEntityAlive* corpse)
 	{
 		// добавить врага в список объектов
 		m_objects.insert(mk_pair(corpse, corpse_info));
+		if (strstr(Core.Params, "-corpse_debug"))
+		{
+			Msg("[DEBUG-668] t=%u event=memory_add monster=%u corpse=%p food=%.3f memory_ms=%u",
+				Device.dwTimeGlobal, u32(monster->ID()), static_cast<const void*>(corpse), corpse->m_fFood, time_memory);
+		}
 	}
 }
 
@@ -87,6 +92,13 @@ void CMonsterCorpseMemory::remove_non_actual()
 			(it->first->m_fFood < 1)
 		)
 		{
+			if (strstr(Core.Params, "-corpse_debug"))
+			{
+				Msg("[DEBUG-668] t=%u event=memory_drop_invalid monster=%u corpse=%p selected=%u age_ms=%u memory_ms=%u alive=%u destroy=%u food=%.3f",
+					cur_time, u32(monster->ID()), static_cast<const void*>(it->first), u32(monster->EatedCorpse == it->first),
+					cur_time - it->second.time, time_memory, u32(it->first && it->first->g_Alive()),
+					u32(it->first && it->first->getDestroy()), it->first ? it->first->m_fFood : -1.f);
+			}
 			m_objects.erase(it);
 
 			// Lain: fixed by adding "continue"
@@ -95,6 +107,12 @@ void CMonsterCorpseMemory::remove_non_actual()
 
 		if (const_cast<CEntityAlive *>(it->first)->is_locked_corpse())
 		{
+			if (strstr(Core.Params, "-corpse_debug"))
+			{
+				Msg("[DEBUG-668] t=%u event=memory_drop_locked monster=%u corpse=%p selected=%u age_ms=%u memory_ms=%u",
+					cur_time, u32(monster->ID()), static_cast<const void*>(it->first),
+					u32(monster->EatedCorpse == it->first), cur_time - it->second.time, time_memory);
+			}
 			m_objects.erase(it);
 			continue;
 		}

@@ -340,6 +340,11 @@ void CBaseMonster::UpdateCL()
 
 	if (EatedCorpse && !CorpseMemory.is_valid_corpse(EatedCorpse))
 	{
+		if (strstr(Core.Params, "-corpse_debug"))
+		{
+			Msg("[DEBUG-668] t=%u event=selection_clear monster=%u corpse=%p reason=not_in_memory",
+				Device.dwTimeGlobal, u32(ID()), static_cast<const void*>(EatedCorpse));
+		}
 		EatedCorpse = NULL;
 	}
 
