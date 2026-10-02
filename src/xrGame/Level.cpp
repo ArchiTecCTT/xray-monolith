@@ -1312,10 +1312,15 @@ void CLevel::OnRender()
 	if (Device.m_SecondViewport.IsSVPFrame())
 		Render->RenderToTarget(Render->rtSVP);
 
-	if (use_reshade)
+	// SVP-lite: SVP frames are never presented, so in R1 skip reshade and the HUD/UI pass on them
+	const bool svp_skip_ui = ps_r__svp_skip_extras && Device.m_SecondViewport.IsSVPFrame() &&
+		::Render->get_generation() == ::Render->GENERATION_R1;
+
+	if (use_reshade && !svp_skip_ui)
 		render_reshade_effects();
 
-	HUD().RenderUI();
+	if (!svp_skip_ui)
+		HUD().RenderUI();
 
 	ScriptDebugRender();
 

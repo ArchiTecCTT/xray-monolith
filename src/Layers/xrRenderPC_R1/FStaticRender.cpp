@@ -436,7 +436,16 @@ void CRender::Calculate()
 	// Transfer to global space to avoid deep pointer access
 	IRender_Target* T = getTarget();
 	float fov_factor = _sqr(90.f / Device.fFOV);
-	g_fSCREEN = float(T->get_width() * T->get_height()) * fov_factor * (EPS_S + ps_r__LOD);
+	u32 scr_w = T->get_width();
+	u32 scr_h = T->get_height();
+	if (Target->SVPSmallFrame())
+	{
+		// SVP-lite: this runs before Target->Begin(), so get_width()/get_height() still hold the previous
+		// frame's size; use the size the small SVP frame is going to be rendered at
+		scr_w = Target->get_svp_width();
+		scr_h = Target->get_svp_height();
+	}
+	g_fSCREEN = float(scr_w * scr_h) * fov_factor * (EPS_S + ps_r__LOD);
 	r_ssaDISCARD = _sqr(ps_r__ssaDISCARD) / g_fSCREEN;
 	r_ssaDONTSORT = _sqr(ps_r__ssaDONTSORT / 3) / g_fSCREEN;
 	r_ssaLOD_A = _sqr(ps_r1_ssaLOD_A / 3) / g_fSCREEN;
@@ -514,12 +523,14 @@ void CRender::Render()
 	}
 
 	Device.Statistic->RenderDUMP.Begin();
+	// SVP-lite: on (never presented) SVP frames skip grass and attachment/HUD UI passes
+	const bool svp_lite = ps_r__svp_skip_extras && Device.m_SecondViewport.IsSVPFrame();
 	// Begin
 	Target->Begin();
 	phase = PHASE_NORMAL;
 	GMBase.r_dsgraph_render_hud(); // hud
 	GMBase.r_dsgraph_render_graph(0); // normal level
-	if (Details)Details->Render(); // grass / details
+	if (Details && !svp_lite) Details->Render(); // grass / details
 	GMBase.r_dsgraph_render_lods(true, false); // lods - FB
 
 	CEnvironment* Env = &g_pGamePersistent->Environment();
@@ -531,12 +542,20 @@ void CRender::Render()
 
 	if (g_hud)
 	{
-		g_hud->Render_R1_Attachment_UI();
+		if (svp_lite)
+		{
+			// skipped passes: still drop the queued attachment UIs (Render_R1_Attachment_UI would clear them)
+			g_pGamePersistent->AttachmentUIsToRender.clear_not_free();
+		}
+		else
+		{
+			g_hud->Render_R1_Attachment_UI();
 
-		if (g_hud->RenderActiveItemUIQuery())
-			GMBase.r_dsgraph_render_hud_ui();
-		if (g_hud->RenderCamAttachedUIQuery())
-			GMBase.r_dsgraph_render_cam_ui();
+			if (g_hud->RenderActiveItemUIQuery())
+				GMBase.r_dsgraph_render_hud_ui();
+			if (g_hud->RenderCamAttachedUIQuery())
+				GMBase.r_dsgraph_render_cam_ui();
+		}
 	}
 
 	phase = PHASE_NORMAL;
@@ -1029,6 +1048,10 @@ static inline bool match_shader_id(LPCSTR const debug_shader_id, LPCSTR const fu
 
 void CRender::RenderToTarget(RRT target)
 {
+	// SVP-lite: with the small SVP target the image is already published by CRenderTarget::End()
+	if (target == rtSVP && Target->SVPSmallEnabled())
+		return;
+
 	ref_rt* RT = nullptr;
 
 	switch (target)
@@ -1046,6 +1069,9 @@ void CRender::RenderToTarget(RRT target)
 
 	IDirect3DSurface9* pBackBuffer = nullptr;
 	HW.pDevice->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &pBackBuffer);
-	D3DXLoadSurfaceFromSurface((*RT)->pRT, 0, 0, pBackBuffer, 0, 0, D3DX_DEFAULT, 0);
+	// SVP-lite: GPU copy for the SVP target (same size/format render targets); fall back to the old D3DX copy if rejected
+	if (target != rtSVP ||
+		FAILED(HW.pDevice->StretchRect(pBackBuffer, nullptr, (*RT)->pRT, nullptr, D3DTEXF_POINT)))
+		D3DXLoadSurfaceFromSurface((*RT)->pRT, 0, 0, pBackBuffer, 0, 0, D3DX_DEFAULT, 0);
 	pBackBuffer->Release();
 }

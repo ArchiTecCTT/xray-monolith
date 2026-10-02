@@ -8,8 +8,16 @@ class CRenderTarget : public IRender_Target
 public:
 	ref_rt rt_secondVP; //--#SM+#-- +SecondVP+
 	ref_rt rt_ui_pda;
+	ref_rt rt_svp_work; // SVP-lite: scratch RT the small SVP frame is rendered into (copied to rt_secondVP)
 	
 private:
+	// SVP-lite: small second viewport (r1_svp_size)
+	BOOL svp_small; // small SVP render target + depth buffer were created
+	BOOL svp_small_frame; // the current frame (between Begin and End) is rendered into the small RT
+	u32 svp_w;
+	u32 svp_h;
+	IDirect3DSurface9* zb_svp;
+
 	BOOL bAvailable;
 	u32 rtWidth;
 	u32 rtHeight;
@@ -72,6 +80,11 @@ public:
 
 	void Begin();
 	void End();
+
+	BOOL SVPSmallEnabled() { return svp_small; }
+	BOOL SVPSmallFrame(); // small SVP target is enabled and this frame is an SVP frame
+	u32 get_svp_width() { return svp_w; }
+	u32 get_svp_height() { return svp_h; }
 
 	void DoAsyncScreenshot();
 

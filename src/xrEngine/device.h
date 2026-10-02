@@ -157,8 +157,8 @@ public:
 		IC u8 GetSVPFrameDelay() { return frameDelay; }
 		void  SetSVPFrameDelay(u8 iDelay)
 		{
-			frameDelay = iDelay;
-			clamp<u8>(frameDelay, 2, u8(-1));
+			// minimum delay is 2 (every 2nd frame is the SVP frame)
+			frameDelay = (iDelay < 2) ? u8(2) : iDelay;
 		}
 	};	
 	
@@ -526,6 +526,12 @@ private:
 
 extern ENGINE_API CRenderDevice Device;
 extern ENGINE_API CRenderDevice* DevicePtr;
+
+// SVP-lite tuning (console: r__svp_delay, r__svp_far, r__svp_skip_extras), defined in xr_ioc_cmd.cpp
+extern ENGINE_API int ps_r__svp_delay;
+extern ENGINE_API float ps_r__svp_far;
+extern ENGINE_API int ps_r__svp_skip_extras;
+extern ENGINE_API int ps_r1_svp_size; // R1: size (pixels) of the small SVP render target, 0 = off (needs vid_restart)
 
 #ifndef _EDITOR
 #define RDEVICE Device

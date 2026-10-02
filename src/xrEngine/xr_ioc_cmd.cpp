@@ -1028,6 +1028,56 @@ public:
 	}
 };
 
+class CCC_SVPFrameDelay : public CCC_Integer
+{
+public:
+	CCC_SVPFrameDelay(LPCSTR N, int* V, int _min = 0, int _max = 999) : CCC_Integer(N, V, _min, _max) {};
+
+	virtual void Execute(LPCSTR args)
+	{
+		CCC_Integer::Execute(args);
+		Device.m_SecondViewport.SetSVPFrameDelay(u8(*value));
+	}
+
+	virtual void Info(TInfo& I)
+	{
+		xr_sprintf(I, sizeof(I), "scope second viewport is rendered every N-th frame, integer in range [%d,%d]", min, max);
+	}
+};
+
+class CCC_SVPFar : public CCC_Float
+{
+public:
+	CCC_SVPFar(LPCSTR N, float* V, float _min = 0, float _max = 1) : CCC_Float(N, V, _min, _max) {};
+
+	virtual void Info(TInfo& I)
+	{
+		xr_sprintf(I, sizeof(I), "far plane in metres used on scope second viewport frames, 0 = off, float in range [%3.1f,%3.1f]", min, max);
+	}
+};
+
+class CCC_SVPSkipExtras : public CCC_Integer
+{
+public:
+	CCC_SVPSkipExtras(LPCSTR N, int* V, int _min = 0, int _max = 999) : CCC_Integer(N, V, _min, _max) {};
+
+	virtual void Info(TInfo& I)
+	{
+		xr_sprintf(I, sizeof(I), "R1: skip grass and HUD/UI passes on scope second viewport frames, integer in range [%d,%d]", min, max);
+	}
+};
+
+class CCC_SVPSize : public CCC_Integer
+{
+public:
+	CCC_SVPSize(LPCSTR N, int* V, int _min = 0, int _max = 999) : CCC_Integer(N, V, _min, _max) {};
+
+	virtual void Info(TInfo& I)
+	{
+		xr_sprintf(I, sizeof(I), "R1: size in pixels of the small scope second viewport render target, 0 = off, applies after vid_restart, integer in range [%d,%d]", min, max);
+	}
+};
+
 class CCC_Editor : public IConsole_Command
 {
 public:
@@ -1066,6 +1116,12 @@ extern int g_ai_unlimited_ammo;
 float g_AimLookFactor = 1.f;
 
 int ps_framelimiter = 0;
+
+// SVP-lite: scope second viewport tuning
+ENGINE_API int ps_r__svp_delay = 3;       // SVP frame is rendered every N-th frame (2..8)
+ENGINE_API float ps_r__svp_far = 0.f;     // far plane (m) for SVP frames, 0 = off
+ENGINE_API int ps_r__svp_skip_extras = 1; // skip grass and HUD/UI passes on SVP frames (R1)
+ENGINE_API int ps_r1_svp_size = 512;      // R1: SVP is rendered into a square RT of this many pixels, 0 = off
 extern u32 g_crosshair_color;
 float g_freelook_z_offset;
 float g_ironsights_factor = 1.25f;
@@ -1294,6 +1350,11 @@ void CCC_Register()
 	CMD1(CCC_HideConsole, "hide");
 
 	CMD4(CCC_Integer, "r__framelimit", &ps_framelimiter, 0, 500);
+	CMD4(CCC_SVPFrameDelay, "r__svp_delay", &ps_r__svp_delay, 2, 8); // scope SVP: render every N-th frame
+	Device.m_SecondViewport.SetSVPFrameDelay(u8(ps_r__svp_delay)); // apply default at startup
+	CMD4(CCC_SVPFar, "r__svp_far", &ps_r__svp_far, 0.f, 5000.f); // scope SVP: far plane in metres, 0 = off
+	CMD4(CCC_SVPSize, "r1_svp_size", &ps_r1_svp_size, 0, 2048); // scope SVP (R1): small render target size in pixels, 0 = off
+	CMD4(CCC_SVPSkipExtras, "r__svp_skip_extras", &ps_r__svp_skip_extras, 0, 1); // scope SVP: skip grass and HUD/UI passes on SVP frames (R1)
 	CMD3(CCC_Mask, "rs_refresh_60hz", &psDeviceFlags, rsRefresh60hz);
 	CMD2(CCC_Color, "g_crosshair_color", &g_crosshair_color);
 	CMD4(CCC_Float, "mouse_sens_aim", &g_AimLookFactor, 0.01f, 5.0f);
