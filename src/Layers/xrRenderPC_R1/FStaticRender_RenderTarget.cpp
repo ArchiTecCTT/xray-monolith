@@ -91,6 +91,9 @@ BOOL CRenderTarget::Create()
 			svp_w = svp_sz;
 			svp_h = svp_sz;
 			Msg("* SVP-lite: small second viewport %ux%u", svp_sz, svp_sz);
+			// default-pool targets start undefined; clear so the lens is black, not garbage, until the first SVP frame is published
+			HW.pDevice->ColorFill(rt_secondVP->pRT, nullptr, D3DCOLOR_XRGB(0, 0, 0));
+			HW.pDevice->ColorFill(rt_svp_work->pRT, nullptr, D3DCOLOR_XRGB(0, 0, 0));
 		}
 		else
 		{
