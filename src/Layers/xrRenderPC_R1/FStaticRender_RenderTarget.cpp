@@ -372,8 +372,9 @@ void CRenderTarget::End()
 		svp_small_frame = FALSE;
 
 		// maps normally emptied by the distortion phase
-		RImplementation.mapDistort.clear();
-		RImplementation.mapHUDDistort.clear();
+		RImplementation.GMBase.RGraph.mapStaticSorted.Distort.clear();
+		RImplementation.GMBase.RGraph.mapDynamicSorted.Distort.clear();
+		RImplementation.GMBase.RGraph.mapHUDSorted.Distort.clear();
 
 		// keep the "previous frame had distortion" state alive across the skipped phase (see Perform())
 		if (frame_distort == (Device.dwFrame - 1)) frame_distort = Device.dwFrame;
