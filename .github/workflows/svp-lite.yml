@@ -1,6 +1,6 @@
 name: svp-lite
 
-# Test builds of the scope second-viewport patches. Builds DX8 (R1) and DX8-AVX only.
+# Test builds of the scope second-viewport patches. Builds DX8-AVX only.
 # Uploads short-lived workflow artifacts. No releases, no secrets, no artifact cleanup.
 
 on:
@@ -22,7 +22,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        buildconf: [DX8-AVX, DX8]
+        buildconf: [DX8-AVX]
 
     steps:
       - name: Checkout (with submodules)
