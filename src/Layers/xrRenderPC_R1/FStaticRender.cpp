@@ -436,16 +436,9 @@ void CRender::Calculate()
 	// Transfer to global space to avoid deep pointer access
 	IRender_Target* T = getTarget();
 	float fov_factor = _sqr(90.f / Device.fFOV);
-	u32 scr_w = T->get_width();
-	u32 scr_h = T->get_height();
-	if (Target->SVPSmallFrame())
-	{
-		// SVP-lite: this runs before Target->Begin(), so get_width()/get_height() still hold the previous
-		// frame's size; use the size the small SVP frame is going to be rendered at
-		scr_w = Target->get_svp_width();
-		scr_h = Target->get_svp_height();
-	}
-	g_fSCREEN = float(scr_w * scr_h) * fov_factor * (EPS_S + ps_r__LOD);
+	// SVP-lite (MT branch): g_fSCREEN stays tied to the full-size target on purpose; the detail worker thread reads
+	// r_ssaDISCARD while this runs, so it must not change on SVP frames
+	g_fSCREEN = float(T->get_width() * T->get_height()) * fov_factor * (EPS_S + ps_r__LOD);
 	r_ssaDISCARD = _sqr(ps_r__ssaDISCARD) / g_fSCREEN;
 	r_ssaDONTSORT = _sqr(ps_r__ssaDONTSORT / 3) / g_fSCREEN;
 	r_ssaLOD_A = _sqr(ps_r1_ssaLOD_A / 3) / g_fSCREEN;
@@ -523,14 +516,15 @@ void CRender::Render()
 	}
 
 	Device.Statistic->RenderDUMP.Begin();
-	// SVP-lite: on (never presented) SVP frames skip grass and attachment/HUD UI passes
+	// SVP-lite: on (never presented) SVP frames skip the attachment/HUD UI passes. Grass is NOT skipped on the MT
+	// branch: the detail MT_CALC gating (m_frame_rendered) would then compute visibles from the scope frustum
 	const bool svp_lite = ps_r__svp_skip_extras && Device.m_SecondViewport.IsSVPFrame();
 	// Begin
 	Target->Begin();
 	phase = PHASE_NORMAL;
 	GMBase.r_dsgraph_render_hud(); // hud
 	GMBase.r_dsgraph_render_graph(0); // normal level
-	if (Details && !svp_lite) Details->Render(); // grass / details
+	if (Details)Details->Render(); // grass / details
 	GMBase.r_dsgraph_render_lods(true, false); // lods - FB
 
 	CEnvironment* Env = &g_pGamePersistent->Environment();

@@ -19,7 +19,7 @@ that extra frame cheaper. Nothing changes while no scope SVP is active.
 | `r__svp_delay` | 2..8 (integer) | **3** | The SVP frame is rendered every N-th frame. 2 = old behaviour (every 2nd frame). Higher = fewer extra frames (faster) but a staler scope image. Applies immediately. |
 | `r__svp_far` | 0..5000 (metres, float) | **0** (off) | On SVP frames the far plane is cut to `min(normal far, r__svp_far)`. Less geometry, portals and HOM work for the scope image. Anything beyond is not drawn in the lens (fog is not tied to it, so a hard cut can be visible). Values smaller than the camera near plane are ignored. Try 300-500. Works in every renderer. |
 | `r1_svp_size` | 0, 64..2048 (pixels) | **512** | *`svp-lite-smallrt` branch, R1 only.* The scope SVP frame is rendered into a small square offscreen target (size x size) instead of the full-screen backbuffer. 0 = off = exactly the `svp-lite` behaviour. **Needs `vid_restart` (or a game restart) to take effect** because the targets are created with the renderer. If the target or its depth buffer cannot be created the engine logs `! SVP-lite: can't create ...` and silently uses the old full-size path. Try 384 / 512 / 768 / 1024: bigger = sharper lens, slower. |
-| `r__svp_skip_extras` | 0 / 1 | **1** | R1 only. On SVP frames skip grass (details), the attachment/HUD/camera-attached 3D UI passes, `HUD().RenderUI()` and the reshade call (SVP frames are never presented, so they were wasted). 0 = old behaviour. |
+| `r__svp_skip_extras` | 0 / 1 | **1** | R1 only. On SVP frames skip the attachment/HUD/camera-attached 3D UI passes (grass is NOT skipped in this multithread build, see below), `HUD().RenderUI()` and the reshade call (SVP frames are never presented, so they were wasted). 0 = old behaviour. |
 
 ## Other changes
 
@@ -34,8 +34,8 @@ that extra frame cheaper. Nothing changes while no scope SVP is active.
 * `r__svp_delay`: low. Only a staler lens image at higher values. R2/R4 HDR flicker hack assumes "frame - 1"
   (see report), so re-test HDR in R2/R4 if you raise it there.
 * `r__svp_far`: low, off by default. Visible far cut-off in the lens when on.
-* `r__svp_skip_extras`: low-medium. Grass and weapon/attachment UI are missing from the scope image only. The queued
-  attachment-UI list is still cleared on skipped frames. Grass cache updates are skipped for one frame after an SVP frame.
+* `r__svp_skip_extras`: low-medium. Weapon/attachment UI is missing from the scope image only. The queued
+  attachment-UI list is still cleared on skipped frames. Multithread build only: grass is deliberately not skipped on SVP frames, because the detail worker thread's frame gating would otherwise build grass visibility from the scope's narrow frustum and cull grass on the next normal frame. The LOD size (`g_fSCREEN`) also stays tied to the full-size target for the same reason (a worker thread reads `r_ssaDISCARD`).
   Reshade / `HUD().RenderUI()` run less often (never on SVP frames); effects tied to a call on each frame would
   update 1 frame in N later.
 * `StretchRect` copy: low (automatic fallback). If the lens image looked wrong/black this is the first thing to suspect.
