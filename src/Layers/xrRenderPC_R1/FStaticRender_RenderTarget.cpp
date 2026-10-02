@@ -8,6 +8,7 @@ static LPCSTR RTname_color_map = "$user$rendertarget_color_map";
 static LPCSTR RTname_distort = "$user$distort";
 static LPCSTR RTname_SecondVP = "$user$viewport2"; //--#SM+#-- +SecondVP+
 static LPCSTR RTname_pda_ui = "$user$ui";
+static LPCSTR RTname_SecondVP_work = "$user$viewport2_work"; // SVP-lite
 
 CRenderTarget::CRenderTarget()
 {
@@ -27,6 +28,12 @@ CRenderTarget::CRenderTarget()
 	param_noise_scale = 1.f;
 
 	rt_secondVP = nullptr; //--#SM+# +SecondVP+
+	rt_svp_work = nullptr;
+	svp_small = FALSE;
+	svp_small_frame = FALSE;
+	svp_w = 0;
+	svp_h = 0;
+	zb_svp = 0;
 
 	param_color_map_influence = 0.0f;
 	param_color_map_interpolate = 0.0f;
@@ -69,7 +76,32 @@ BOOL CRenderTarget::Create()
 
 	//We need to use Device.resolution in order to maintain performance while rendering image with second viewport + supersampling.
 	//Please do not change this. It's just working properly.
-	rt_secondVP.create(RTname_SecondVP, Device.dwWidth, Device.dwHeight, HW.Caps.fTarget); //--#SM+#-- +SecondVP+
+	// SVP-lite: optionally render the SVP frame into a small square RT (r1_svp_size) instead of the full-size backbuffer
+	if (ps_r1_svp_size > 0)
+	{
+		const u32 svp_sz = u32(clampr(ps_r1_svp_size, 64, 2048));
+		rt_secondVP.create(RTname_SecondVP, svp_sz, svp_sz, HW.Caps.fTarget);
+		rt_svp_work.create(RTname_SecondVP_work, svp_sz, svp_sz, HW.Caps.fTarget);
+		HRESULT svp_hr = E_FAIL;
+		if (rt_secondVP->valid() && rt_svp_work->valid())
+			svp_hr = HW.pDevice->CreateDepthStencilSurface(svp_sz, svp_sz, HW.Caps.fDepth, D3DMULTISAMPLE_NONE, 0, TRUE, &zb_svp, NULL);
+		if (SUCCEEDED(svp_hr) && zb_svp)
+		{
+			svp_small = TRUE;
+			svp_w = svp_sz;
+			svp_h = svp_sz;
+			Msg("* SVP-lite: small second viewport %ux%u", svp_sz, svp_sz);
+		}
+		else
+		{
+			Msg("! SVP-lite: can't create %ux%u second viewport target, using full size", svp_sz, svp_sz);
+			_RELEASE(zb_svp);
+			rt_svp_work.destroy();
+			rt_secondVP.destroy();
+		}
+	}
+	if (!svp_small)
+		rt_secondVP.create(RTname_SecondVP, Device.dwWidth, Device.dwHeight, HW.Caps.fTarget); //--#SM+#-- +SecondVP+
 	rt_ui_pda.create(RTname_pda_ui, Device.dwWidth, Device.dwHeight, HW.Caps.fTarget);
 
 	if ((rtHeight != Device.dwHeight) || (rtWidth != Device.dwWidth))
@@ -109,6 +141,8 @@ CRenderTarget::~CRenderTarget()
 	_RELEASE(pFB);
 	_RELEASE(pTempZB);
 	_RELEASE(ZB);
+	_RELEASE(zb_svp);
+	rt_svp_work.destroy();
 	s_postprocess_D[1].destroy();
 	s_postprocess[1].destroy();
 	s_postprocess_D[0].destroy();
@@ -249,6 +283,20 @@ void CRenderTarget::Begin()
 	}
 	*/
 
+	// SVP-lite: SVP frame goes into the small offscreen RT (no supersample / post-process on it)
+	svp_small_frame = SVPSmallFrame();
+	if (svp_small_frame)
+	{
+		RCache.set_RT(rt_svp_work->pRT);
+		RCache.set_ZB(zb_svp);
+		curWidth = svp_w;
+		curHeight = svp_h;
+		D3DVIEWPORT9 svp_vp = {0, 0, curWidth, curHeight, 0, 1.f};
+		CHK_DX(HW.pDevice->SetViewport(&svp_vp));
+		Device.Clear();
+		return;
+	}
+
 	if (!Perform())
 	{
 		// Base RT
@@ -308,8 +356,39 @@ void CRenderTarget::DoAsyncScreenshot()
 	}
 }
 
+BOOL CRenderTarget::SVPSmallFrame()
+{
+	return svp_small && Device.m_SecondViewport.IsSVPFrame();
+}
+
 void CRenderTarget::End()
 {
+	// SVP-lite: end of a small SVP frame - no PP-UI, distortion or post-process quad
+	if (svp_small_frame)
+	{
+		svp_small_frame = FALSE;
+
+		// maps normally emptied by the distortion phase
+		RImplementation.mapDistort.clear();
+		RImplementation.mapHUDDistort.clear();
+
+		// keep the "previous frame had distortion" state alive across the skipped phase (see Perform())
+		if (frame_distort == (Device.dwFrame - 1)) frame_distort = Device.dwFrame;
+
+		// back to the backbuffer
+		RCache.set_RT(HW.pBaseRT);
+		RCache.set_ZB(HW.pBaseZB);
+		curWidth = Device.dwWidth;
+		curHeight = Device.dwHeight;
+		D3DVIEWPORT9 base_vp = {0, 0, curWidth, curHeight, 0, 1.f};
+		CHK_DX(HW.pDevice->SetViewport(&base_vp));
+
+		// publish the finished image as $user$viewport2 (small, same-size GPU copy)
+		if (FAILED(HW.pDevice->StretchRect(rt_svp_work->pRT, nullptr, rt_secondVP->pRT, nullptr, D3DTEXF_POINT)))
+			D3DXLoadSurfaceFromSurface(rt_secondVP->pRT, 0, 0, rt_svp_work->pRT, 0, 0, D3DX_DEFAULT, 0);
+		return;
+	}
+
 	if (g_pGamePersistent) g_pGamePersistent->OnRenderPPUI_main(); // PP-UI
 
 	// find if distortion is needed at all

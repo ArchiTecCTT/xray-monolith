@@ -512,6 +512,7 @@ extern ENGINE_API CRenderDevice Device;
 extern ENGINE_API int ps_r__svp_delay;
 extern ENGINE_API float ps_r__svp_far;
 extern ENGINE_API int ps_r__svp_skip_extras;
+extern ENGINE_API int ps_r1_svp_size; // R1: size (pixels) of the small SVP render target, 0 = off (needs vid_restart)
 
 #ifndef _EDITOR
 #define RDEVICE Device
