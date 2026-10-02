@@ -705,13 +705,15 @@ void CRender::Render()
 
 
 	Device.Statistic->RenderDUMP.Begin();
+	// SVP-lite: on (never presented) SVP frames skip grass and attachment/HUD UI passes
+	const bool svp_lite = ps_r__svp_skip_extras && Device.m_SecondViewport.IsSVPFrame();
 	// Begin
 	Target->Begin();
 	o.vis_intersect = FALSE;
 	phase = PHASE_NORMAL;
 	r_dsgraph_render_hud(); // hud
 	r_dsgraph_render_graph(0); // normal level
-	if (Details)Details->Render(); // grass / details
+	if (Details && !svp_lite) Details->Render(); // grass / details
 	r_dsgraph_render_lods(true, false); // lods - FB
 
 	CEnvironment* Env = &g_pGamePersistent->Environment();
@@ -726,12 +728,20 @@ void CRender::Render()
 
 	if (g_hud)
 	{
-		g_hud->Render_R1_Attachment_UI();
+		if (svp_lite)
+		{
+			// skipped passes: still drop the queued attachment UIs (Render_R1_Attachment_UI would clear them)
+			g_pGamePersistent->AttachmentUIsToRender.clear_not_free();
+		}
+		else
+		{
+			g_hud->Render_R1_Attachment_UI();
 
-		if (g_hud->RenderActiveItemUIQuery())
-			r_dsgraph_render_hud_ui();
-		if (g_hud->RenderCamAttachedUIQuery())
-			r_dsgraph_render_cam_ui();
+			if (g_hud->RenderActiveItemUIQuery())
+				r_dsgraph_render_hud_ui();
+			if (g_hud->RenderCamAttachedUIQuery())
+				r_dsgraph_render_cam_ui();
+		}
 	}
 
 	HOM.Enable();
@@ -1240,6 +1250,9 @@ void CRender::RenderToTarget(RRT target)
 
 	IDirect3DSurface9* pBackBuffer = nullptr;
 	HW.pDevice->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &pBackBuffer);
-	D3DXLoadSurfaceFromSurface((*RT)->pRT, 0, 0, pBackBuffer, 0, 0, D3DX_DEFAULT, 0);
+	// SVP-lite: GPU copy for the SVP target (same size/format render targets); fall back to the old D3DX copy if rejected
+	if (target != rtSVP ||
+		FAILED(HW.pDevice->StretchRect(pBackBuffer, nullptr, (*RT)->pRT, nullptr, D3DTEXF_LINEAR)))
+		D3DXLoadSurfaceFromSurface((*RT)->pRT, 0, 0, pBackBuffer, 0, 0, D3DX_DEFAULT, 0);
 	pBackBuffer->Release();
 }
