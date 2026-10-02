@@ -1265,7 +1265,7 @@ void CRender::RenderToTarget(RRT target)
 	HW.pDevice->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &pBackBuffer);
 	// SVP-lite: GPU copy for the SVP target (same size/format render targets); fall back to the old D3DX copy if rejected
 	if (target != rtSVP ||
-		FAILED(HW.pDevice->StretchRect(pBackBuffer, nullptr, (*RT)->pRT, nullptr, D3DTEXF_LINEAR)))
+		FAILED(HW.pDevice->StretchRect(pBackBuffer, nullptr, (*RT)->pRT, nullptr, D3DTEXF_POINT)))
 		D3DXLoadSurfaceFromSurface((*RT)->pRT, 0, 0, pBackBuffer, 0, 0, D3DX_DEFAULT, 0);
 	pBackBuffer->Release();
 }
