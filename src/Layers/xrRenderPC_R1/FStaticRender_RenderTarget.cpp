@@ -361,7 +361,9 @@ void CRenderTarget::DoAsyncScreenshot()
 
 BOOL CRenderTarget::SVPSmallFrame()
 {
-	return svp_small && Device.m_SecondViewport.IsSVPFrame();
+	// the surfaces must exist (they are recreated with this object on every device reset)
+	return svp_small && zb_svp && rt_svp_work._get() && rt_svp_work->pRT && rt_secondVP._get() && rt_secondVP->pRT &&
+		Device.m_SecondViewport.IsSVPFrame();
 }
 
 void CRenderTarget::End()

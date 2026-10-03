@@ -205,6 +205,12 @@ void CLightR_Manager::render_point(u32 _priority)
 		CFrustum F;
 		F.CreateFromMatrix(L_combine, FRUSTUM_P_LRTB | FRUSTUM_P_FAR);
 
+		// vid_restart: render packets queued before the reset hold released state blocks, drop them
+		if (L->GMLight.reset_epoch != RImplementation.m_dsgraph_epoch)
+		{
+			L->GMLight.reset_epoch = RImplementation.m_dsgraph_epoch;
+			L->GMLight.RGraph.clear<false>();
+		}
 		L->GMLight.traverse((CSector*)L->SpatialComponent->spatial.sector, F, L_pos, L_combine);
 		L->GMLight.r_dsgraph_capture(false,true);
 
@@ -287,6 +293,12 @@ void CLightR_Manager::render_spot(u32 _priority)
 
 		CFrustum F;
 		F.CreateFromMatrix(L_combine, FRUSTUM_P_LRTB | FRUSTUM_P_FAR);
+		// vid_restart: render packets queued before the reset hold released state blocks, drop them
+		if (L->GMLight.reset_epoch != RImplementation.m_dsgraph_epoch)
+		{
+			L->GMLight.reset_epoch = RImplementation.m_dsgraph_epoch;
+			L->GMLight.RGraph.clear<false>();
+		}
 		L->GMLight.traverse((CSector*)L->SpatialComponent->spatial.sector, F, L_pos, L_combine);
 		L->GMLight.r_dsgraph_capture(false, true);
 

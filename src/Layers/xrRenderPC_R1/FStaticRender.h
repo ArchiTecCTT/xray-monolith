@@ -94,6 +94,7 @@ public:
 	shared_str c_ldynamic_props;
 	bool m_bMakeAsyncSS;
 	bool m_bFirstFrameAfterReset; // Determines weather the frame is the first after resetting device.
+	u32 m_dsgraph_epoch = 0; // bumped on every device reset; draw-graph packets queued before it are stale
 	xr_list<light*> v_all_lights_dque;
 
 private:

@@ -16,6 +16,7 @@ public:
 
 	R_dsgraph::DynamicSceneRgraph RGraph;
 	u32										i_options;		// input:	culling options
+	u32										reset_epoch = 0;	// R1 lights: last vid_restart epoch this graph was cleared for
 	u32										i_doptions;
 	Fvector									i_vBase;		// input:	"view" point
 	CFrustum								i_frustum;		// input:	"view" frustum

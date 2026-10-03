@@ -132,6 +132,12 @@ void CRender::destroy()
 
 void CRender::reset_begin()
 {
+	// The reset releases and re-records the state blocks that queued render packets point to (raw pointers),
+	// so drop every packet queued so far. Per-light graphs are dropped lazily via m_dsgraph_epoch (LightPPA.cpp)
+	++m_dsgraph_epoch;
+	GMBase.RGraph.clear();
+	if (L_Dynamic) L_Dynamic->reset();
+
 	//AVO: let's reload details while changed details options on vid_restart
 	if (b_loaded && ((dm_current_size != dm_size) || (ps_r__Detail_density != ps_current_detail_density) || (
 		ps_r__Detail_height != ps_current_detail_height)))
@@ -512,6 +518,10 @@ void CRender::Render()
 	if (m_bFirstFrameAfterReset)
 	{
 		m_bFirstFrameAfterReset = false;
+
+		// this frame is discarded: don't let what Calculate() queued for it leak into the next frame
+		GMBase.RGraph.clear<false>();
+		if (L_Dynamic) L_Dynamic->reset();
 		return;
 	}
 

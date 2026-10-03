@@ -26,6 +26,7 @@ public:
 	virtual ~CLightR_Manager();
 
 	void add(light* L);
+	void reset() { selected_point.clear(); selected_spot.clear(); } // drop per-frame selections (vid_restart)
 	void render(u32 _priority);
 	void render_point(u32 _priority);
 	void render_spot(u32 _priority);
