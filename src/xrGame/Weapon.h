@@ -454,6 +454,9 @@ public:
 	LPCSTR GetSilencerNameScript() const { return *GetSilencerName(); }
 	LPCSTR GetScopeNameScript() const { return *GetScopeName(); }
 	float GetFireDispersionScript() const { return fireDispersionBase; }
+	// EFT parts: bullet speed. Get = the section's / an upgrade's start speed (m/s) without silencer, ammo or the factor.
+	float GetBulletSpeedScript() { return GetBulletSpeed(); }
+	float GetBulletSpeedKScript() const { return m_fBulletSpeedK; }
 	float RPMScript() const { return fOneShotTime; }
 	float RealRPMScript() const { return 60.0f / fOneShotTime; } // Return actual RPM like in configs
 	float ModeRPMScript() const { return fModeShotTime; }
@@ -461,6 +464,13 @@ public:
 
 	//Setters
 	void SetFireDispersionScript(float val) { fireDispersionBase = val; }
+	// factor on the start speed of every bullet this object fires; not a number (NaN) or <= 0 is ignored, range 0.01 .. 10
+	void SetBulletSpeedKScript(float val)
+	{
+		if (!_valid(val) || val <= 0.f) return;
+		clamp(val, 0.01f, 10.f);
+		m_fBulletSpeedK = val;
+	}
 	void SetRPM(float newOneShotTime) { fOneShotTime = newOneShotTime; } // Input - time between shots like received from getter
 	void SetRealRPM(float rpm) { fOneShotTime = 60.0f / rpm; } // Input - actual RPM like in configs
 	void SetModeRPM(float newOneShotTime) { fModeShotTime = newOneShotTime; } // Input - time between shots like received from getter

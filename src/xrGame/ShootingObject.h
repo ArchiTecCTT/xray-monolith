@@ -82,6 +82,9 @@ protected:
 
 	//скорость вылета пули из ствола
 	float m_fStartBulletSpeed;
+	//EFT parts: per-object factor on the start speed, set by scripts (Weapon.h SetBulletSpeedKScript); 1 = unchanged.
+	//Not saved, not sent: a script re-applies it. See docs in the porting repository (engine parts patch).
+	float m_fBulletSpeedK;
 	//максимальное расстояние стрельбы
 	float fireDistance;
 

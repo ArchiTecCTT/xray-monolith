@@ -45,6 +45,8 @@ void CWeaponAK74::script_register	(lua_State *L)
 			
 			.def("GetBaseDispersion", &CWeapon::GetBaseDispersion)
 			.def("GetFireDispersion", &CWeapon::GetFireDispersionScript)
+			.def("GetBulletSpeed", &CWeapon::GetBulletSpeedScript)
+			.def("GetBulletSpeedK", &CWeapon::GetBulletSpeedKScript)
 			
 			.def("GetMisfireStartCondition", &CWeapon::GetMisfireStartCondition)
 			.def("GetMisfireEndCondition", &CWeapon::GetMisfireEndCondition)
@@ -102,6 +104,7 @@ void CWeaponAK74::script_register	(lua_State *L)
 
 			// Setters
 			.def("SetFireDispersion", &CWeapon::SetFireDispersionScript)
+			.def("SetBulletSpeedK", &CWeapon::SetBulletSpeedKScript)
 			.def("SetMisfireStartCondition", &CWeapon::SetMisfireStartCondition)
 			.def("SetMisfireEndCondition", &CWeapon::SetMisfireEndCondition)
 			.def("SetRPM", &CWeapon::SetRPM)

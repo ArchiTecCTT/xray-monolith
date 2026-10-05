@@ -27,6 +27,7 @@ CShootingObject::CShootingObject(void)
 	fvHitPower.set(0.0f, 0.0f, 0.0f, 0.0f);
 	fvHitPowerCritical.set(0.0f, 0.0f, 0.0f, 0.0f);
 	m_fStartBulletSpeed = 1000.f;
+	m_fBulletSpeedK = 1.f;
 
 	m_vCurrentShootDir.set(0, 0, 0);
 	m_vCurrentShootPos.set(0, 0, 0);
@@ -547,7 +548,7 @@ void CShootingObject::FireBullet(const Fvector& pos,
 
 	Level().BulletManager().AddBullet(pos,
 	                                  dir,
-	                                  m_fStartBulletSpeed * cur_silencer_koef.bullet_speed,
+	                                  m_fStartBulletSpeed * cur_silencer_koef.bullet_speed * m_fBulletSpeedK,
 	                                  l_fHitPower * cur_silencer_koef.hit_power,
 	                                  fHitImpulse * cur_silencer_koef.hit_impulse,
 	                                  parent_id,
