@@ -114,6 +114,8 @@ CWeapon::CWeapon()
 	m_BriefInfo_CalcFrame = 0;
 	m_fConditionShotDecK = 1.0f;
 	m_fShotVolumeK = 1.0f;
+	m_fHudInertionSpeedK = 1.0f;
+	m_fHudInertionAmpK = 1.0f;
 
 	iAmmoElapsed = -1;
 	iMagazineSize = -1;
@@ -2823,6 +2825,11 @@ void CWeapon::UpdateHudAdditional(Fmatrix& trans)
 		hi->m_measures.m_inertion_params.m_offset_LRUD.w,
 		hi->m_measures.m_inertion_params.m_offset_LRUD_aim.w,
 		m_zoom_params.m_fZoomRotationFactor);
+
+	// EFT parts: per-object factors set by scripts (1 = unchanged). The speed factor is what an upgrade's
+	// inertion_tendto_speed changes (WeaponUpgrade.cpp:153); the amplitude factor scales how far the weapon travels.
+	fInertiaSpeedMod *= m_fHudInertionSpeedK;
+	vIOffsets.mul(m_fHudInertionAmpK);
 
 	// Высчитываем инерцию из поворотов камеры
 	bool bIsInertionPresent = m_fLR_InertiaFactor != 0.0f || m_fUD_InertiaFactor != 0.0f;
