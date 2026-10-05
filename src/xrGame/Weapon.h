@@ -454,6 +454,19 @@ public:
 	LPCSTR GetSilencerNameScript() const { return *GetSilencerName(); }
 	LPCSTR GetScopeNameScript() const { return *GetScopeName(); }
 	float GetFireDispersionScript() const { return fireDispersionBase; }
+	// EFT parts: bullet speed. Get = the section's / an upgrade's start speed (m/s) without silencer, ammo or the factor.
+	float GetBulletSpeedScript() { return GetBulletSpeed(); }
+	float GetBulletSpeedKScript() const { return m_fBulletSpeedK; }
+	// EFT parts: wear per shot. Get = the section's / an upgrade's value (condition fraction per shot) without the factor.
+	float GetConditionShotDecScript() const { return conditionDecreasePerShot; }
+	float GetConditionQueueShotDecScript() const { return conditionDecreasePerQueueShot; }
+	float GetConditionShotDecKScript() const { return m_fConditionShotDecK; }
+	float GetShotVolumeKScript() const { return m_fShotVolumeK; }
+	// EFT parts: the item's own weight (inv_weight, plus an upgrade's addition, plus what set_weight wrote), WITHOUT the
+	// scope, silencer, launcher and magazine that Weight() adds (Weapon.cpp:3081-3100). The base for game_object:set_weight.
+	float GetBaseWeightScript() const { return CInventoryItemObject::Weight(); }
+	float GetHudInertionSpeedKScript() const { return m_fHudInertionSpeedK; }
+	float GetHudInertionAmpKScript() const { return m_fHudInertionAmpK; }
 	float RPMScript() const { return fOneShotTime; }
 	float RealRPMScript() const { return 60.0f / fOneShotTime; } // Return actual RPM like in configs
 	float ModeRPMScript() const { return fModeShotTime; }
@@ -461,6 +474,40 @@ public:
 
 	//Setters
 	void SetFireDispersionScript(float val) { fireDispersionBase = val; }
+	// factor on the start speed of every bullet this object fires; not a number (NaN) or <= 0 is ignored, range 0.01 .. 10
+	void SetBulletSpeedKScript(float val)
+	{
+		if (!_valid(val) || val <= 0.f) return;
+		clamp(val, 0.01f, 10.f);
+		m_fBulletSpeedK = val;
+	}
+	// factor on the wear of every shot; NaN or < 0 is ignored, range 0 .. 10 (0 = no wear)
+	void SetConditionShotDecKScript(float val)
+	{
+		if (!_valid(val) || val < 0.f) return;
+		clamp(val, 0.f, 10.f);
+		m_fConditionShotDecK = val;
+	}
+	// factor on the volume of the shot sound (see m_fShotVolumeK); NaN or < 0 is ignored, range 0 .. 2 (0 = silent shots, also to NPCs)
+	void SetShotVolumeKScript(float val)
+	{
+		if (!_valid(val) || val < 0.f) return;
+		clamp(val, 0.f, 2.f);
+		m_fShotVolumeK = val;
+	}
+	// factors on the HUD sway (see m_fHudInertionSpeedK / m_fHudInertionAmpK); NaN or < 0 is ignored, range 0 .. 5 (0 = no sway)
+	void SetHudInertionSpeedKScript(float val)
+	{
+		if (!_valid(val) || val < 0.f) return;
+		clamp(val, 0.f, 5.f);
+		m_fHudInertionSpeedK = val;
+	}
+	void SetHudInertionAmpKScript(float val)
+	{
+		if (!_valid(val) || val < 0.f) return;
+		clamp(val, 0.f, 5.f);
+		m_fHudInertionAmpK = val;
+	}
 	void SetRPM(float newOneShotTime) { fOneShotTime = newOneShotTime; } // Input - time between shots like received from getter
 	void SetRealRPM(float rpm) { fOneShotTime = 60.0f / rpm; } // Input - actual RPM like in configs
 	void SetModeRPM(float newOneShotTime) { fModeShotTime = newOneShotTime; } // Input - time between shots like received from getter
@@ -729,6 +776,18 @@ protected:
 	float misfireStartProbability; //øàíñ îñå÷êè ïðè èçíîøåíîñòè áîëüøå ÷åì misfireStartCondition
 	float misfireEndProbability; //øàíñ îñå÷êè ïðè èçíîøåíîñòè áîëüøå ÷åì misfireEndCondition
 	float conditionDecreasePerQueueShot; //óâåëè÷åíèå èçíîøåíîñòè ïðè âûñòðåëå î÷åðåäüþ
+	//EFT parts: per-object factor on the wear of every shot (single and queue), set by scripts; 1 = unchanged. Not saved, not sent.
+	float m_fConditionShotDecK;
+	//EFT parts: per-object volume factor of the shot sound (CWeaponMagazined::PlaySoundShot, shotgun last shot); 1 = unchanged.
+	//It is the volume_mult of the sound player, so it scales what the player hears AND what NPCs hear (sound range and power
+	//are max_ai_distance * volume, xrSound/SoundRender_Emitter.cpp:85, xrEngine/IGame_Level.cpp:331). Not saved, not sent.
+	float m_fShotVolumeK;
+	//EFT parts: per-object factors on the HUD weapon sway (CWeapon::UpdateHudAdditional); 1 = unchanged. Not saved, not sent.
+	//Speed: how fast the weapon follows the camera turn (m_tendto_speed*). Amplitude: how far it travels (m_offset_LRUD*).
+	//Kept here, not in HudItemData()->m_measures: that is reloaded from the section (player_hud.cpp:233-234) and an
+	//upgrade writes into it (WeaponUpgrade.cpp:153-156), so a script's value there would be lost.
+	float m_fHudInertionSpeedK;
+	float m_fHudInertionAmpK;
 	float conditionDecreasePerShot; //óâåëè÷åíèå èçíîøåíîñòè ïðè îäèíî÷íîì âûñòðåëå
 
 public:
