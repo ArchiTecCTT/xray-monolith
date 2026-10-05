@@ -457,6 +457,10 @@ public:
 	// EFT parts: bullet speed. Get = the section's / an upgrade's start speed (m/s) without silencer, ammo or the factor.
 	float GetBulletSpeedScript() { return GetBulletSpeed(); }
 	float GetBulletSpeedKScript() const { return m_fBulletSpeedK; }
+	// EFT parts: wear per shot. Get = the section's / an upgrade's value (condition fraction per shot) without the factor.
+	float GetConditionShotDecScript() const { return conditionDecreasePerShot; }
+	float GetConditionQueueShotDecScript() const { return conditionDecreasePerQueueShot; }
+	float GetConditionShotDecKScript() const { return m_fConditionShotDecK; }
 	float RPMScript() const { return fOneShotTime; }
 	float RealRPMScript() const { return 60.0f / fOneShotTime; } // Return actual RPM like in configs
 	float ModeRPMScript() const { return fModeShotTime; }
@@ -470,6 +474,13 @@ public:
 		if (!_valid(val) || val <= 0.f) return;
 		clamp(val, 0.01f, 10.f);
 		m_fBulletSpeedK = val;
+	}
+	// factor on the wear of every shot; NaN or < 0 is ignored, range 0 .. 10 (0 = no wear)
+	void SetConditionShotDecKScript(float val)
+	{
+		if (!_valid(val) || val < 0.f) return;
+		clamp(val, 0.f, 10.f);
+		m_fConditionShotDecK = val;
 	}
 	void SetRPM(float newOneShotTime) { fOneShotTime = newOneShotTime; } // Input - time between shots like received from getter
 	void SetRealRPM(float rpm) { fOneShotTime = 60.0f / rpm; } // Input - actual RPM like in configs
@@ -739,6 +750,8 @@ protected:
 	float misfireStartProbability; //øàíñ îñå÷êè ïðè èçíîøåíîñòè áîëüøå ÷åì misfireStartCondition
 	float misfireEndProbability; //øàíñ îñå÷êè ïðè èçíîøåíîñòè áîëüøå ÷åì misfireEndCondition
 	float conditionDecreasePerQueueShot; //óâåëè÷åíèå èçíîøåíîñòè ïðè âûñòðåëå î÷åðåäüþ
+	//EFT parts: per-object factor on the wear of every shot (single and queue), set by scripts; 1 = unchanged. Not saved, not sent.
+	float m_fConditionShotDecK;
 	float conditionDecreasePerShot; //óâåëè÷åíèå èçíîøåíîñòè ïðè îäèíî÷íîì âûñòðåëå
 
 public:

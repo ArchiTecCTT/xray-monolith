@@ -112,6 +112,7 @@ CWeapon::CWeapon()
 	
 	m_iAmmoCurrentTotal = 0;
 	m_BriefInfo_CalcFrame = 0;
+	m_fConditionShotDecK = 1.0f;
 
 	iAmmoElapsed = -1;
 	iMagazineSize = -1;
