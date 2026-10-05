@@ -102,6 +102,7 @@ protected:
 	virtual DLL_Pure* _construct();
 
 	Flags16 m_huditem_flags;
+	shared_str m_hand_pose_suffix;
 
 	enum
 	{
@@ -216,6 +217,11 @@ public:
 	IC BOOL RenderHud() { return m_huditem_flags.test(fl_renderhud); }
 	attachable_hud_item* HudItemData();
 	bool IsAttachedToHUD();
+
+	// EFT parts: a suffix a script sets (CWeapon:SetHandPose). attachable_hud_item::anim_play plays the hands motion
+	// "<motion name><suffix>" when the hands animation file has it, else the plain one. Not saved, not in net packets.
+	const shared_str& HandPoseSuffix() const { return m_hand_pose_suffix; }
+	void SetHandPoseSuffix(const shared_str& s) { m_hand_pose_suffix = s; }
 	virtual bool ParentIsActor();
 	virtual float GetNearWallRange();
 	virtual float GetBaseHudFov();

@@ -646,9 +646,21 @@ u32 attachable_hud_item::anim_play(const shared_str& anm_name_b, BOOL bMixIn, co
         // Verdatim: store the final anim speed for use in motion mark timing scaling
         final_anim_speed = speed;
 
+	// EFT parts: a script-set pose suffix picks the hands motion "<name><suffix>" of the same animation file when it
+	// exists (the left hand placed for the fitted part); no suffix or no such motion: the plain motion, as before.
+	MotionID hand_mid = M.mid;
+	if (m_parent_hud_item && m_parent_hud_item->HandPoseSuffix().size() && m_parent->m_model)
+	{
+		string256 pose_name;
+		xr_sprintf(pose_name, "%s%s", M.name.c_str(), m_parent_hud_item->HandPoseSuffix().c_str());
+		MotionID pose_mid = m_parent->m_model->ID_Cycle_Safe(pose_name);
+		if (pose_mid.valid())
+			hand_mid = pose_mid;
+	}
+
 	u32 ret = 0;
 	if (m_attach_place_idx != SCOPE_ATTACH_IDX) {
-		ret = g_player_hud->anim_play(m_attach_place_idx, M.mid, bMixIn, md, speed);
+		ret = g_player_hud->anim_play(m_attach_place_idx, hand_mid, bMixIn, md, speed);
 	}
 
 	if (m_model->dcast_PKinematicsAnimated())

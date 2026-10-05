@@ -466,6 +466,8 @@ public:
 	// scope, silencer, launcher and magazine that Weight() adds (Weapon.cpp:3081-3100). The base for game_object:set_weight.
 	float GetBaseWeightScript() const { return CInventoryItemObject::Weight(); }
 	float GetHudInertionSpeedKScript() const { return m_fHudInertionSpeedK; }
+	// EFT parts: the hands-motion suffix (see CHudItem::HandPoseSuffix); "" = none
+	LPCSTR GetHandPoseScript() const { return m_hand_pose_suffix.c_str() ? m_hand_pose_suffix.c_str() : ""; }
 	float GetHudInertionAmpKScript() const { return m_fHudInertionAmpK; }
 	float RPMScript() const { return fOneShotTime; }
 	float RealRPMScript() const { return 60.0f / fOneShotTime; } // Return actual RPM like in configs
@@ -494,6 +496,25 @@ public:
 		if (!_valid(val) || val < 0.f) return;
 		clamp(val, 0.f, 2.f);
 		m_fShotVolumeK = val;
+	}
+	// EFT parts: sets the hands-motion suffix. Letters, digits and '_' only, at most 24 characters; anything else is ignored.
+	// Takes effect at the next hands motion that starts; a rifle held idle in the hands starts its idle motion again at once
+	// (the same call the state machine makes on entering eIdle). "" clears it.
+	void SetHandPoseScript(LPCSTR s)
+	{
+		if (!s) return;
+		size_t n = xr_strlen(s);
+		if (n > 24) return;
+		for (size_t i = 0; i < n; ++i)
+		{
+			char c = s[i];
+			if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_')) return;
+		}
+		shared_str pose(s);
+		if (pose == m_hand_pose_suffix) return;
+		m_hand_pose_suffix = pose;
+		if (IsAttachedToHUD() && GetState() == eIdle && !IsPending())
+			PlayAnimIdle();
 	}
 	// factors on the HUD sway (see m_fHudInertionSpeedK / m_fHudInertionAmpK); NaN or < 0 is ignored, range 0 .. 5 (0 = no sway)
 	void SetHudInertionSpeedKScript(float val)
