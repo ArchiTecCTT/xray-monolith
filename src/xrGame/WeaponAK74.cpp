@@ -12,6 +12,11 @@ CWeaponAK74::~CWeaponAK74()
 
 using namespace luabind;
 
+// EFT parts: what this exe offers scripts on a CWeapon (bit mask; a global function that an exe without the patch lacks):
+//   1 = Get/SetBulletSpeedK, GetBulletSpeed   2 = Get/SetConditionShotDecK, GetConditionShotDec, GetConditionQueueShotDec
+//   4 = Get/SetShotVolumeK   8 = Get/SetHudInertionSpeedK, Get/SetHudInertionAmpK   16 = GetBaseWeight
+static int eft_weapon_api() { return 1 | 2 | 4 | 8 | 16; }
+
 #pragma optimize("s",on)
 void CWeaponAK74::script_register	(lua_State *L)
 {
@@ -51,6 +56,7 @@ void CWeaponAK74::script_register	(lua_State *L)
 			.def("GetConditionQueueShotDec", &CWeapon::GetConditionQueueShotDecScript)
 			.def("GetConditionShotDecK", &CWeapon::GetConditionShotDecKScript)
 			.def("GetShotVolumeK", &CWeapon::GetShotVolumeKScript)
+			.def("GetBaseWeight", &CWeapon::GetBaseWeightScript)
 			.def("GetHudInertionSpeedK", &CWeapon::GetHudInertionSpeedKScript)
 			.def("GetHudInertionAmpK", &CWeapon::GetHudInertionAmpKScript)
 			
@@ -244,5 +250,11 @@ void CWeaponAK74::script_register	(lua_State *L)
 			.def("SetAmmoType2", &CWeaponMagazinedWGrenade::SetAmmoType2)
 			.def("GetAmmoType2", &CWeaponMagazinedWGrenade::GetAmmoType2)
 			.def("AmmoTypeForEach2", &CWeaponMagazinedWGrenade::AmmoTypeForEach2)
+	];
+
+	// EFT parts: feature detection for scripts; nil in an exe without the patch
+	module(L)
+	[
+		def("eft_weapon_api", &eft_weapon_api)
 	];
 }

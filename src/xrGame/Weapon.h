@@ -462,6 +462,9 @@ public:
 	float GetConditionQueueShotDecScript() const { return conditionDecreasePerQueueShot; }
 	float GetConditionShotDecKScript() const { return m_fConditionShotDecK; }
 	float GetShotVolumeKScript() const { return m_fShotVolumeK; }
+	// EFT parts: the item's own weight (inv_weight, plus an upgrade's addition, plus what set_weight wrote), WITHOUT the
+	// scope, silencer, launcher and magazine that Weight() adds (Weapon.cpp:3081-3100). The base for game_object:set_weight.
+	float GetBaseWeightScript() const { return CInventoryItemObject::Weight(); }
 	float GetHudInertionSpeedKScript() const { return m_fHudInertionSpeedK; }
 	float GetHudInertionAmpKScript() const { return m_fHudInertionAmpK; }
 	float RPMScript() const { return fOneShotTime; }
