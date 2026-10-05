@@ -854,7 +854,7 @@ void CWeaponMagazined::PlaySoundShot()
 			strconcat(sizeof(sndNameMisfire), sndNameMisfire, m_sSndShotCurrent.c_str(), "MisfireActor");
 			if (m_sounds.FindSoundItem(sndNameMisfire, false))
 			{
-				m_sounds.PlaySound(sndNameMisfire, get_LastFP(), H_Root(), !!GetHUDmode(), false, (u8)-1);
+				m_sounds.PlaySound(sndNameMisfire, get_LastFP(), H_Root(), !!GetHUDmode(), false, (u8)-1, m_fShotVolumeK);
 				return;
 			}
 		}
@@ -863,7 +863,7 @@ void CWeaponMagazined::PlaySoundShot()
 		strconcat(sizeof(sndNameFirst), sndNameFirst, m_sSndShotCurrent.c_str(), "ActorFirst");
 		if (m_iShotNum == 1 && m_sounds.FindSoundItem(sndNameFirst, false))
 		{
-			m_sounds.PlaySound(sndNameFirst, get_LastFP(), H_Root(), !!GetHUDmode(), false, (u8)-1);
+			m_sounds.PlaySound(sndNameFirst, get_LastFP(), H_Root(), !!GetHUDmode(), false, (u8)-1, m_fShotVolumeK);
 			return;
 		}
 
@@ -871,7 +871,7 @@ void CWeaponMagazined::PlaySoundShot()
 		strconcat(sizeof(sndName), sndName, m_sSndShotCurrent.c_str(), "Actor");
 		if (m_sounds.FindSoundItem(sndName, false))
 		{
-			m_sounds.PlaySound(sndName, get_LastFP(), H_Root(), !!GetHUDmode(), false, (u8)-1);
+			m_sounds.PlaySound(sndName, get_LastFP(), H_Root(), !!GetHUDmode(), false, (u8)-1, m_fShotVolumeK);
 			return;
 		}
 	}
@@ -882,12 +882,12 @@ void CWeaponMagazined::PlaySoundShot()
 		strconcat(sizeof(sndNameMisfire), sndNameMisfire, m_sSndShotCurrent.c_str(), "Misfire");
 		if (m_sounds.FindSoundItem(sndNameMisfire, false))
 		{
-			m_sounds.PlaySound(sndNameMisfire, get_LastFP(), H_Root(), !!GetHUDmode(), false, (u8)-1);
+			m_sounds.PlaySound(sndNameMisfire, get_LastFP(), H_Root(), !!GetHUDmode(), false, (u8)-1, m_fShotVolumeK);
 			return;
 		}
 	}
 
-	m_sounds.PlaySound(m_sSndShotCurrent.c_str(), get_LastFP(), H_Root(), !!GetHUDmode(), false, (u8)-1);
+	m_sounds.PlaySound(m_sSndShotCurrent.c_str(), get_LastFP(), H_Root(), !!GetHUDmode(), false, (u8)-1, m_fShotVolumeK);
 }
 
 void CWeaponMagazined::OnShot()

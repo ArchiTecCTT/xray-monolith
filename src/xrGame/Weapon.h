@@ -461,6 +461,7 @@ public:
 	float GetConditionShotDecScript() const { return conditionDecreasePerShot; }
 	float GetConditionQueueShotDecScript() const { return conditionDecreasePerQueueShot; }
 	float GetConditionShotDecKScript() const { return m_fConditionShotDecK; }
+	float GetShotVolumeKScript() const { return m_fShotVolumeK; }
 	float RPMScript() const { return fOneShotTime; }
 	float RealRPMScript() const { return 60.0f / fOneShotTime; } // Return actual RPM like in configs
 	float ModeRPMScript() const { return fModeShotTime; }
@@ -481,6 +482,13 @@ public:
 		if (!_valid(val) || val < 0.f) return;
 		clamp(val, 0.f, 10.f);
 		m_fConditionShotDecK = val;
+	}
+	// factor on the volume of the shot sound (see m_fShotVolumeK); NaN or < 0 is ignored, range 0 .. 2 (0 = silent shots, also to NPCs)
+	void SetShotVolumeKScript(float val)
+	{
+		if (!_valid(val) || val < 0.f) return;
+		clamp(val, 0.f, 2.f);
+		m_fShotVolumeK = val;
 	}
 	void SetRPM(float newOneShotTime) { fOneShotTime = newOneShotTime; } // Input - time between shots like received from getter
 	void SetRealRPM(float rpm) { fOneShotTime = 60.0f / rpm; } // Input - actual RPM like in configs
@@ -752,6 +760,10 @@ protected:
 	float conditionDecreasePerQueueShot; //óâåëè÷åíèå èçíîøåíîñòè ïðè âûñòðåëå î÷åðåäüþ
 	//EFT parts: per-object factor on the wear of every shot (single and queue), set by scripts; 1 = unchanged. Not saved, not sent.
 	float m_fConditionShotDecK;
+	//EFT parts: per-object volume factor of the shot sound (CWeaponMagazined::PlaySoundShot, shotgun last shot); 1 = unchanged.
+	//It is the volume_mult of the sound player, so it scales what the player hears AND what NPCs hear (sound range and power
+	//are max_ai_distance * volume, xrSound/SoundRender_Emitter.cpp:85, xrEngine/IGame_Level.cpp:331). Not saved, not sent.
+	float m_fShotVolumeK;
 	float conditionDecreasePerShot; //óâåëè÷åíèå èçíîøåíîñòè ïðè îäèíî÷íîì âûñòðåëå
 
 public:
