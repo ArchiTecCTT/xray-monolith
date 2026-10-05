@@ -1,0 +1,100 @@
+name: eft-parts
+
+# Test build of the EFT-parts script setters (branch eft-parts-engine). Builds DX8-AVX only.
+# Same steps as svp-lite.yml (copied from the svp-lite-mt branch). Short-lived artifacts only: no releases, no secrets,
+# no artifact cleanup. Runs on a push of eft-parts-engine and by hand (Actions > eft-parts > Run workflow, pick the branch).
+
+on:
+  push:
+    branches: [eft-parts-engine]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build ${{ matrix.buildconf }}
+    if: github.repository == 'ArchiTecCTT/xray-monolith'
+    runs-on: windows-2022
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: pwsh
+    strategy:
+      fail-fast: false
+      matrix:
+        buildconf: [DX8-AVX]
+
+    steps:
+      - name: Checkout (with submodules)
+        # actions/checkout v4.2.2
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Locate Visual Studio 2022 and check ATL/MFC
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          if (-not (Test-Path $vswhere)) { throw "vswhere.exe not found at $vswhere" }
+          $vs = & $vswhere -latest -products * -version '[17.0,18.0)' -property installationPath
+          if (-not $vs) { throw 'Visual Studio 2022 not found' }
+          Write-Host "Visual Studio 2022: $vs"
+          $msbuild = Join-Path $vs 'MSBuild\Current\Bin\amd64\MSBuild.exe'
+          if (-not (Test-Path $msbuild)) { throw "MSBuild (amd64) not found at $msbuild" }
+          $afx = Get-ChildItem -Path (Join-Path $vs 'VC\Tools\MSVC') -Recurse -Filter afx.h -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $afx) { throw 'ATL/MFC header afx.h not found in this Visual Studio install' }
+          Write-Host "afx.h: $($afx.FullName)"
+          Write-Host "MSBuild: $msbuild"
+          "MSBUILD_EXE=$msbuild" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Build ${{ matrix.buildconf }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $log = Join-Path $env:GITHUB_WORKSPACE 'msbuild-${{ matrix.buildconf }}.log'
+          & $env:MSBUILD_EXE src/engine-vs2022.sln /nologo /m:1 /p:Configuration=${{ matrix.buildconf }} /p:Platform=x64 /p:CL_MPCount=2 /fl "/flp:LogFile=$log;Verbosity=normal"
+          if ($LASTEXITCODE -ne 0) { throw "MSBuild failed with exit code $LASTEXITCODE" }
+
+      - name: Collect exe, manifest and log
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $conf = '${{ matrix.buildconf }}'
+          $exeName = 'Anomaly' + ($conf -replace '-', '') + '.exe'
+          $bin = Join-Path $env:GITHUB_WORKSPACE '_build\_game\bin_dbg'
+          Write-Host "Contents of ${bin}:"
+          Get-ChildItem $bin | ForEach-Object { Write-Host ("  {0}  {1} bytes" -f $_.Name, $_.Length) }
+          $exe = Join-Path $bin $exeName
+          if (-not (Test-Path $exe)) { throw "Expected build output not found: $exe" }
+          $stage = Join-Path $env:GITHUB_WORKSPACE 'staging'
+          New-Item -ItemType Directory -Path $stage -Force | Out-Null
+          Copy-Item $exe $stage
+          Copy-Item (Join-Path $env:GITHUB_WORKSPACE 'msbuild-${{ matrix.buildconf }}.log') $stage
+          $sha = (Get-FileHash -Path $exe -Algorithm SHA256).Hash.ToLower()
+          $manifest = [ordered]@{
+            sourceCommit  = $env:GITHUB_SHA
+            branch        = $env:GITHUB_REF_NAME
+            configuration = $conf
+            exe           = $exeName
+            sha256        = $sha
+          }
+          $manifest | ConvertTo-Json | Set-Content -Path (Join-Path $stage 'build-manifest.json') -Encoding utf8
+          Get-Content (Join-Path $stage 'build-manifest.json')
+
+      - name: Upload exe, manifest and log
+        uses: actions/upload-artifact@v4.6.0
+        with:
+          name: ${{ matrix.buildconf }}-exe-${{ github.ref_name }}
+          path: staging/*
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload build log (failed build)
+        if: failure()
+        uses: actions/upload-artifact@v4.6.0
+        with:
+          name: ${{ matrix.buildconf }}-buildlog-${{ github.ref_name }}
+          path: msbuild-${{ matrix.buildconf }}.log
+          if-no-files-found: warn
+          retention-days: 7
