@@ -283,7 +283,7 @@ void CInventoryItem::pre_install_upgrade()
 		{
 			weapon->Detach(weapon->GetScopeName().c_str(), true);
 		}
-		if (weapon->SilencerAttachable() && weapon->IsSilencerAttached())
+		if (weapon->SilencerAttachable() && weapon->IsAddonSilencerAttached())
 		{
 			weapon->Detach(weapon->GetSilencerName().c_str(), true);
 		}

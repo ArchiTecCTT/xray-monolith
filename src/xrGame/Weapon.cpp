@@ -261,6 +261,13 @@ void CWeapon::UpdateFireDependencies_internal()
 		if (GetHUDmode())
 		{
 			HudItemData()->setup_firedeps(m_current_firedeps);
+			if (m_parts_silencer)
+			{
+				// Points are absolute HUD MODEL coordinates, not shared HUD measure edits.
+				HudItemData()->m_item_transform.transform_tiny(m_current_firedeps.vLastFPSilencer, m_parts_fire_hud);
+				m_current_firedeps.vLastFP = m_current_firedeps.vLastFPSilencer;
+				m_current_firedeps.m_FireParticlesXForm.c = m_current_firedeps.vLastFP;
+			}
 			VERIFY(_valid(m_current_firedeps.m_FireParticlesXForm));
 		}
 		else
@@ -270,12 +277,13 @@ void CWeapon::UpdateFireDependencies_internal()
 			Fvector& fp = vLoadedFirePoint;
 			Fvector& fp2 = vLoadedFirePoint2;
 			Fvector& sp = vLoadedShellPoint;
-			Fvector& fps = vLoadedFirePointSilencer;
+			Fvector& fps = m_parts_silencer ? m_parts_fire_world : vLoadedFirePointSilencer;
 
 			parent.transform_tiny(m_current_firedeps.vLastFP, fp);
 			parent.transform_tiny(m_current_firedeps.vLastFP2, fp2);
 			parent.transform_tiny(m_current_firedeps.vLastSP, sp);
 			parent.transform_tiny(m_current_firedeps.vLastFPSilencer, fps);
+			if (m_parts_silencer) m_current_firedeps.vLastFP = m_current_firedeps.vLastFPSilencer;
 
 			m_current_firedeps.vLastFD.set(0.f, 0.f, 1.f);
 			parent.transform_dir(m_current_firedeps.vLastFD);
@@ -570,7 +578,7 @@ void CWeapon::ForceUpdateFireParticles()
 		_pxf.k = d;
 		_pxf.i.crossproduct(Fvector().set(0.0f, 1.0f, 0.0f), _pxf.k);
 		_pxf.j.crossproduct(_pxf.k, _pxf.i);
-		_pxf.c = XFORM().c;
+		_pxf.c = m_parts_silencer ? get_LastFPSilencer() : XFORM().c;
 
 		m_current_firedeps.m_FireParticlesXForm.set(_pxf);
 	}
@@ -1867,11 +1875,28 @@ bool CWeapon::IsScopeAttached() const
 		ALife::eAddonPermanent == m_eScopeStatus;
 }
 
-bool CWeapon::IsSilencerAttached() const
+bool CWeapon::IsAddonSilencerAttached() const
 {
 	return (ALife::eAddonAttachable == m_eSilencerStatus &&
 		0 != (m_flagsAddOnState & CSE_ALifeItemWeapon::eWeaponAddonSilencer)) ||
 		ALife::eAddonPermanent == m_eSilencerStatus;
+}
+
+bool CWeapon::IsSilencerAttached() const
+{
+	return m_parts_silencer || IsAddonSilencerAttached();
+}
+
+bool CWeapon::SetPartsSilencerScript(bool on, Fvector world, Fvector hud)
+{
+	if (on && (IsAddonSilencerAttached() || !SilencerAttachable() || !_valid(world) || !_valid(hud))) return false;
+	m_parts_silencer = on;
+	m_parts_fire_world = world;
+	m_parts_fire_hud = hud;
+	dwFP_Frame = u32(-1);
+	InitAddons();
+	UpdateAddonsVisibility();
+	return true;
 }
 
 bool CWeapon::GrenadeLauncherAttachable()
@@ -1932,7 +1957,7 @@ void CWeapon::UpdateHUDAddonsVisibility()
 
 	if (SilencerAttachable())
 	{
-		HudItemData()->set_bone_visible(wpn_silencer, IsSilencerAttached());
+		HudItemData()->set_bone_visible(wpn_silencer, IsAddonSilencerAttached());
 	}
 	if (m_eSilencerStatus == ALife::eAddonDisabled)
 	{
@@ -1990,7 +2015,7 @@ void CWeapon::UpdateAddonsVisibility()
 	bone_id = pWeaponVisual->LL_BoneID(wpn_silencer);
 	if (SilencerAttachable())
 	{
-		if (IsSilencerAttached())
+		if (IsAddonSilencerAttached())
 		{
 			if (!pWeaponVisual->LL_GetBoneVisible(bone_id))
 				pWeaponVisual->LL_SetBoneVisible(bone_id, TRUE, TRUE);
@@ -3099,7 +3124,7 @@ float CWeapon::Weight() const
 	{
 		res += pSettings->r_float(GetScopeName(), "inv_weight");
 	}
-	if (IsSilencerAttached() && GetSilencerName().size())
+	if (IsAddonSilencerAttached() && GetSilencerName().size())
 	{
 		res += pSettings->r_float(GetSilencerName(), "inv_weight");
 	}
@@ -3316,7 +3341,7 @@ u32 CWeapon::Cost() const
 	{
 		res += pSettings->r_u32(GetScopeName(), "cost");
 	}
-	if (IsSilencerAttached() && GetSilencerName().size())
+	if (IsAddonSilencerAttached() && GetSilencerName().size())
 	{
 		res += pSettings->r_u32(GetSilencerName(), "cost");
 	}

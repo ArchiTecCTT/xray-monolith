@@ -16,7 +16,8 @@ using namespace luabind;
 //   1 = Get/SetBulletSpeedK, GetBulletSpeed   2 = Get/SetConditionShotDecK, GetConditionShotDec, GetConditionQueueShotDec
 //   4 = Get/SetShotVolumeK   8 = Get/SetHudInertionSpeedK, Get/SetHudInertionAmpK   16 = GetBaseWeight
 //   32 = Get/SetHandPose (a suffix for the hands motions: the left hand per fitted part)
-static int eft_weapon_api() { return 1 | 2 | 4 | 8 | 16 | 32; }
+//   64 = Get/SetPartsSilencer (transient silenced state and source HUD/world muzzle points)
+static int eft_weapon_api() { return 1 | 2 | 4 | 8 | 16 | 32 | 64; }
 
 #pragma optimize("s",on)
 void CWeaponAK74::script_register	(lua_State *L)
@@ -39,6 +40,8 @@ void CWeaponAK74::script_register	(lua_State *L)
 			.def("GetScopeName", &CWeapon::GetScopeNameScript)
 			
 			.def("IsSilencerAttached", &CWeapon::IsSilencerAttached)
+			.def("GetPartsSilencer", &CWeapon::GetPartsSilencerScript)
+			.def("SetPartsSilencer", &CWeapon::SetPartsSilencerScript)
 			.def("SilencerAttachable", &CWeapon::SilencerAttachable)
 			.def("GetSilencerName", &CWeapon::GetSilencerNameScript)
 			

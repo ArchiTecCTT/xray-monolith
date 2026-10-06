@@ -1258,7 +1258,7 @@ void CUIActorMenu::PropertiesBoxForWeapon(CUICellItem* cell_item, PIItem item, b
 	}
 	if (pWeapon->SilencerAttachable())
 	{
-		if (pWeapon->IsSilencerAttached())
+		if (pWeapon->IsAddonSilencerAttached())
 		{
 			m_UIPropertiesBox->AddItem("st_detach_silencer", NULL, INVENTORY_DETACH_SILENCER_ADDON);
 			b_show = true;

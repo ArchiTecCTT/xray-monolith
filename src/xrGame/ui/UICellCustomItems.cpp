@@ -426,7 +426,7 @@ bool CUIWeaponCellItem::is_scope()
 
 bool CUIWeaponCellItem::is_silencer()
 {
-	return object()->SilencerAttachable() && object()->IsSilencerAttached();
+	return object()->SilencerAttachable() && object()->IsAddonSilencerAttached();
 }
 
 bool CUIWeaponCellItem::is_launcher()
@@ -486,7 +486,7 @@ void CUIWeaponCellItem::Update()
 
 	if (object()->SilencerAttachable())
 	{
-		if (object()->IsSilencerAttached())
+		if (object()->IsAddonSilencerAttached())
 		{
 			if (!GetIcon(eSilencer) || bForceReInitAddons)
 			{

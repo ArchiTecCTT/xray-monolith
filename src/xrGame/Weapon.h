@@ -254,6 +254,13 @@ public:
 	bool IsGrenadeLauncherAttached() const;
 	bool IsScopeAttached() const;
 	bool IsSilencerAttached() const;
+	bool IsAddonSilencerAttached() const;
+	// EFT parts suppressor: transient; scripts restore it from the per-object parts store.
+	bool m_parts_silencer = false;
+	Fvector m_parts_fire_world = {0.f, 0.f, 0.f};
+	Fvector m_parts_fire_hud = {0.f, 0.f, 0.f};
+	bool GetPartsSilencerScript() const { return m_parts_silencer; }
+	bool SetPartsSilencerScript(bool on, Fvector world, Fvector hud);
 
 	virtual bool GrenadeLauncherAttachable();
 	virtual bool ScopeAttachable();

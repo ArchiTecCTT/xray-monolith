@@ -1305,7 +1305,7 @@ bool CWeaponMagazined::CanAttach(PIItem pIItem)
 		}
 		return false;
 	}
-	else if (pSilencer &&
+	else if (pSilencer && !m_parts_silencer &&
 		m_eSilencerStatus == ALife::eAddonAttachable &&
 		(m_flagsAddOnState & CSE_ALifeItemWeapon::eWeaponAddonSilencer) == 0 &&
 		(m_sSilencerName == pIItem->object().cNameSect()))
@@ -1392,7 +1392,7 @@ bool CWeaponMagazined::Attach(PIItem pIItem, bool b_send_event)
 		}
 		result = true;
 	}
-	else if (pSilencer &&
+	else if (pSilencer && !m_parts_silencer &&
 		m_eSilencerStatus == ALife::eAddonAttachable &&
 		(m_flagsAddOnState & CSE_ALifeItemWeapon::eWeaponAddonSilencer) == 0 &&
 		(m_sSilencerName == pIItem->object().cNameSect()))
@@ -1512,6 +1512,7 @@ bool CWeaponMagazined::Detach(const char* item_section_name, bool b_spawn_item)
 extern int scope_2dtexactive; //crookr
 void CWeaponMagazined::InitAddons()
 {
+	if (m_parts_silencer && IsAddonSilencerAttached()) { m_parts_silencer = false; dwFP_Frame = u32(-1); }
 	if (IsScopeAttached())
 	{
 		shared_str scope_tex_name;
@@ -1557,7 +1558,7 @@ void CWeaponMagazined::InitAddons()
 
 		//Load silencer values
 		LoadLights(*cNameSect(), "silencer_");
-		ApplySilencerKoeffs();
+		if (m_parts_silencer) ResetSilencerKoeffs(); else ApplySilencerKoeffs();
 	}
 	else
 	{
