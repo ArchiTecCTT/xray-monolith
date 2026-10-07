@@ -741,6 +741,7 @@ void CKinematicsAnimated::IBlend_Startup()
 	m_authored_mask.clear();
 	m_authored_keys.clear();
 	m_authored_selected.clear();
+	m_authored_dynamic = false;
 	_DBG_SINGLE_USE_MARKER;
 	CBlend B;
 	ZeroMemory(&B, sizeof(B));
@@ -970,13 +971,35 @@ void CKinematicsAnimated::LL_BuldBoneMatrixDequatize(const CBoneData* bd, u8 cha
 			keys_substruct(keys.keys[j], BK[j], keys.chanel_blend_conts[j]);
 }
 
-// Sample only authored key0, retaining every child local, including fingers.
-void CKinematicsAnimated::AuthoredHoldWorld(MotionID hold, u16 bone, Fmatrix& result)
+// Existing live hold clocks preserve idle breathing at action boundaries.
+// No new cycle/clock or retained blend pointers. Static key0 when none is live.
+bool CKinematicsAnimated::AuthoredHoldKey(MotionID hold, u16 bone, CKey& result)
 {
-	CBlend sample;
-	sample.timeCurrent = 0.f;
+	CKey keys[MAX_BLENDED];
+	const CBlend* blends[MAX_BLENDED];
+	int count = 0;
+	for (CBlend* b : blend_cycle(0))
+	{
+		if (b->motionID != hold || b->channel != 0 || b->blend_state() == CBlend::eFREE_SLOT || fis_zero(b->blendAmount)) continue;
+		if (count == MAX_BLENDED) return false;
+		blends[count] = b;
+		Dequantize(keys[count++], *b, *LL_GetMotion(hold, bone));
+	}
+	if (count)
+		MixInterlerp(result, keys, blends, count); // Existing native hold mixing.
+	else
+	{
+		CBlend sample;
+		sample.timeCurrent = 0.f;
+		Dequantize(result, sample, *LL_GetMotion(hold, bone));
+	}
+	return true;
+}
+
+bool CKinematicsAnimated::AuthoredHoldWorld(MotionID hold, u16 bone, Fmatrix& result)
+{
 	CKey key;
-	Dequantize(key, sample, *LL_GetMotion(hold, bone));
+	if (!AuthoredHoldKey(hold, bone, key)) return false;
 	Fmatrix local;
 	local.mk_xform(key.Q, key.T);
 	const u16 parent = LL_GetData(bone).GetParentID();
@@ -985,9 +1008,10 @@ void CKinematicsAnimated::AuthoredHoldWorld(MotionID hold, u16 bone, Fmatrix& re
 	else
 	{
 		Fmatrix world;
-		AuthoredHoldWorld(hold, parent, world);
+		if (!AuthoredHoldWorld(hold, parent, world)) return false;
 		result.mul_43(world, local);
 	}
+	return true;
 }
 
 bool CKinematicsAnimated::SetAuthoredHold(MotionID hold, u16 root, u16 anchor,
@@ -1000,7 +1024,8 @@ bool CKinematicsAnimated::SetAuthoredHold(MotionID hold, u16 root, u16 anchor,
 		root >= count || anchor >= count || root == LL_GetBoneRoot() || selected.empty())
 		return false;
 
-	if (hold != m_authored_hold || root != m_authored_root || anchor != m_authored_anchor || selected != m_authored_selected)
+	const bool changed = hold != m_authored_hold || root != m_authored_root || anchor != m_authored_anchor || selected != m_authored_selected;
+	if (changed)
 	{
 		// Fail closed on missing/extra/duplicate bones or an anchor inside the arm.
 		xr_vector<u8> mask(count, 0);
@@ -1020,18 +1045,26 @@ bool CKinematicsAnimated::SetAuthoredHold(MotionID hold, u16 root, u16 anchor,
 		m_authored_mask.swap(mask);
 		m_authored_selected = selected;
 		m_authored_keys.resize(count);
-		CBlend sample;
-		sample.timeCurrent = 0.f;
-		for (u16 id : selected)
-			Dequantize(m_authored_keys[id], sample, *LL_GetMotion(hold, id));
-		Fmatrix held_anchor, held_root, inverse;
-		AuthoredHoldWorld(hold, anchor, held_anchor);
-		AuthoredHoldWorld(hold, root, held_root);
-		inverse.invert(held_anchor);
-		m_authored_root_in_anchor.mul_43(inverse, held_root);
 		m_authored_hold = hold;
 		m_authored_root = root;
 		m_authored_anchor = anchor;
+	}
+	bool dynamic = false;
+	for (CBlend* b : blend_cycle(0))
+	{
+		if (b->motionID != hold || b->channel != 0 || b->blend_state() == CBlend::eFREE_SLOT) continue;
+		if (!_valid(b->blendAmount) || b->blendAmount < 0.f || !_valid(b->timeCurrent) || b->timeCurrent < 0.f) return false;
+		if (!fis_zero(b->blendAmount)) dynamic = true;
+	}
+	if (changed || dynamic || m_authored_dynamic)
+	{
+		for (u16 id : selected)
+			if (!AuthoredHoldKey(hold, id, m_authored_keys[id])) return false;
+		Fmatrix held_anchor, held_root, inverse;
+		if (!AuthoredHoldWorld(hold, anchor, held_anchor) || !AuthoredHoldWorld(hold, root, held_root)) return false;
+		inverse.invert(held_anchor);
+		m_authored_root_in_anchor.mul_43(inverse, held_root);
+		m_authored_dynamic = dynamic;
 	}
 
 	// CURRENT normally blended gun and parent, not action frame0. Neither

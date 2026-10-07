@@ -35,7 +35,13 @@ Implementation:
   falloff context. Interpolate/wrap ORIGINAL marker difference vectors (same
   weapon parent), normalize amounts, measure distance only AFTER mixing.
   Unknown context/mismatched counts/missing own hold disables the layer.
-- `CKinematicsAnimated`: sample/cache key0 of complete existing own hold.
+  Idle is context only; no permanent idle override after profiled falloff dies.
+- `CKinematicsAnimated`: sample/cache key0 of complete existing own hold when
+  no own-hold cycle is live. At native incoming/outgoing boundaries, sample the
+  EXISTING own-idle clocks/amounts using ordinary MixInterlerp, not scalar-clock
+  averages. No new cycle/clock or retained blend pointers. Idle diagnostic found
+  existing217-key own holds breathe (gun-relative root2.735mm/.198deg and4
+  dynamic arm children); freezing them would create an avoidable boundary pop.
   Validate exactly the subtree and anchor exclusion (no name-prefix guessing).
   Rebase root using CURRENT normally blended gun and parent transforms. Apply
   shortest normalized-linear quaternion / linear translation only after normal

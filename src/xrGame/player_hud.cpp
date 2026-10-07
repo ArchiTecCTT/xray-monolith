@@ -1541,8 +1541,9 @@ void attachable_hud_item::update_handon(IKinematicsAnimated* hands)
 	CHudItem* owner = m_parent_hud_item;
 	CWeapon* weapon = smart_cast<CWeapon*>(owner);
 	if (!weapon || weapon->IsGrenadeLauncherAttached() || !owner->m_handon_profile.size() || !owner->HandPoseSuffix().size()) return;
-	const bool idle = m_handon_source == owner->m_handon_hold;
-	bool eligible = idle || (owner->m_handon_actions.count(m_handon_source) != 0 && owner->HandOnActionRunning());
+	// Idle is context, not a permanently enabled layer. After the previous
+	// profiled action's normal falloff dies, ordinary idle remains untouched.
+	bool eligible = owner->m_handon_actions.count(m_handon_source) != 0 && owner->HandOnActionRunning();
 
 	// Numeric object ID + profile/suffix/HUD generation fences. No retained
 	// blend/weapon/track pointer, no per-frame allocation or identity-by-wrapper.
