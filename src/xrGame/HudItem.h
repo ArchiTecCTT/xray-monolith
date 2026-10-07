@@ -24,6 +24,7 @@ class CUIWindow;
 #include "inventory_space.h"
 #include "hudsound.h"
 #include "HUDManager.h"
+#include "EftHandOn.h"
 
 #define TENDTO_SPEED         1.0f     // Модификатор силы инерции (больше - чувствительней)
 #define TENDTO_SPEED_AIM     1.0f     // (Для прицеливания)
@@ -222,6 +223,18 @@ public:
 	// "<motion name><suffix>" when the hands animation file has it, else the plain one. Not saved, not in net packets.
 	const shared_str& HandPoseSuffix() const { return m_hand_pose_suffix; }
 	void SetHandPoseSuffix(const shared_str& s) { m_hand_pose_suffix = s; }
+
+	// Transient, per-object opt-in authored-hold profile. No save/net fields.
+	bool SetHandOnProfile(LPCSTR section);
+	LPCSTR GetHandOnProfile() const { return m_handon_profile.size() ? m_handon_profile.c_str() : ""; }
+	shared_str m_handon_profile, m_handon_hold, m_handon_root, m_handon_anchor;
+	xr_vector<shared_str> m_handon_bones;
+	// ORIGINAL marker difference vectors; never retargeted wrist/skin distances.
+	xr_map<shared_str, xr_vector<Fvector>> m_handon_motions; // includes mix context
+	xr_set<shared_str> m_handon_actions; // only these actions enable the layer
+	float m_handon_range = 0.f;
+	u32 m_handon_generation = 0;
+	bool HandOnActionRunning() const { return m_bStopAtEndAnimIsRunning && m_current_motion_def; }
 	virtual bool ParentIsActor();
 	virtual float GetNearWallRange();
 	virtual float GetBaseHudFov();

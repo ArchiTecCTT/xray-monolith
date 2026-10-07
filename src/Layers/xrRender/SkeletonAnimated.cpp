@@ -736,6 +736,11 @@ void CKinematicsAnimated::LL_SetChannelFactor(u16 channel, float factor)
 
 void CKinematicsAnimated::IBlend_Startup()
 {
+	ClearAuthoredHold();
+	m_authored_hold.invalidate();
+	m_authored_mask.clear();
+	m_authored_keys.clear();
+	m_authored_selected.clear();
 	_DBG_SINGLE_USE_MARKER;
 	CBlend B;
 	ZeroMemory(&B, sizeof(B));
@@ -965,6 +970,84 @@ void CKinematicsAnimated::LL_BuldBoneMatrixDequatize(const CBoneData* bd, u8 cha
 			keys_substruct(keys.keys[j], BK[j], keys.chanel_blend_conts[j]);
 }
 
+// Sample only authored key0, retaining every child local, including fingers.
+void CKinematicsAnimated::AuthoredHoldWorld(MotionID hold, u16 bone, Fmatrix& result)
+{
+	CBlend sample;
+	sample.timeCurrent = 0.f;
+	CKey key;
+	Dequantize(key, sample, *LL_GetMotion(hold, bone));
+	Fmatrix local;
+	local.mk_xform(key.Q, key.T);
+	const u16 parent = LL_GetData(bone).GetParentID();
+	if (parent == BI_NONE)
+		result = local;
+	else
+	{
+		Fmatrix world;
+		AuthoredHoldWorld(hold, parent, world);
+		result.mul_43(world, local);
+	}
+}
+
+bool CKinematicsAnimated::SetAuthoredHold(MotionID hold, u16 root, u16 anchor,
+	const xr_vector<u16>& selected, float weight)
+{
+	xrCriticalSectionGuard guard(&UCalc_Mutex);
+	ClearAuthoredHold();
+	const u16 count = LL_BoneCount();
+	if (!hold.valid() || !_valid(weight) || weight <= 0.f || weight > 1.f ||
+		root >= count || anchor >= count || root == LL_GetBoneRoot() || selected.empty())
+		return false;
+
+	if (hold != m_authored_hold || root != m_authored_root || anchor != m_authored_anchor || selected != m_authored_selected)
+	{
+		// Fail closed on missing/extra/duplicate bones or an anchor inside the arm.
+		xr_vector<u8> mask(count, 0);
+		for (u16 id : selected)
+		{
+			if (id >= count || mask[id]) return false;
+			mask[id] = 1;
+		}
+		for (u16 id = 0; id < count; ++id)
+		{
+			u16 ancestor = id;
+			while (ancestor != BI_NONE && ancestor != root)
+				ancestor = LL_GetData(ancestor).GetParentID();
+			if (bool(mask[id]) != (ancestor == root)) return false;
+		}
+		if (mask[anchor]) return false;
+		m_authored_mask.swap(mask);
+		m_authored_selected = selected;
+		m_authored_keys.resize(count);
+		CBlend sample;
+		sample.timeCurrent = 0.f;
+		for (u16 id : selected)
+			Dequantize(m_authored_keys[id], sample, *LL_GetMotion(hold, id));
+		Fmatrix held_anchor, held_root, inverse;
+		AuthoredHoldWorld(hold, anchor, held_anchor);
+		AuthoredHoldWorld(hold, root, held_root);
+		inverse.invert(held_anchor);
+		m_authored_root_in_anchor.mul_43(inverse, held_root);
+		m_authored_hold = hold;
+		m_authored_root = root;
+		m_authored_anchor = anchor;
+	}
+
+	// CURRENT normally blended gun and parent, not action frame0. Neither
+	// belongs to the filtered subtree. Bone_GetAnimPos uses temporary instances.
+	Fmatrix gun, parent, inverse, world, local;
+	Bone_GetAnimPos(gun, anchor, u8(-1), true);
+	Bone_GetAnimPos(parent, LL_GetData(root).GetParentID(), u8(-1), true);
+	inverse.invert(parent);
+	world.mul_43(gun, m_authored_root_in_anchor);
+	local.mul_43(inverse, world);
+	m_authored_keys[root].Q.set(local);
+	m_authored_keys[root].T = local.c;
+	m_authored_weight = weight;
+	return true;
+}
+
 // calculate single bone with key blending 
 void CKinematicsAnimated::LL_BoneMatrixBuild(u16 bone_id, CBoneInstance& bi, const Fmatrix* parent, const SKeyTable& keys)
 {
@@ -986,6 +1069,24 @@ void CKinematicsAnimated::LL_BoneMatrixBuild(u16 bone_id, CBoneInstance& bi, con
 	CKey Result;
 	//Mix channels
 	MixChannels(Result, channel_keys, BC, ch_count);
+
+	// Blend AFTER the normal action mix. Root/right/gun are not in this mask.
+	if (m_authored_weight > 0.f && bone_id < m_authored_mask.size() && m_authored_mask[bone_id])
+	{
+		const CKey& target = m_authored_keys[bone_id];
+		// Unity Quaternion.Lerp: shortest normalized linear interpolation.
+		// Leave the engine's normal channel slerp completely unchanged.
+		const float dot = Result.Q.x * target.Q.x + Result.Q.y * target.Q.y +
+			Result.Q.z * target.Q.z + Result.Q.w * target.Q.w;
+		const float a = 1.f - m_authored_weight;
+		const float b = dot < 0.f ? -m_authored_weight : m_authored_weight;
+		Result.Q.x = a * Result.Q.x + b * target.Q.x;
+		Result.Q.y = a * Result.Q.y + b * target.Q.y;
+		Result.Q.z = a * Result.Q.z + b * target.Q.z;
+		Result.Q.w = a * Result.Q.w + b * target.Q.w;
+		Result.Q.normalize();
+		Result.T.lerp(Result.T, target.T, m_authored_weight);
+	}
 
 	Fmatrix RES;
 	RES.mk_xform(Result.Q, Result.T);

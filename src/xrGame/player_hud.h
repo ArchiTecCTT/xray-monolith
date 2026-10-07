@@ -324,6 +324,14 @@ struct attachable_hud_item
 	void load(const shared_str& sect_name);
 	void update(bool bForce);
 	void setup_firedeps(firedeps& fd);
+	void update_handon(IKinematicsAnimated* hands);
+	shared_str m_handon_source, m_handon_suffix, m_handon_profile;
+	MotionID m_handon_cycle, m_handon_hold;
+	IKinematicsAnimated* m_handon_model = nullptr;
+	u32 m_handon_generation = u32(-1);
+	u16 m_handon_root = BI_NONE, m_handon_anchor = BI_NONE, m_handon_owner = u16(-1);
+	xr_vector<u16> m_handon_bones;
+	xr_vector<std::pair<MotionID, shared_str>> m_handon_tracks;
 	void render(IDSGraphManager* DM);
 	void render_item_ui();
 	bool render_item_ui_query();

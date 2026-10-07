@@ -658,6 +658,22 @@ u32 attachable_hud_item::anim_play(const shared_str& anm_name_b, BOOL bMixIn, co
 			hand_mid = pose_mid;
 	}
 
+	// Opt-in profiled actions use their original authored action, not an old
+	// per-part action copy. Draw/idle/unprofiled variants retain existing rules.
+	if (m_parent_hud_item && m_parent_hud_item->m_handon_profile.size() &&
+		m_parent_hud_item->HandPoseSuffix().size() && m_parent->m_model &&
+		m_parent_hud_item->m_handon_actions.count(M.name) != 0)
+	{
+		string256 own_hold;
+		xr_sprintf(own_hold, "%s%s", m_parent_hud_item->m_handon_hold.c_str(),
+			m_parent_hud_item->HandPoseSuffix().c_str());
+		if (m_parent->m_model->ID_Cycle_Safe(own_hold).valid() && m_parent->m_model_2 &&
+			m_parent->m_model_2->ID_Cycle_Safe(own_hold).valid()) hand_mid = M.mid;
+	}
+
+	// Final resolved source (after callbacks/MRAA/random selection).
+	m_handon_source = M.name;
+	m_handon_cycle = hand_mid;
 	u32 ret = 0;
 	if (m_attach_place_idx != SCOPE_ATTACH_IDX) {
 		ret = g_player_hud->anim_play(m_attach_place_idx, hand_mid, bMixIn, md, speed);
@@ -842,6 +858,9 @@ void player_hud::load(const shared_str& player_hud_sect, bool force)
 
 	if (script_override_arms) return;
 
+	// Explicit generation fence even if a renderer pool reuses the same address.
+	for (attachable_hud_item* item : m_attached_items)
+		if (item) item->m_handon_model = nullptr;
 	if (m_model)
 	{
 		IRenderVisual* v = m_model->dcast_RenderVisual();
@@ -1231,11 +1250,18 @@ void player_hud::update(const Fmatrix& cam_trans)
 	m_transform.mul(trans, m_attach_offset);
 	m_transform_2.mul(trans_2, m_attach_offset_2);
 
+	// Preserve each model's original UpdateTracks/CalculateBones ordering.
 	m_model->UpdateTracks();
 	m_model->dcast_PKinematics()->CalculateBones_Invalidate();
 	m_model->dcast_PKinematics()->CalculateBones(TRUE);
 
+	// Only model_2 renders the anatomical left arm. Resolve its own bone IDs;
+	// visual_2 may differ from visual. Foreign left/both/offhand ownership wins.
+	m_model_2->ClearAuthoredHold();
 	m_model_2->UpdateTracks();
+	if (m_attached_items[0] && !m_attached_items[1] &&
+		script_anim_part != 1 && script_anim_part != 2 && !script_override_arms)
+		m_attached_items[0]->update_handon(m_model_2);
 	m_model_2->dcast_PKinematics()->CalculateBones_Invalidate();
 	m_model_2->dcast_PKinematics()->CalculateBones(TRUE);
 
@@ -1507,6 +1533,75 @@ float player_hud::SetBlendAnmTime(LPCSTR name, float time)
 	}
 
 	return 0;
+}
+
+void attachable_hud_item::update_handon(IKinematicsAnimated* hands)
+{
+	CHudItem* owner = m_parent_hud_item;
+	if (!owner || !owner->m_handon_profile.size() || !owner->HandPoseSuffix().size()) return;
+	const bool idle = m_handon_source == owner->m_handon_hold;
+	bool eligible = idle || (owner->m_handon_actions.count(m_handon_source) != 0 && owner->HandOnActionRunning());
+
+	// Numeric object ID + profile/suffix/HUD generation fences. No retained
+	// blend/weapon/track pointer, no per-frame allocation or identity-by-wrapper.
+	if (m_handon_model != hands || m_handon_generation != owner->m_handon_generation ||
+		m_handon_suffix != owner->HandPoseSuffix() || m_handon_profile != owner->m_handon_profile ||
+		m_handon_owner != owner->object().ID())
+	{
+		m_handon_model = hands;
+		m_handon_generation = owner->m_handon_generation;
+		m_handon_suffix = owner->HandPoseSuffix();
+		m_handon_profile = owner->m_handon_profile;
+		m_handon_owner = owner->object().ID();
+		string256 name;
+		xr_sprintf(name, "%s%s", owner->m_handon_hold.c_str(), m_handon_suffix.c_str());
+		m_handon_hold = hands->ID_Cycle_Safe(name);
+		IKinematics* k = hands->dcast_PKinematics();
+		m_handon_root = k->LL_BoneID(owner->m_handon_root.c_str());
+		m_handon_anchor = k->LL_BoneID(owner->m_handon_anchor.c_str());
+		m_handon_bones.clear();
+		for (const shared_str& bone : owner->m_handon_bones)
+			m_handon_bones.push_back(k->LL_BoneID(bone.c_str()));
+		m_handon_tracks.clear();
+		for (const auto& entry : owner->m_handon_motions)
+		{
+			const MotionID plain = hands->ID_Cycle_Safe(entry.first.c_str());
+			if (plain.valid()) m_handon_tracks.emplace_back(plain, entry.first);
+			xr_sprintf(name, "%s%s", entry.first.c_str(), m_handon_suffix.c_str());
+			const MotionID own = hands->ID_Cycle_Safe(name);
+			if (own.valid()) m_handon_tracks.emplace_back(own, entry.first);
+		}
+	}
+	if (!m_handon_hold.valid()) return; // No generic donor fallback.
+
+	// TWO original markers have the same weapon parent. Thus their local
+	// difference mixes linearly, using EXISTING normal cycle clocks/amounts.
+	// Blend vectors BEFORE distance, not scalar weights; include live falloff
+	// context to preserve incoming/outgoing continuity, never restart a cycle.
+	EftHandOnMix mixed;
+	bool current = false;
+	for (u32 n = 0; n < hands->LL_PartBlendsCount(0); ++n)
+	{
+		CBlend* b = hands->LL_PartBlend(0, n);
+		if (!b || b->channel != 0) continue;
+		if (b->motionID == m_handon_cycle && b->blend_state() != CBlend::eFalloff) current = true;
+		if (!_valid(b->blendAmount) || b->blendAmount < 0.f) return;
+		if (fis_zero(b->blendAmount)) continue;
+		const auto track = std::find_if(m_handon_tracks.begin(), m_handon_tracks.end(),
+			[b](const std::pair<MotionID, shared_str>& t) { return t.first == b->motionID; });
+		if (track == m_handon_tracks.end()) return; // Unknown cycle: fail closed.
+		if (b->blend_state() == CBlend::eFalloff && owner->m_handon_actions.count(track->second)) eligible = true;
+		const auto entry = owner->m_handon_motions.find(track->second);
+		if (entry == owner->m_handon_motions.end()) return;
+		const auto& vectors = entry->second;
+		if (vectors.size() != hands->LL_GetRootMotion(b->motionID)->get_count()) return;
+		Fvector delta;
+		if (!eft_handon_sample(vectors.data(), u32(vectors.size()), b->timeCurrent, SAMPLE_FPS, delta) ||
+			!mixed.add(delta.x, delta.y, delta.z, b->blendAmount)) return;
+	}
+	if (!current || !eligible || fis_zero(mixed.total)) return; // No stale/cancelled target.
+	const float weight = mixed.weight(owner->m_handon_range);
+	hands->SetAuthoredHold(m_handon_hold, m_handon_root, m_handon_anchor, m_handon_bones, weight);
 }
 
 //0 = both, 1 = left, 2 = right

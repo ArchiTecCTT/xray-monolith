@@ -52,6 +52,77 @@ CHudItem::CHudItem()
 	script_ui_matrix.identity();
 }
 
+bool CHudItem::SetHandOnProfile(LPCSTR section)
+{
+	if (!section) return false;
+	if (m_handon_profile == section) return true;
+	// Any failed change disables the old profile, rather than applying stale data.
+	m_handon_profile = "";
+	m_handon_motions.clear();
+	m_handon_actions.clear();
+	m_handon_bones.clear();
+	++m_handon_generation;
+	if (!section[0]) return true;
+	if (xr_strlen(section) > 96 || !pSettings->section_exist(section)) return false;
+	for (LPCSTR key : {"hold_motion", "subtree_root", "anchor", "bones", "distance_range"})
+		if (!pSettings->line_exist(section, key)) return false;
+	string128 motions;
+	xr_sprintf(motions, "%s_motions", section);
+	if (!pSettings->section_exist(motions)) return false;
+	LPCSTR list = pSettings->r_string(section, "bones");
+	for (u32 i = 0; i < _GetItemCount(list); ++i)
+	{
+		string128 bone;
+		_GetItem(list, i, bone);
+		m_handon_bones.emplace_back(bone);
+	}
+	if (m_handon_bones.empty()) return false;
+	m_handon_range = pSettings->r_float(section, "distance_range");
+	if (!_valid(m_handon_range) || m_handon_range <= 0.f) return false;
+	for (u32 i = 0; i < pSettings->line_count(motions); ++i)
+	{
+		LPCSTR name, track;
+		pSettings->r_line(motions, i, &name, &track);
+		if (!pSettings->section_exist(track)) { m_handon_motions.clear(); return false; }
+		const u32 count = pSettings->line_count(track);
+		if (count == 0 || count > 60000) { m_handon_motions.clear(); return false; }
+		xr_vector<Fvector> vectors;
+		vectors.reserve(count);
+		for (u32 f = 0; f < count; ++f)
+		{
+			string32 key;
+			xr_sprintf(key, "%u", f);
+			Fvector delta;
+			char trailing;
+			if (!pSettings->line_exist(track, key) ||
+				sscanf(pSettings->r_string(track, key), "%f , %f , %f %c", &delta.x, &delta.y, &delta.z, &trailing) != 3 || !_valid(delta))
+			{
+				m_handon_motions.clear();
+				return false;
+			}
+			vectors.push_back(delta);
+		}
+		m_handon_motions.emplace(shared_str(name), std::move(vectors));
+	}
+	if (m_handon_motions.empty()) return false;
+	string128 actions;
+	xr_sprintf(actions, "%s_actions", section);
+	if (!pSettings->section_exist(actions)) return false;
+	for (u32 i = 0; i < pSettings->line_count(actions); ++i)
+	{
+		LPCSTR name, value;
+		pSettings->r_line(actions, i, &name, &value);
+		if (m_handon_motions.find(name) == m_handon_motions.end() || !pSettings->r_bool(actions, name)) return false;
+		m_handon_actions.insert(name);
+	}
+	if (m_handon_actions.empty()) return false;
+	m_handon_hold = pSettings->r_string(section, "hold_motion");
+	m_handon_root = pSettings->r_string(section, "subtree_root");
+	m_handon_anchor = pSettings->r_string(section, "anchor");
+	m_handon_profile = section;
+	return true;
+}
+
 DLL_Pure* CHudItem::_construct()
 {
 	m_object = smart_cast<CPhysicItem*>(this);

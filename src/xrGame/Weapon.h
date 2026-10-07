@@ -508,6 +508,8 @@ public:
 	// EFT parts: sets the hands-motion suffix. Letters, digits and '_' only, at most 24 characters; anything else is ignored.
 	// Takes effect at the next hands motion that starts; a rifle held idle in the hands starts its idle motion again at once
 	// (the same call the state machine makes on entering eIdle). "" clears it.
+	bool SetHandOnProfileScript(LPCSTR section) { return SetHandOnProfile(section); }
+	LPCSTR GetHandOnProfileScript() const { return GetHandOnProfile(); }
 	void SetHandPoseScript(LPCSTR s)
 	{
 		if (!s) return;

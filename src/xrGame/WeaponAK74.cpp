@@ -18,7 +18,8 @@ using namespace luabind;
 //   32 = Get/SetHandPose (a suffix for the hands motions: the left hand per fitted part)
 //   64 = Get/SetPartsSilencer (transient silenced state and source HUD/world muzzle points)
 //   128 = Get/SetHudInertionRetSpeedK (how fast the HUD weapon comes back after a camera turn)
-static int eft_weapon_api() { return 1 | 2 | 4 | 8 | 16 | 32 | 64 | 128; }
+//   256 = Get/SetHandOnProfile (opt-in authored left subtree, action clock unchanged)
+static int eft_weapon_api() { return 1 | 2 | 4 | 8 | 16 | 32 | 64 | 128 | 256; }
 
 #pragma optimize("s",on)
 void CWeaponAK74::script_register	(lua_State *L)
@@ -130,6 +131,8 @@ void CWeaponAK74::script_register	(lua_State *L)
 			.def("SetHudInertionAmpK", &CWeapon::SetHudInertionAmpKScript)
 			.def("SetHudInertionRetSpeedK", &CWeapon::SetHudInertionRetSpeedKScript)
 			.def("SetHandPose", &CWeapon::SetHandPoseScript)
+			.def("SetHandOnProfile", &CWeapon::SetHandOnProfileScript)
+			.def("GetHandOnProfile", &CWeapon::GetHandOnProfileScript)
 			.def("SetMisfireStartCondition", &CWeapon::SetMisfireStartCondition)
 			.def("SetMisfireEndCondition", &CWeapon::SetMisfireEndCondition)
 			.def("SetRPM", &CWeapon::SetRPM)

@@ -67,6 +67,13 @@ private:
 public:
 
 	virtual void OnCalculateBones();
+	bool SetAuthoredHold(MotionID hold, u16 root, u16 anchor,
+		const xr_vector<u16>& bones, float weight) override;
+	void ClearAuthoredHold() override
+	{
+		xrCriticalSectionGuard guard(&UCalc_Mutex);
+		m_authored_weight = 0.f;
+	}
 public:
 #ifdef _EDITOR
 public:
@@ -95,6 +102,18 @@ private:
 	BlendSVec blend_cycles[MAX_PARTS];
 	BlendSVec blend_fx;
 	animation::channels channels;
+
+	// Per-instance cache: key0 of an authored hold, only its complete subtree.
+	// No per-frame allocation and no second animation/clock/callback.
+	MotionID m_authored_hold;
+	u16 m_authored_root = BI_NONE;
+	u16 m_authored_anchor = BI_NONE;
+	float m_authored_weight = 0.f;
+	xr_vector<CKey> m_authored_keys;
+	xr_vector<u8> m_authored_mask;
+	xr_vector<u16> m_authored_selected;
+	Fmatrix m_authored_root_in_anchor;
+	void AuthoredHoldWorld(MotionID hold, u16 bone, Fmatrix& result);
 protected:
 	// internal functions
 	virtual void IBoneInstances_Create();

@@ -42,6 +42,12 @@ public:
 public:
 	virtual void OnCalculateBones() = 0;
 
+	// Optional authored local-key target, NOT a cycle: normal clocks/marks are untouched.
+	// Called between UpdateTracks and CalculateBones by the HUD owner only.
+	virtual bool SetAuthoredHold(MotionID hold, u16 root, u16 anchor,
+		const xr_vector<u16>& bones, float weight) = 0;
+	virtual void ClearAuthoredHold() = 0;
+
 #ifdef DEBUG
 	virtual std::pair<LPCSTR,LPCSTR>	LL_MotionDefName_dbg	(MotionID	ID) = 0;
 	virtual	void						LL_DumpBlends_dbg		( )=0;
