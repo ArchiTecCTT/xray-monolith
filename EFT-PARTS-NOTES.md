@@ -40,7 +40,10 @@ Implementation:
   Rebase root using CURRENT normally blended gun and parent transforms. Apply
   shortest normalized-linear quaternion / linear translation only after normal
   mixing, only inside the selected subtree. Never change existing channel slerp.
-- Clear each update; foreign left/both script ownership, offhand item and
+- Apply only to the model rendering the anatomical left arm (`model_2`);
+  resolve its actual bone IDs even when outfit visual_2 differs from visual.
+- Clear each update AND at new native-cycle/left-or-both-script/detach/profile
+  boundaries; foreign left/both script ownership, offhand item and
   override arms take precedence. No script slot claim/seek/stop/resync, new
   PlayCycle, changed action clock, duration, sound, mark or completion callback.
   Original per-model UpdateTracks/CalculateBones ordering is preserved.

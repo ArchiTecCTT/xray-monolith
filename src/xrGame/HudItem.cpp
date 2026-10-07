@@ -57,6 +57,9 @@ bool CHudItem::SetHandOnProfile(LPCSTR section)
 	if (!section) return false;
 	if (m_handon_profile == section) return true;
 	// Any failed change disables the old profile, rather than applying stale data.
+	if (g_player_hud && g_player_hud->attached_item(0) &&
+		g_player_hud->attached_item(0)->m_parent_hud_item == this && g_player_hud->m_model_2)
+		g_player_hud->m_model_2->ClearAuthoredHold();
 	m_handon_profile = "";
 	m_handon_motions.clear();
 	m_handon_actions.clear();

@@ -1669,6 +1669,8 @@ u32 player_hud::anim_play(u16 part, const MotionID& M, BOOL bMixIn, const CMotio
 	if (override_part != u16(-1))
 		part_id = override_part;
 
+	// Do not expose the preceding target to any immediate query of a new cycle.
+	if (m_model_2) m_model_2->ClearAuthoredHold();
 	play_blend(this, part_id, M, bMixIn, speed);
 
 	return motion_length(M, md, speed);
@@ -1757,6 +1759,7 @@ u32 player_hud::script_anim_play(u8 hand, LPCSTR section, LPCSTR anm_name, bool 
 	script_anim_offset[0] = offs;
 	script_anim_offset[1] = rrot;
 	script_anim_part = hand;
+	if ((hand == 1 || hand == 2) && m_model_2) m_model_2->ClearAuthoredHold();
 
 	player_hud_motion_container* pm = get_hand_motions(section);
 	player_hud_motion* phm = pm->find_motion(anm_name);
@@ -1925,6 +1928,7 @@ void player_hud::set_part_cycle_speed(u8 part, float speed)
 void player_hud::detach_item_idx(u16 idx)
 {
 	if (NULL == m_attached_items[idx]) return;
+	if (idx < 2 && m_model_2) m_model_2->ClearAuthoredHold();
 
 	m_attached_items[idx]->m_parent_hud_item->on_b_hud_detach();
 	m_attached_items[idx] = NULL;
