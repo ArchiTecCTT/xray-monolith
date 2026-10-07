@@ -44,7 +44,10 @@ Implementation:
   resolve its actual bone IDs even when outfit visual_2 differs from visual.
 - Clear each update AND at new native-cycle/left-or-both-script/detach/profile
   boundaries; foreign left/both script ownership, offhand item and
-  override arms take precedence. No script slot claim/seek/stop/resync, new
+  override arms take precedence. Physical/permanent launcher attachment
+  suppresses both target application and original-action selection (do not
+  depend solely on a script clearing the foregrip suffix). No script slot
+  claim/seek/stop/resync, new
   PlayCycle, changed action clock, duration, sound, mark or completion callback.
   Original per-model UpdateTracks/CalculateBones ordering is preserved.
 - Renderer target writes/clears use UCalc_Mutex; Copy/Spawn call IBlend_Startup

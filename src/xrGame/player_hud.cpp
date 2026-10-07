@@ -659,8 +659,9 @@ u32 attachable_hud_item::anim_play(const shared_str& anm_name_b, BOOL bMixIn, co
 	}
 
 	// Opt-in profiled actions use their original authored action, not an old
-	// per-part action copy. Draw/idle/unprofiled variants retain existing rules.
-	if (m_parent_hud_item && m_parent_hud_item->m_handon_profile.size() &&
+	// per-part action copy. Draw/idle/unprofiled/launcher paths retain old rules.
+	CWeapon* handon_weapon = smart_cast<CWeapon*>(m_parent_hud_item);
+	if (handon_weapon && !handon_weapon->IsGrenadeLauncherAttached() && m_parent_hud_item->m_handon_profile.size() &&
 		m_parent_hud_item->HandPoseSuffix().size() && m_parent->m_model &&
 		m_parent_hud_item->m_handon_actions.count(M.name) != 0)
 	{
@@ -1538,7 +1539,8 @@ float player_hud::SetBlendAnmTime(LPCSTR name, float time)
 void attachable_hud_item::update_handon(IKinematicsAnimated* hands)
 {
 	CHudItem* owner = m_parent_hud_item;
-	if (!owner || !owner->m_handon_profile.size() || !owner->HandPoseSuffix().size()) return;
+	CWeapon* weapon = smart_cast<CWeapon*>(owner);
+	if (!weapon || weapon->IsGrenadeLauncherAttached() || !owner->m_handon_profile.size() || !owner->HandPoseSuffix().size()) return;
 	const bool idle = m_handon_source == owner->m_handon_hold;
 	bool eligible = idle || (owner->m_handon_actions.count(m_handon_source) != 0 && owner->HandOnActionRunning());
 
