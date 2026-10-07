@@ -17,7 +17,8 @@ using namespace luabind;
 //   4 = Get/SetShotVolumeK   8 = Get/SetHudInertionSpeedK, Get/SetHudInertionAmpK   16 = GetBaseWeight
 //   32 = Get/SetHandPose (a suffix for the hands motions: the left hand per fitted part)
 //   64 = Get/SetPartsSilencer (transient silenced state and source HUD/world muzzle points)
-static int eft_weapon_api() { return 1 | 2 | 4 | 8 | 16 | 32 | 64; }
+//   128 = Get/SetHudInertionRetSpeedK (how fast the HUD weapon comes back after a camera turn)
+static int eft_weapon_api() { return 1 | 2 | 4 | 8 | 16 | 32 | 64 | 128; }
 
 #pragma optimize("s",on)
 void CWeaponAK74::script_register	(lua_State *L)
@@ -63,6 +64,7 @@ void CWeaponAK74::script_register	(lua_State *L)
 			.def("GetBaseWeight", &CWeapon::GetBaseWeightScript)
 			.def("GetHudInertionSpeedK", &CWeapon::GetHudInertionSpeedKScript)
 			.def("GetHudInertionAmpK", &CWeapon::GetHudInertionAmpKScript)
+			.def("GetHudInertionRetSpeedK", &CWeapon::GetHudInertionRetSpeedKScript)
 			.def("GetHandPose", &CWeapon::GetHandPoseScript)
 			
 			.def("GetMisfireStartCondition", &CWeapon::GetMisfireStartCondition)
@@ -126,6 +128,7 @@ void CWeaponAK74::script_register	(lua_State *L)
 			.def("SetShotVolumeK", &CWeapon::SetShotVolumeKScript)
 			.def("SetHudInertionSpeedK", &CWeapon::SetHudInertionSpeedKScript)
 			.def("SetHudInertionAmpK", &CWeapon::SetHudInertionAmpKScript)
+			.def("SetHudInertionRetSpeedK", &CWeapon::SetHudInertionRetSpeedKScript)
 			.def("SetHandPose", &CWeapon::SetHandPoseScript)
 			.def("SetMisfireStartCondition", &CWeapon::SetMisfireStartCondition)
 			.def("SetMisfireEndCondition", &CWeapon::SetMisfireEndCondition)

@@ -476,6 +476,7 @@ public:
 	// EFT parts: the hands-motion suffix (see CHudItem::HandPoseSuffix); "" = none
 	LPCSTR GetHandPoseScript() const { return m_hand_pose_suffix.c_str() ? m_hand_pose_suffix.c_str() : ""; }
 	float GetHudInertionAmpKScript() const { return m_fHudInertionAmpK; }
+	float GetHudInertionRetSpeedKScript() const { return m_fHudInertionRetSpeedK; }
 	float RPMScript() const { return fOneShotTime; }
 	float RealRPMScript() const { return 60.0f / fOneShotTime; } // Return actual RPM like in configs
 	float ModeRPMScript() const { return fModeShotTime; }
@@ -535,6 +536,14 @@ public:
 		if (!_valid(val) || val < 0.f) return;
 		clamp(val, 0.f, 5.f);
 		m_fHudInertionAmpK = val;
+	}
+	// factor on how fast the HUD weapon comes back after a camera turn (see m_fHudInertionRetSpeedK); NaN or <= 0 is ignored,
+	// range 0.05 .. 5 (never 0: the weapon would stay where the turn left it)
+	void SetHudInertionRetSpeedKScript(float val)
+	{
+		if (!_valid(val) || val <= 0.f) return;
+		clamp(val, 0.05f, 5.f);
+		m_fHudInertionRetSpeedK = val;
 	}
 	void SetRPM(float newOneShotTime) { fOneShotTime = newOneShotTime; } // Input - time between shots like received from getter
 	void SetRealRPM(float rpm) { fOneShotTime = 60.0f / rpm; } // Input - actual RPM like in configs
@@ -816,6 +825,8 @@ protected:
 	//upgrade writes into it (WeaponUpgrade.cpp:153-156), so a script's value there would be lost.
 	float m_fHudInertionSpeedK;
 	float m_fHudInertionAmpK;
+	//Return: how fast the weapon comes back to its place after the turn (m_tendto_ret_speed*); below 1 = slower, a heavy weapon.
+	float m_fHudInertionRetSpeedK;
 	float conditionDecreasePerShot; //óâåëè÷åíèå èçíîøåíîñòè ïðè îäèíî÷íîì âûñòðåëå
 
 public:

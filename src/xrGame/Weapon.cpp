@@ -116,6 +116,7 @@ CWeapon::CWeapon()
 	m_fShotVolumeK = 1.0f;
 	m_fHudInertionSpeedK = 1.0f;
 	m_fHudInertionAmpK = 1.0f;
+	m_fHudInertionRetSpeedK = 1.0f;
 
 	iAmmoElapsed = -1;
 	iMagazineSize = -1;
@@ -2855,6 +2856,8 @@ void CWeapon::UpdateHudAdditional(Fmatrix& trans)
 	// inertion_tendto_speed changes (WeaponUpgrade.cpp:153); the amplitude factor scales how far the weapon travels.
 	fInertiaSpeedMod *= m_fHudInertionSpeedK;
 	vIOffsets.mul(m_fHudInertionAmpK);
+	// The return factor scales both the exponential and the linear return below (both use fInertiaReturnSpeedMod).
+	fInertiaReturnSpeedMod *= m_fHudInertionRetSpeedK;
 
 	// Высчитываем инерцию из поворотов камеры
 	bool bIsInertionPresent = m_fLR_InertiaFactor != 0.0f || m_fUD_InertiaFactor != 0.0f;
