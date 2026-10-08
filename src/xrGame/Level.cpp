@@ -294,6 +294,8 @@ CLevel::~CLevel()
 {
     PROF_EVENT("CLevel::~CLevel");
     //crash_saving::save_impl = nullptr; // CLevel not available, disable crash save
+    // R1 queue of attachment UIs (CHUDManager::Render_R1_Attachment_UI): the objects below delete their attachments
+    if (g_pGamePersistent) g_pGamePersistent->AttachmentUIsToRender.clear_not_free();
     xr_delete(g_player_hud);
     delete_data(m_script_attachments);
     delete_data(hud_zones_list);

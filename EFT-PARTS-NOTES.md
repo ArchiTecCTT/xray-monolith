@@ -117,3 +117,27 @@ changes. Nothing is invented: no new pose, no solver.
 monotonic fall and rise, exact pass-through of slow weights, no-history start at raw,
 `blend_time` 0 equals raw, one step per frame, NaN/inf/negative/zero `dt`, profile
 value validation. Not a full engine/HUD build; the Windows exe is built by CI.
+
+## R1 attachment-UI queue left stale (crash in `script_attachment::RenderUI`)
+
+Owner crash 2026-10-08 (build 0.43.1, DX8 exe from `svp-lite-mt-parts-handon-smooth`, "unhandled exception" at
+`0x140417E56`, right after loading a save, before the first object spawn). That address is the read of
+`m_kinematics`' vtable (`m_kinematics->LL_BoneCount()`) in the `script_attachment::RenderUI` loop: the constructor
+zeroes `+0xe8` (m_kinematics) and `+0x120` (m_script_ui), `+0x1a0` is `m_script_ui_bone`, children map at `+0x1d8`.
+The faulting `this` is a freed attachment.
+
+Mechanism (R1 only; `script_attachment_manager.cpp:148`, `GameObject.cpp:775` queue into
+`g_pGamePersistent->AttachmentUIsToRender`, `HUDManager.cpp:226-231` draws and clears, `FStaticRender.cpp` `Render()`):
+the vector is emptied once per frame inside `Render_R1_Attachment_UI()`, but `L_Dynamic->render(1)` runs AFTER it and
+`CLightR_Manager::render_point/render_spot` (`LightPPA.cpp:215/303`) capture dynamic renderables again for every light,
+which calls `renderable_Render` and queues the attachments of every lit object. Those entries stayed in the vector until
+the next frame's `Render()`; a level unload (`~CGameObject`/`~CLevel` delete the attachments) or a script
+`remove_attachment` in between leaves freed pointers there, and the next `Render_R1_Attachment_UI()` calls `RenderUI()` on them.
+
+Fix: `Render()` empties the queue at its end (and on the discarded first frame after a reset); `~CLevel` empties it before
+it deletes attachments. The next `Calculate()` queues the live attachments again, so nothing visible is lost.
+Not fixed (not proven here): the same-frame window in which the game thread (`XRay::Engine::GameThread`, runs in parallel
+with `Calculate`/`Render`) deletes an attachment between its queueing and `RenderUI()`.
+
+`tests/eft_attui_queue_test.cpp` (standalone g++, ASAN): frame-protocol model plus a check that the sources contain the clears
+(fails on the unfixed sources). Not an engine build; the Windows exe is built by CI.

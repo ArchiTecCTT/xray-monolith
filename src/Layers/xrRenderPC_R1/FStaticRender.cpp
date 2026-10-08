@@ -522,6 +522,8 @@ void CRender::Render()
 		// this frame is discarded: don't let what Calculate() queued for it leak into the next frame
 		GMBase.RGraph.clear<false>();
 		if (L_Dynamic) L_Dynamic->reset();
+		// the attachments queued by Calculate() are not drawn on this frame: drop them (see the end of Render())
+		g_pGamePersistent->AttachmentUIsToRender.clear_not_free();
 		return;
 	}
 
@@ -589,6 +591,12 @@ void CRender::Render()
 	// Postprocess, if necessary
 	Target->End();
 	if (L_Projector) L_Projector->finalize();
+
+	// R1 queues script attachments (for their 3D UI) from every renderable_Render, and the per-light captures of
+	// L_Dynamic->render(1) run AFTER Render_R1_Attachment_UI() above. Whatever they queued would stay in the vector
+	// until the next frame's Render(), across anything that deletes attachments in between (a script's remove_attachment,
+	// a level unload), and RenderUI() would then run on freed objects. The next Calculate() queues the live ones again.
+	g_pGamePersistent->AttachmentUIsToRender.clear_not_free();
 
 	// HUD
 	Device.Statistic->RenderDUMP.End();
