@@ -233,6 +233,7 @@ public:
 	xr_map<shared_str, xr_vector<Fvector>> m_handon_motions; // includes mix context
 	xr_set<shared_str> m_handon_actions; // only these actions enable the layer
 	float m_handon_range = 0.f;
+	float m_handon_blend_time = EFT_HANDON_BLEND_TIME_DEFAULT; // profile `blend_time`, seconds
 	u32 m_handon_generation = 0;
 	bool HandOnActionRunning() const { return m_bStopAtEndAnimIsRunning && m_current_motion_def; }
 	virtual bool ParentIsActor();

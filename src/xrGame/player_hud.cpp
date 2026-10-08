@@ -1538,6 +1538,10 @@ float player_hud::SetBlendAnmTime(LPCSTR name, float time)
 
 void attachable_hud_item::update_handon(IKinematicsAnimated* hands)
 {
+	// Any return below means the layer is not live this frame: the weight
+	// limiter forgets its history (restored only on the path that applies it).
+	EftHandOnEase held_ease = m_handon_ease;
+	m_handon_ease.reset();
 	CHudItem* owner = m_parent_hud_item;
 	CWeapon* weapon = smart_cast<CWeapon*>(owner);
 	if (!weapon || weapon->IsGrenadeLauncherAttached() || !owner->m_handon_profile.size() || !owner->HandPoseSuffix().size()) return;
@@ -1556,6 +1560,7 @@ void attachable_hud_item::update_handon(IKinematicsAnimated* hands)
 		m_handon_suffix = owner->HandPoseSuffix();
 		m_handon_profile = owner->m_handon_profile;
 		m_handon_owner = owner->object().ID();
+		held_ease.reset(); // new profile/suffix/HUD generation: no history to ease from
 		string256 name;
 		xr_sprintf(name, "%s%s", owner->m_handon_hold.c_str(), m_handon_suffix.c_str());
 		m_handon_hold = hands->ID_Cycle_Safe(name);
@@ -1603,7 +1608,11 @@ void attachable_hud_item::update_handon(IKinematicsAnimated* hands)
 			!mixed.add(delta.x, delta.y, delta.z, b->blendAmount)) return;
 	}
 	if (!current || !eligible || fis_zero(mixed.total)) return; // No stale/cancelled target.
-	const float weight = mixed.weight(owner->m_handon_range);
+	// Tarkov's rule gives the target weight; the limiter only decides how fast
+	// the shown weight may follow it (same two authored poses, slower crossing).
+	m_handon_ease = held_ease;
+	const float weight = m_handon_ease.step(mixed.weight(owner->m_handon_range), Device.fTimeDelta,
+		owner->m_handon_blend_time, Device.dwFrame);
 	hands->SetAuthoredHold(m_handon_hold, m_handon_root, m_handon_anchor, m_handon_bones, weight);
 }
 

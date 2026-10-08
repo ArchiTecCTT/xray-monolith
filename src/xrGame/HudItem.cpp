@@ -82,6 +82,13 @@ bool CHudItem::SetHandOnProfile(LPCSTR section)
 	if (m_handon_bones.empty()) return false;
 	m_handon_range = pSettings->r_float(section, "distance_range");
 	if (!_valid(m_handon_range) || m_handon_range <= 0.f) return false;
+	// Optional: how slowly the weight may move. Absent = default; 0 = raw Tarkov rule.
+	m_handon_blend_time = EFT_HANDON_BLEND_TIME_DEFAULT;
+	if (pSettings->line_exist(section, "blend_time"))
+	{
+		m_handon_blend_time = pSettings->r_float(section, "blend_time");
+		if (!eft_handon_blend_time_valid(m_handon_blend_time)) { m_handon_blend_time = EFT_HANDON_BLEND_TIME_DEFAULT; return false; }
+	}
 	for (u32 i = 0; i < pSettings->line_count(motions); ++i)
 	{
 		LPCSTR name, track;

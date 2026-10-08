@@ -5,6 +5,7 @@
 #include "../Include/xrRender/KinematicsAnimated.h"
 #include "actor_defs.h"
 #include "player_hud_legs.h"
+#include "EftHandOn.h"
 
 #define SCOPE_ATTACH_IDX 2
 
@@ -332,6 +333,7 @@ struct attachable_hud_item
 	u16 m_handon_root = BI_NONE, m_handon_anchor = BI_NONE, m_handon_owner = u16(-1);
 	xr_vector<u16> m_handon_bones;
 	xr_vector<std::pair<MotionID, shared_str>> m_handon_tracks;
+	EftHandOnEase m_handon_ease; // weight rate limiter; forgotten whenever the layer is not live
 	void render(IDSGraphManager* DM);
 	void render_item_ui();
 	bool render_item_ui_query();

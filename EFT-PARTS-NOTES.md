@@ -74,3 +74,46 @@ real incoming/outgoing mixes, interrupted action/repeated attempt, holster,
 swap/load/outfit/HUD generation, parent variants, WPO/MRAA split marks/sounds/
 speeds, FDDA/detector/offhand ownership, part placements, skin penetration and
 startup/map/FPS/heap timing. Offline reconstruction does not test these.
+
+## Hand-on weight rate limit (`blend_time`)
+
+Branch `svp-lite-mt-parts-handon-smooth` from `79e3ff4`. Same opt-in: no profile, no change.
+
+Why: Tarkov's weight (1 - distance/0.1 m) goes 1->0, or 0->1, in 4-5 frames
+(0.13-0.17 s) when the hand leaves or reaches the grip at the start/end of a
+reload or check. The gap between the grip's authored hold and the plain clip
+hand (default handguard spot) then closes, or opens, inside those frames on top
+of the clip's own motion: it reads as a flick through the default pose, most on
+slanted grips (their hold is furthest from the default). Suspected from the
+code and the shipped per-frame weights; only the game can confirm it.
+
+What: `EftHandOnEase` (`EftHandOn.h`), used at the end of
+`attachable_hud_item::update_handon`, rate-limits the weight AFTER Tarkov's rule.
+The shown weight may not move faster than `1 / blend_time` per second (`Device.fTimeDelta`),
+up or down. Same two authored poses, same per-bone blend; only the crossing time
+changes. Nothing is invented: no new pose, no solver.
+- Profile key `blend_time` in the `<profile>` section, seconds for a full 0<->1
+  swing. Absent = `EFT_HANDON_BLEND_TIME_DEFAULT` (0.25). `0` = the raw Tarkov
+  rule, frame for frame (the old behaviour). Valid range 0..2; anything else
+  (negative, NaN, over 2) makes `SetHandOnProfile` fail and the profile stays off.
+- Raw weight slower than the limit passes through unchanged, so the steady-state
+  rule is still Tarkov's.
+- The limiter has no history when the layer was not live last frame (every early
+  return in `update_handon`, a profile/suffix/HUD generation change, or a gap of more than 2 frames without a call forgets it): the first live frame starts AT the raw
+  weight, so activation is never worse than before. One step per `Device.dwFrame`.
+- Cost: one float compare/add per frame in the HUD update; nothing allocated;
+  the renderer side and `UCalc_Mutex` use are untouched (`SetAuthoredHold` is called as before).
+- Trade-off: the grip's pull outlasts the raw ramp by up to `blend_time` while the
+  hand travels away (a soft rubber-band at the start of a reload), and on return
+  the last part of the slide onto the grip finishes slightly after the clip hand
+  arrives. Lower `blend_time` if the departure feels sticky.
+- Rejected: easing the raw weight with smoothstep alone (same 5 frames, same gap
+  closing speed, and it reshapes Tarkov's steady-state rule); slerping the subtree
+  root in world space once (changes the wrist path, not the closing speed, and
+  touches the renderer blend); sampling the clip ahead of time to start the rise
+  early (multi-blend speeds/wrap make it fragile).
+
+`tests/eft_handon_ease_test.cpp` (standalone g++, production header): slope bound,
+monotonic fall and rise, exact pass-through of slow weights, no-history start at raw,
+`blend_time` 0 equals raw, one step per frame, NaN/inf/negative/zero `dt`, profile
+value validation. Not a full engine/HUD build; the Windows exe is built by CI.
