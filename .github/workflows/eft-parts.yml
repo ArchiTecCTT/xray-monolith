@@ -6,7 +6,7 @@ name: eft-parts
 
 on:
   push:
-    branches: [eft-parts-engine, svp-lite-mt-parts]
+    branches: [eft-parts-engine, svp-lite-mt-parts, svp-lite-mt-parts-canted]
   workflow_dispatch:
 
 permissions:
