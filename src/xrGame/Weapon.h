@@ -526,6 +526,13 @@ public:
 		if (IsAttachedToHUD() && GetState() == eIdle && !IsPending())
 			PlayAnimIdle();
 	}
+	// EFT parts: the alternative aim (V, zoom type 1, HUD index 3) from a script, for a part (a canted sight) the section
+	// does not know. pos/rot replace aim_hud_offset_alt_pos/rot (one pair for 16x9 and 4:3), zoom replaces
+	// scope_zoom_factor_alt when > 0. Refused (false, nothing changes) when on and a value is not finite, |pos| > 1 m,
+	// |rot| > pi or zoom < 0. Off: a section without an alt aim of its own leaves zoom type 1 (and the launcher's remembered
+	// type 1). Transient like the hand pose: not saved, not in net packets; the script sets it again.
+	bool SetAltAimScript(bool on, Fvector pos, Fvector rot, float zoom);
+	bool GetAltAimScript() const { return m_eft_alt_aim; }
 	// factors on the HUD sway (see m_fHudInertionSpeedK / m_fHudInertionAmpK); NaN or < 0 is ignored, range 0 .. 5 (0 = no sway)
 	void SetHudInertionSpeedKScript(float val)
 	{
@@ -1142,6 +1149,15 @@ public:
 
 	bool m_altAimPos;
 	u8 m_zoomtype;
+
+	// EFT parts alt aim (SetAltAimScript)
+	bool m_eft_alt_aim = false;
+	Fvector m_eft_alt_pos = {0.f, 0.f, 0.f};
+	Fvector m_eft_alt_rot = {0.f, 0.f, 0.f};
+	float m_eft_alt_zoom = 0.f;
+	// the section's own alt aim (use_alt_aim_hud on the weapon or on a modular scope), without the script's
+	bool SectionHasAltAim() const;
+	bool HasAltAim() const { return m_altAimPos || m_eft_alt_aim; }
 
 	CWeaponAmmo* m_pCurrentAmmo;
 	u8 m_ammoType;

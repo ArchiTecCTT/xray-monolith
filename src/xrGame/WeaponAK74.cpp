@@ -19,7 +19,8 @@ using namespace luabind;
 //   64 = Get/SetPartsSilencer (transient silenced state and source HUD/world muzzle points)
 //   128 = Get/SetHudInertionRetSpeedK (how fast the HUD weapon comes back after a camera turn)
 //   256 = Get/SetHandOnProfile (opt-in authored left subtree, action clock unchanged)
-static int eft_weapon_api() { return 1 | 2 | 4 | 8 | 16 | 32 | 64 | 128 | 256; }
+//   512 = Get/SetAltAim (the V aim's HUD offset and zoom from a script: a canted sight part)
+static int eft_weapon_api() { return 1 | 2 | 4 | 8 | 16 | 32 | 64 | 128 | 256 | 512; }
 
 #pragma optimize("s",on)
 void CWeaponAK74::script_register	(lua_State *L)
@@ -131,6 +132,8 @@ void CWeaponAK74::script_register	(lua_State *L)
 			.def("SetHudInertionAmpK", &CWeapon::SetHudInertionAmpKScript)
 			.def("SetHudInertionRetSpeedK", &CWeapon::SetHudInertionRetSpeedKScript)
 			.def("SetHandPose", &CWeapon::SetHandPoseScript)
+			.def("SetAltAim", &CWeapon::SetAltAimScript)
+			.def("GetAltAim", &CWeapon::GetAltAimScript)
 			.def("SetHandOnProfile", &CWeapon::SetHandOnProfileScript)
 			.def("GetHandOnProfile", &CWeapon::GetHandOnProfileScript)
 			.def("SetMisfireStartCondition", &CWeapon::SetMisfireStartCondition)

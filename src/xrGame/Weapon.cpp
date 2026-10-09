@@ -61,6 +61,9 @@ float CWeapon::SDS_Radius(bool alt) {
 	// hack for GL to always return 0, fix later
 	if (m_zoomtype == 2)
 		return 0.0;
+	// EFT parts alt aim: no overlay, so no scope radius
+	if (alt && m_eft_alt_aim)
+		return 0.0;
 
 	shared_str scope_tex_name;
 	if (zoomFlags.test(SDS))
@@ -338,6 +341,12 @@ void CWeapon::UpdateZoomParams() {
 	{
 		m_zoom_params.m_bUseDynamicZoom = m_zoom_params.m_bUseDynamicZoom_Alt || READ_IF_EXISTS(pSettings, r_bool, cNameSect(), "scope_dynamic_zoom_alt", false);
 		m_zoom_params.m_fScopeZoomFactor = (g_player_hud->m_adjust_mode ? g_player_hud->m_adjust_zoom_factor[2] : READ_IF_EXISTS(pSettings, r_float, cNameSect(), "scope_zoom_factor_alt", 0)) / (READ_IF_EXISTS(pSettings, r_string, cNameSect(), "scope_texture_alt", NULL) && zoomFlags.test(SDS_ZOOM) && (SDS_Radius(true) > 0.0) ? zoom_multiple : 1);
+		// EFT parts alt aim: the script's zoom replaces scope_zoom_factor_alt (fixed, no overlay)
+		if (m_eft_alt_aim && m_eft_alt_zoom > 0.f && !g_player_hud->m_adjust_mode)
+		{
+			m_zoom_params.m_bUseDynamicZoom = FALSE;
+			m_zoom_params.m_fScopeZoomFactor = m_eft_alt_zoom;
+		}
 		m_zoom_params.m_fZoomStepCount = 0;
 	} else //Main Sight
 	{
@@ -411,7 +420,9 @@ void CWeapon::UpdateUIScope()
 		if (!m_secondary_scope_tex_name) {
 			m_secondary_scope_tex_name = READ_IF_EXISTS(pSettings, r_string, cNameSect(), "scope_texture_alt", NULL);
 		}
-		scope_tex_name = m_secondary_scope_tex_name;
+		// EFT parts alt aim: the section's alt overlay does not belong to the script's aim
+		if (!m_eft_alt_aim)
+			scope_tex_name = m_secondary_scope_tex_name;
 	}
 
 	if (!g_dedicated_server)
@@ -445,7 +456,7 @@ void CWeapon::SwitchZoomType()
 {
 	if (!useSeparateUBGLKeybind)
     {
-		if (m_zoomtype == 0 && (m_altAimPos || g_player_hud->m_adjust_mode || (m_modular_attachments && IsScopeAttached() && READ_IF_EXISTS(pSettings, r_bool, GetScopeName(), "use_alt_aim_hud", false))))
+		if (m_zoomtype == 0 && (HasAltAim() || g_player_hud->m_adjust_mode || (m_modular_attachments && IsScopeAttached() && READ_IF_EXISTS(pSettings, r_bool, GetScopeName(), "use_alt_aim_hud", false))))
 		{
             SetZoomTypeAndParams(1);
 		}
@@ -463,7 +474,7 @@ void CWeapon::SwitchZoomType()
 	}
     else
     {
-		if (m_zoomtype == 0 && (m_altAimPos || g_player_hud->m_adjust_mode || (m_modular_attachments && IsScopeAttached() && READ_IF_EXISTS(pSettings, r_bool, GetScopeName(), "use_alt_aim_hud", false))))
+		if (m_zoomtype == 0 && (HasAltAim() || g_player_hud->m_adjust_mode || (m_modular_attachments && IsScopeAttached() && READ_IF_EXISTS(pSettings, r_bool, GetScopeName(), "use_alt_aim_hud", false))))
 		{
 			SetZoomTypeAndParams(1);
 		}
@@ -516,6 +527,44 @@ void CWeapon::SetZoomType(u8 new_zoom_type)
     {
         funct(this->lua_game_object(), previous_zoom_type, m_zoomtype);
     }
+}
+
+bool CWeapon::SectionHasAltAim() const
+{
+	return m_altAimPos || (m_modular_attachments && IsScopeAttached() && READ_IF_EXISTS(pSettings, r_bool, GetScopeName(), "use_alt_aim_hud", false));
+}
+
+bool CWeapon::SetAltAimScript(bool on, Fvector pos, Fvector rot, float zoom)
+{
+	if (on)
+	{
+		if (!_valid(pos) || !_valid(rot) || !_valid(zoom) || zoom < 0.f) return false;
+		if (_abs(pos.x) > 1.f || _abs(pos.y) > 1.f || _abs(pos.z) > 1.f) return false;
+		if (_abs(rot.x) > PI || _abs(rot.y) > PI || _abs(rot.z) > PI) return false;
+
+		const bool zoom_changed = !m_eft_alt_aim || zoom != m_eft_alt_zoom;
+		m_eft_alt_aim = true;
+		m_eft_alt_pos = pos; // UpdateHudAdditional reads these every frame
+		m_eft_alt_rot = rot;
+		m_eft_alt_zoom = zoom;
+		if (m_zoomtype == 1 && zoom_changed)
+			UpdateUIScope(); // overlay and zoom of the alt aim now in use
+		return true;
+	}
+
+	if (!m_eft_alt_aim) return true;
+	m_eft_alt_aim = false;
+	if (!SectionHasAltAim())
+	{
+		// index 3 of this HUD section is not set: never stay in, or come back to, zoom type 1
+		if (zoomTypeBeforeLauncher == 1)
+			zoomTypeBeforeLauncher = 0;
+		if (m_zoomtype == 1)
+			SetZoomTypeAndParams(0);
+	}
+	if (m_zoomtype != 2)
+		UpdateUIScope(); // the section's overlay and zoom (or the main ones) come back
+	return true;
 }
 
 extern float g_ironsights_factor;
@@ -2510,6 +2559,10 @@ void CWeapon::UpdateHudAdditional(Fmatrix& trans)
 			{
 				curr_offs = hi->m_measures.m_hands_offset[0][5]; //pos,normal2
 				curr_rot = hi->m_measures.m_hands_offset[1][5]; //pos,normal2
+			}
+			else if (idx == 3 && m_eft_alt_aim) {
+				curr_offs = m_eft_alt_pos; //pos,aim_alt from the script (EFT parts)
+				curr_rot = m_eft_alt_rot; //rot,aim_alt
 			}
 			else {
 				curr_offs = hi->m_measures.m_hands_offset[0][idx]; //pos,aim
