@@ -534,9 +534,9 @@ public:
 	// type 1). Transient like the hand pose: not saved, not in net packets; the script sets it again.
 	bool SetAltAimScript(bool on, Fvector pos, Fvector rot, float zoom);
 	bool GetAltAimScript() const { return m_eft_alt_aim; }
-	// EFT parts: the sight's zero (EftZero.h): the actor's own shots while aimed (IsZoomed: the sight, V too) leave elev
-	// radians above (and wind radians right of) the aim, before the dispersion (CWeapon::FireTrace); not at the hip, not NPC
-	// shots, not with a blocked barrel, not the grenade launcher (LaunchGrenade does not go through FireTrace). Refused (false, nothing changes) when a value is not finite,
+	// EFT parts: the sight's zero (EftZero.h): the actor's own shots, aimed and from the hip, leave elev radians above (and
+	// wind radians right of) the aim, before the dispersion (CWeapon::FireTrace); not NPC shots, not with a blocked barrel,
+	// not the grenade launcher (LaunchGrenade does not go through FireTrace). Refused (false, nothing changes) when a value is not finite,
 	// |elev| > eft_zero::ELEV_MAX or |wind| > eft_zero::WIND_MAX. Transient like the alt aim: not saved, not in net packets.
 	bool SetZeroScript(float elev, float wind);
 	float GetZeroElevationScript() const { return m_eft_zero_elev; }

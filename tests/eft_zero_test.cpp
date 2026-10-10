@@ -45,10 +45,11 @@ static bool same(const V3& a, const V3& b) { return a.x == b.x && a.y == b.y && 
 
 // ---------------------------------------------------------------------------------------------------------------- Part 1
 // CWeapon::FireTrace's gate, as written in WeaponFire.cpp (Part 2 checks the line)
-static V3 fire_trace_dir(V3 D, float elev, float wind, bool parent_is_actor, bool zoomed, bool barrel_blocked)
+// (the gate reads no zoom state: aimed and hip shots are turned alike; Part 2 checks that FireTrace names no IsZoomed)
+static V3 fire_trace_dir(V3 D, float elev, float wind, bool parent_is_actor, bool barrel_blocked)
 {
 	V3 shot_dir = D;
-	if ((elev != 0.f || wind != 0.f) && parent_is_actor && zoomed && !barrel_blocked)
+	if ((elev != 0.f || wind != 0.f) && parent_is_actor && !barrel_blocked)
 		ez::apply(shot_dir, elev, wind);
 	return shot_dir;
 }
@@ -200,12 +201,11 @@ static void part1()
 
 	// FireTrace's gate: only the actor's own shot with a free barrel
 	V3 D = dir_hp(.5f, .02f);
-	CHECK(same(fire_trace_dir(D, 0.f, 0.f, true, true, false), D));
-	CHECK(!same(fire_trace_dir(D, .001f, 0.f, true, true, false), D));
-	CHECK(!same(fire_trace_dir(D, 0.f, .001f, true, true, false), D));
-	CHECK(same(fire_trace_dir(D, .001f, .001f, false, true, false), D)); // an NPC's shot
-	CHECK(same(fire_trace_dir(D, .001f, .001f, true, false, false), D)); // at the hip: along the crosshair
-	CHECK(same(fire_trace_dir(D, .001f, .001f, true, true, true), D));   // a blocked barrel (the eye -> barrel trace)
+	CHECK(same(fire_trace_dir(D, 0.f, 0.f, true, false), D));
+	CHECK(!same(fire_trace_dir(D, .001f, 0.f, true, false), D));       // the actor's shot, aimed or from the hip
+	CHECK(!same(fire_trace_dir(D, 0.f, .001f, true, false), D));
+	CHECK(same(fire_trace_dir(D, .001f, .001f, false, false), D));     // an NPC's shot
+	CHECK(same(fire_trace_dir(D, .001f, .001f, true, true), D));       // a blocked barrel (the eye -> barrel trace)
 
 	// the dispersion comes after the zero: the group's centre moves up by the elevation, its spread stays
 	const int N = 20000;
@@ -272,7 +272,7 @@ static void part2(const std::string& dir)
 	CHECK(has(fire, "#include \"EftZero.h\""));
 	const std::string ft = body(fire, "void CWeapon::FireTrace(const Fvector& P, const Fvector& D)");
 	CHECK(has(ft, "\tFvector shot_dir = D;\n"));
-	CHECK(has(ft, "\tif ((m_eft_zero_elev != 0.f || m_eft_zero_wind != 0.f) && ParentIsActor() && IsZoomed() && !GetPick().barrel_blocked)\n"
+	CHECK(has(ft, "\tif ((m_eft_zero_elev != 0.f || m_eft_zero_wind != 0.f) && ParentIsActor() && !GetPick().barrel_blocked)\n"
 		"\t\teft_zero::apply(shot_dir, m_eft_zero_elev, m_eft_zero_wind);\n"));
 	CHECK(in_order(ft, "eft_zero::apply(shot_dir", "for (int i = 0; i < l_cartridge.param_s.buckShot; ++i)"));
 	CHECK(has(ft, "FireBullet(P, shot_dir, fire_disp, l_cartridge, H_Parent()->ID(), ID(), SendHit, iAmmoElapsed);"));
@@ -296,10 +296,8 @@ static void part2(const std::string& dir)
 	CHECK(has(h, "float GetZeroWindageScript() const { return m_eft_zero_wind; }"));
 	CHECK(has(h, "\tfloat m_eft_zero_elev = 0.f;\n") && has(h, "\tfloat m_eft_zero_wind = 0.f;\n"));
 	CHECK(!has(cpp, "m_eft_zero"));
-	// aimed = IsZoomed = m_bIsZoomModeNow: set by OnZoomIn, cleared by OnZoomOut (the hip: the zero does not act)
-	CHECK(has(h, "IC bool IsZoomed() const\n\t{\n\t\treturn m_zoom_params.m_bIsZoomModeNow;"));
-	CHECK(has(body(cpp, "void CWeapon::OnZoomIn()"), "m_zoom_params.m_bIsZoomModeNow = true;"));
-	CHECK(has(body(cpp, "void CWeapon::OnZoomOut()"), "m_zoom_params.m_bIsZoomModeNow = false;"));
+	// hip shots follow the zero too (owner 2026-10-10): FireTrace does not look at the zoom state
+	CHECK(!has(ft, "IsZoomed") && !has(ft, "m_bIsZoomModeNow"));
 
 	// WeaponAK74.cpp: bit 2048 and the three exports on CWeapon, after GetAimSettleK
 	CHECK(has(ak, "static int eft_weapon_api() { return 1 | 2 | 4 | 8 | 16 | 32 | 64 | 128 | 256 | 512 | 1024 | 2048"));

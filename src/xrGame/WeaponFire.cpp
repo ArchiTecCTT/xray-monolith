@@ -120,11 +120,10 @@ void CWeapon::FireTrace(const Fvector& P, const Fvector& D)
 
 
 	bool SendHit = SendHitAllowed(H_Parent());
-	// EFT parts: the sight's zero (SetZeroScript, EftZero.h): the actor's own shot while aimed (through the sight, V too)
-	// leaves angled by the zero, before the dispersion; at the hip the shot follows the crosshair as before; P, the pick and
-	// a blocked barrel (the eye -> barrel trace) stay as they are
+	// EFT parts: the sight's zero (SetZeroScript, EftZero.h): the actor's own shot, aimed or from the hip, leaves angled by
+	// the zero, before the dispersion; P, the pick and a blocked barrel (the eye -> barrel trace) stay as they are
 	Fvector shot_dir = D;
-	if ((m_eft_zero_elev != 0.f || m_eft_zero_wind != 0.f) && ParentIsActor() && IsZoomed() && !GetPick().barrel_blocked)
+	if ((m_eft_zero_elev != 0.f || m_eft_zero_wind != 0.f) && ParentIsActor() && !GetPick().barrel_blocked)
 		eft_zero::apply(shot_dir, m_eft_zero_elev, m_eft_zero_wind);
 	//выстерлить пулю (с учетом возможной стрельбы дробью)
 	for (int i = 0; i < l_cartridge.param_s.buckShot; ++i)

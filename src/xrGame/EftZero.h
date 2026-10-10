@@ -7,8 +7,8 @@
 // zero range. The sight picture does not move: the shot leaves `elev` radians above the aim (and `wind` radians to the
 // right of it) in CWeapon::FireTrace, before the dispersion (CShootingObject::FireBullet -> random_dir). The shot's start,
 // the HUD/eye pick, firepos/aimpos and the blocked-barrel decision stay as they are; the caller skips this for a blocked
-// barrel, for shots that are not the actor's and at the hip (not aimed: the shot follows the crosshair, as a zeroed sight
-// turns the sight line, not the bore). "Up" is the world's up in the plane of the shot (gravity's plane), so a
+// barrel and for shots that are not the actor's. Hip shots are turned too (the owner, 2026-10-10: "Hip fire should also
+// follow the zero"). "Up" is the world's up in the plane of the shot (gravity's plane), so a
 // rolled rifle (V, a canted sight) is zeroed against the same drop.
 //
 // Self-contained (no engine types): tests/eft_zero_test.cpp runs this same code.
