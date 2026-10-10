@@ -21,7 +21,8 @@ using namespace luabind;
 //   256 = Get/SetHandOnProfile (opt-in authored left subtree, action clock unchanged)
 //   512 = Get/SetAltAim (the V aim's HUD offset and zoom from a script: a canted sight part)
 //   1024 = Get/SetAimSettleK (strength of the aim-in kick of the HUD section's aim_settle_* spring keys)
-static int eft_weapon_api() { return 1 | 2 | 4 | 8 | 16 | 32 | 64 | 128 | 256 | 512 | 1024; }
+//   2048 = SetZero / GetZeroElevation / GetZeroWindage (the sight's zero: the actor's shots leave angled up/right, radians)
+static int eft_weapon_api() { return 1 | 2 | 4 | 8 | 16 | 32 | 64 | 128 | 256 | 512 | 1024 | 2048; }
 
 #pragma optimize("s",on)
 void CWeaponAK74::script_register	(lua_State *L)
@@ -137,6 +138,9 @@ void CWeaponAK74::script_register	(lua_State *L)
 			.def("GetAltAim", &CWeapon::GetAltAimScript)
 			.def("SetAimSettleK", &CWeapon::SetAimSettleKScript)
 			.def("GetAimSettleK", &CWeapon::GetAimSettleKScript)
+			.def("SetZero", &CWeapon::SetZeroScript)
+			.def("GetZeroElevation", &CWeapon::GetZeroElevationScript)
+			.def("GetZeroWindage", &CWeapon::GetZeroWindageScript)
 			.def("SetHandOnProfile", &CWeapon::SetHandOnProfileScript)
 			.def("GetHandOnProfile", &CWeapon::GetHandOnProfileScript)
 			.def("SetMisfireStartCondition", &CWeapon::SetMisfireStartCondition)

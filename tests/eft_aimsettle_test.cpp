@@ -789,8 +789,8 @@ static void part2(const std::string& root, const std::string& dir)
 	CHECK(in_order(hud, "if (pActor->IsZoomAimingMode())", "m_zoom_params.m_fZoomRotationFactor += factor;"));
 	CHECK(cpp.find("R.rotateZ(-m_hud_offset[1].z);") != std::string::npos);
 
-	// WeaponAK74.cpp: bit 1024 and the two exports on CWeapon, after GetAltAim
-	CHECK(ak.find("static int eft_weapon_api() { return 1 | 2 | 4 | 8 | 16 | 32 | 64 | 128 | 256 | 512 | 1024; }") != std::string::npos);
+	// WeaponAK74.cpp: bit 1024 and the two exports on CWeapon, after GetAltAim (later bits may follow 1024: 2048 = SetZero)
+	CHECK(ak.find("static int eft_weapon_api() { return 1 | 2 | 4 | 8 | 16 | 32 | 64 | 128 | 256 | 512 | 1024") != std::string::npos);
 	CHECK(ak.find("//   1024 = Get/SetAimSettleK") != std::string::npos);
 	CHECK(in_order(ak, "class_<CWeapon,", ".def(\"GetAltAim\", &CWeapon::GetAltAimScript)"));
 	CHECK(in_order(ak, ".def(\"GetAltAim\", &CWeapon::GetAltAimScript)", ".def(\"SetAimSettleK\", &CWeapon::SetAimSettleKScript)"));

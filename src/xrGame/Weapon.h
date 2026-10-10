@@ -534,6 +534,13 @@ public:
 	// type 1). Transient like the hand pose: not saved, not in net packets; the script sets it again.
 	bool SetAltAimScript(bool on, Fvector pos, Fvector rot, float zoom);
 	bool GetAltAimScript() const { return m_eft_alt_aim; }
+	// EFT parts: the sight's zero (EftZero.h): the actor's own shots leave elev radians above (and wind radians right of) the
+	// aim, before the dispersion (CWeapon::FireTrace); not NPC shots, not with a blocked barrel, not the grenade launcher
+	// (LaunchGrenade does not go through FireTrace). Refused (false, nothing changes) when a value is not finite,
+	// |elev| > eft_zero::ELEV_MAX or |wind| > eft_zero::WIND_MAX. Transient like the alt aim: not saved, not in net packets.
+	bool SetZeroScript(float elev, float wind);
+	float GetZeroElevationScript() const { return m_eft_zero_elev; }
+	float GetZeroWindageScript() const { return m_eft_zero_wind; }
 	// EFT parts: strength of the aim-in kick (HUD section keys aim_settle_*, EftAimSettle.h): 1 = the section's values,
 	// 0 = no kick (the travel spring stays). Refused (false, nothing changes) when not finite or < 0; clamped to 4.
 	// Not reset by Load, not saved, not sent: the script sets it again, like the hand pose.
@@ -1173,6 +1180,9 @@ public:
 	Fvector m_eft_alt_pos = {0.f, 0.f, 0.f};
 	Fvector m_eft_alt_rot = {0.f, 0.f, 0.f};
 	float m_eft_alt_zoom = 0.f;
+	// EFT parts zero (SetZeroScript), radians
+	float m_eft_zero_elev = 0.f;
+	float m_eft_zero_wind = 0.f;
 	// the section's own alt aim (use_alt_aim_hud on the weapon or on a modular scope), without the script's
 	bool SectionHasAltAim() const;
 	bool HasAltAim() const { return m_altAimPos || m_eft_alt_aim; }

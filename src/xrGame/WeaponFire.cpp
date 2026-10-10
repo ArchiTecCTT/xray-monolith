@@ -15,6 +15,7 @@
 #include "game_cl_mp.h"
 #include "reward_event_generator.h"
 #include "../Layers/xrRender/xrRender_console.h"
+#include "EftZero.h"
 
 #define FLAME_TIME 0.05f
 
@@ -119,10 +120,15 @@ void CWeapon::FireTrace(const Fvector& P, const Fvector& D)
 
 
 	bool SendHit = SendHitAllowed(H_Parent());
+	// EFT parts: the sight's zero (SetZeroScript, EftZero.h): the actor's own shot leaves angled by the zero, before the
+	// dispersion; P, the pick and a blocked barrel (the eye -> barrel trace) stay as they are
+	Fvector shot_dir = D;
+	if ((m_eft_zero_elev != 0.f || m_eft_zero_wind != 0.f) && ParentIsActor() && !GetPick().barrel_blocked)
+		eft_zero::apply(shot_dir, m_eft_zero_elev, m_eft_zero_wind);
 	//выстерлить пулю (с учетом возможной стрельбы дробью)
 	for (int i = 0; i < l_cartridge.param_s.buckShot; ++i)
 	{
-		FireBullet(P, D, fire_disp, l_cartridge, H_Parent()->ID(), ID(), SendHit, iAmmoElapsed);
+		FireBullet(P, shot_dir, fire_disp, l_cartridge, H_Parent()->ID(), ID(), SendHit, iAmmoElapsed);
 	}
 
 	StartShotParticles();
@@ -141,6 +147,15 @@ void CWeapon::FireTrace(const Fvector& P, const Fvector& D)
 	--iAmmoElapsed;
 
 	VERIFY((u32)iAmmoElapsed == m_magazine.size());
+}
+
+bool CWeapon::SetZeroScript(float elev, float wind)
+{
+	if (!eft_zero::accept(elev, wind))
+		return false;
+	m_eft_zero_elev = elev;
+	m_eft_zero_wind = wind;
+	return true;
 }
 
 void CWeapon::StopShooting()
