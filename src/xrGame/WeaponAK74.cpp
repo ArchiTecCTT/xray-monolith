@@ -20,7 +20,8 @@ using namespace luabind;
 //   128 = Get/SetHudInertionRetSpeedK (how fast the HUD weapon comes back after a camera turn)
 //   256 = Get/SetHandOnProfile (opt-in authored left subtree, action clock unchanged)
 //   512 = Get/SetAltAim (the V aim's HUD offset and zoom from a script: a canted sight part)
-static int eft_weapon_api() { return 1 | 2 | 4 | 8 | 16 | 32 | 64 | 128 | 256 | 512; }
+//   1024 = Get/SetAimSettleK (strength of the aim-in kick of the HUD section's aim_settle_* spring keys)
+static int eft_weapon_api() { return 1 | 2 | 4 | 8 | 16 | 32 | 64 | 128 | 256 | 512 | 1024; }
 
 #pragma optimize("s",on)
 void CWeaponAK74::script_register	(lua_State *L)
@@ -134,6 +135,8 @@ void CWeaponAK74::script_register	(lua_State *L)
 			.def("SetHandPose", &CWeapon::SetHandPoseScript)
 			.def("SetAltAim", &CWeapon::SetAltAimScript)
 			.def("GetAltAim", &CWeapon::GetAltAimScript)
+			.def("SetAimSettleK", &CWeapon::SetAimSettleKScript)
+			.def("GetAimSettleK", &CWeapon::GetAimSettleKScript)
 			.def("SetHandOnProfile", &CWeapon::SetHandOnProfileScript)
 			.def("GetHandOnProfile", &CWeapon::GetHandOnProfileScript)
 			.def("SetMisfireStartCondition", &CWeapon::SetMisfireStartCondition)

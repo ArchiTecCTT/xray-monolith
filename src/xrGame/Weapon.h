@@ -15,6 +15,7 @@
 #include "CameraRecoil.h"
 
 #include "NewZoomFlag.h"
+#include "EftAimSettle.h"
 
 class CEntity;
 class ENGINE_API CMotionDef;
@@ -533,6 +534,11 @@ public:
 	// type 1). Transient like the hand pose: not saved, not in net packets; the script sets it again.
 	bool SetAltAimScript(bool on, Fvector pos, Fvector rot, float zoom);
 	bool GetAltAimScript() const { return m_eft_alt_aim; }
+	// EFT parts: strength of the aim-in kick (HUD section keys aim_settle_*, EftAimSettle.h): 1 = the section's values,
+	// 0 = no kick (the travel spring stays). Refused (false, nothing changes) when not finite or < 0; clamped to 4.
+	// Not reset by Load, not saved, not sent: the script sets it again, like the hand pose.
+	bool SetAimSettleKScript(float k) { return eft_aim_settle::set_k(m_aim_settle_k, k); }
+	float GetAimSettleKScript() const { return m_aim_settle_k; }
 	// factors on the HUD sway (see m_fHudInertionSpeedK / m_fHudInertionAmpK); NaN or < 0 is ignored, range 0 .. 5 (0 = no sway)
 	void SetHudInertionSpeedKScript(float val)
 	{
@@ -607,6 +613,18 @@ protected:
 	Fmatrix m_Offset;
 	Fvector m_hud_offset[2];
 	Fvector m_hud_aim_rot;
+	// EFT parts: the aim-in springs (EftAimSettle.h). Config from the HUD section (aim_travel_* / aim_settle_*), read in
+	// Load (all absent = off = the exponential slide); the state is transient, zeroed by Load, show, hide, drop and
+	// net_Destroy (ResetAimSettle folds a live kick into m_hud_offset first, so nothing pops).
+	eft_aim_settle::config m_aim_settle_cfg;
+	eft_aim_settle::state m_aim_settle;
+	float m_aim_settle_k = 1.f;
+	void LoadAimSettle();
+	void ResetAimSettle()
+	{
+		m_aim_settle.fold(m_hud_offset[0], m_hud_offset[1]);
+		m_aim_settle.reset();
+	}
 	// 0-èñïîëüçóåòñÿ áåç ó÷àñòèÿ ðóê, 1-îäíà ðóêà, 2-äâå ðóêè
 	EHandDependence eHandDependence;
 	bool m_bIsSingleHanded;

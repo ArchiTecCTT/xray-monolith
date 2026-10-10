@@ -312,7 +312,8 @@ static void part2(const std::string& dir)
     CHECK(body(cpp, "float CWeapon::SDS_Radius(bool alt)").find("if (alt && m_eft_alt_aim)\n\t\treturn 0.0;") != std::string::npos);
 
     // WeaponAK74.cpp: bit 512 and the two exports on CWeapon, next to SetHandPose
-    CHECK(ak.find("static int eft_weapon_api() { return 1 | 2 | 4 | 8 | 16 | 32 | 64 | 128 | 256 | 512; }") != std::string::npos);
+    // (later bits may follow 512: 1024 = SetAimSettleK)
+    CHECK(ak.find("static int eft_weapon_api() { return 1 | 2 | 4 | 8 | 16 | 32 | 64 | 128 | 256 | 512") != std::string::npos);
     CHECK(in_order(ak, "class_<CWeapon,", ".def(\"SetHandPose\", &CWeapon::SetHandPoseScript)"));
     CHECK(in_order(ak, ".def(\"SetHandPose\", &CWeapon::SetHandPoseScript)", ".def(\"SetAltAim\", &CWeapon::SetAltAimScript)"));
     CHECK(in_order(ak, ".def(\"SetAltAim\", &CWeapon::SetAltAimScript)", ".def(\"GetAltAim\", &CWeapon::GetAltAimScript)"));

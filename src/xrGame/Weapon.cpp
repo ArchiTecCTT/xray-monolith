@@ -974,6 +974,33 @@ void CWeapon::Load(LPCSTR section)
 
 	m_firepos = READ_IF_EXISTS(pSettings, r_bool, section, "firepos", true);
 	m_aimpos = READ_IF_EXISTS(pSettings, r_bool, section, "aimpos", true);
+
+	LoadAimSettle();
+}
+
+// EFT parts: the aim-in spring keys of the HUD section (EftAimSettle.h, eft_aim_settle::load has the keys and limits).
+// A bad value switches its spring off (or clamps w / zeta) with one log line naming the section and the key.
+void CWeapon::LoadAimSettle()
+{
+	struct reader
+	{
+		LPCSTR sect;
+		bool has(LPCSTR key) const { return !!pSettings->line_exist(sect, key); }
+		LPCSTR str(LPCSTR key) const { return pSettings->r_string(sect, key); }
+		void bad(LPCSTR key, LPCSTR why) const
+		{
+			LPCSTR v = has(key) ? str(key) : "(absent)";
+			Msg("! [EFT aim settle] [%s] %s = %s: %s", sect, key, v ? v : "", why);
+		}
+	};
+	if (hud_sect.size())
+	{
+		reader r = {hud_sect.c_str()};
+		eft_aim_settle::load(m_aim_settle_cfg, r);
+	}
+	else
+		m_aim_settle_cfg.clear();
+	ResetAimSettle();
 }
 
 // demonized: World model on stalkers adjustments
@@ -1115,6 +1142,7 @@ void CWeapon::net_Destroy()
 	Light_Destroy();
 
 	while (m_magazine.size()) m_magazine.pop_back();
+	ResetAimSettle();
 }
 
 BOOL CWeapon::IsUpdating()
@@ -1290,6 +1318,7 @@ void CWeapon::OnH_B_Independent(bool just_before_destroy)
 
 	m_strapped_mode = false;
 	m_zoom_params.m_bIsZoomModeNow = false;
+	ResetAimSettle();
 	UpdateXForm();
 
 	if (ParentIsActor())
@@ -1324,6 +1353,7 @@ void CWeapon::OnActiveItem()
 	//. Show
 	SwitchState(eShowing);
 	//-
+	ResetAimSettle();
 
 	inherited::OnActiveItem();
 	//если мы заряжаемся и оружие было в руках
@@ -1341,6 +1371,7 @@ void CWeapon::OnHiddenItem()
 		SwitchState(eHidden);
 
 	OnZoomOut();
+	ResetAimSettle();
 	inherited::OnHiddenItem();
 
 	m_set_next_ammoType_on_reload = undefined_ammo_type;
@@ -2579,8 +2610,22 @@ void CWeapon::UpdateHudAdditional(Fmatrix& trans)
 			(m_zoom_params.m_fZoomRotateTime * cur_silencer_koef.zoom_rotate_time * cur_scope_koef.zoom_rotate_time
 					* cur_launcher_koef.zoom_rotate_time);
 
-		InterpolateOffset(m_hud_offset[0], curr_offs, factor);
-		InterpolateOffset(m_hud_offset[1], curr_rot, factor);
+		if (m_aim_settle_cfg.any())
+		{
+			// EFT parts: the aim-in springs (EftAimSettle.h) for idx 1/3 instead of the slide; off (the slide, as below)
+			// for idx 0/2/4, while coming back from the lowered pose and in the adjust tool
+			const bool aim = (idx == 1 || idx == 3) && last_idx != 4 && !g_player_hud->m_adjust_mode;
+			const float rotate_time = m_zoom_params.m_fZoomRotateTime * cur_silencer_koef.zoom_rotate_time *
+				cur_scope_koef.zoom_rotate_time * cur_launcher_koef.zoom_rotate_time;
+			eft_aim_settle::frame(m_aim_settle_cfg, m_aim_settle, aim, idx == 0, IsZoomed(), Device.fTimeDelta,
+				rotate_time, m_aim_settle_k, m_hud_offset[0], curr_offs, m_hud_offset[1], curr_rot,
+				[this, factor](Fvector& current, const Fvector& target) { InterpolateOffset(current, target, factor); });
+		}
+		else
+		{
+			InterpolateOffset(m_hud_offset[0], curr_offs, factor);
+			InterpolateOffset(m_hud_offset[1], curr_rot, factor);
+		}
 		InterpolateOffset(m_hud_aim_rot, curr_aim_rot, factor);
 
 		// Remove pending state before weapon has fully moved to the new position to remove some delay
@@ -2590,23 +2635,29 @@ void CWeapon::UpdateHudAdditional(Fmatrix& trans)
 			last_idx = idx;
 		}
 
+		// EFT parts: the aim-in kick goes into the matrix only; m_hud_offset (the slide, the pending test above, the
+		// inertia roll) never holds it
+		Fvector hud_offs = m_hud_offset[0], hud_rot = m_hud_offset[1];
+		if (m_aim_settle.kick)
+			m_aim_settle.add_kick(hud_offs, hud_rot);
+
 		Fmatrix hud_rotation;
 		hud_rotation.identity();
 		hud_rotation.setHPB(m_hud_aim_rot);
 		trans.mulB_43(hud_rotation);
 
 		hud_rotation.identity();
-		hud_rotation.rotateX(m_hud_offset[1].x);
+		hud_rotation.rotateX(hud_rot.x);
 
 		Fmatrix hud_rotation_y;
 		hud_rotation_y.identity();
-		hud_rotation_y.rotateY(m_hud_offset[1].y);
+		hud_rotation_y.rotateY(hud_rot.y);
 		hud_rotation.mulA_43(hud_rotation_y);
 
 		hud_rotation_y.identity();
-		hud_rotation_y.rotateZ(m_hud_offset[1].z);
+		hud_rotation_y.rotateZ(hud_rot.z);
 		hud_rotation.mulA_43(hud_rotation_y);
-		hud_rotation.translate_over(m_hud_offset[0]);
+		hud_rotation.translate_over(hud_offs);
 		trans.mulB_43(hud_rotation);
 
 		if (pActor->IsZoomAimingMode())
