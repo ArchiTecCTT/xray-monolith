@@ -35,23 +35,6 @@ void fix_texture_thm_name(LPSTR fn)
 		*_ext = 0;
 }
 
-struct TH_LoadTHM
-{
-	using map_TD = xr_map<shared_str, CTextureDescrMngr::texture_desc>;
-	using map_CS = xr_map<shared_str, cl_dt_scaler*>;
-
-	LPCSTR initial;
-	map_TD& s_texture_details;
-	map_CS& s_detail_scalers;
-};
-
-void CTextureDescrMngr::LoadTHMThread(void* args)
-{
-	PROF_EVENT();
-
-	TH_LoadTHM* p = (TH_LoadTHM*)args;
-	LoadTHM(p->initial, p->s_texture_details, p->s_detail_scalers);
-}
 
 void CTextureDescrMngr::LoadTHM(LPCSTR initial, map_TD& s_texture_details, map_CS& s_detail_scalers)
 {
@@ -124,11 +107,14 @@ void CTextureDescrMngr::LoadTHM(LPCSTR initial, map_TD& s_texture_details, map_C
 
 void CTextureDescrMngr::Load()
 {
-	TH_LoadTHM* gtex = new TH_LoadTHM({"$game_textures$", m_texture_details, m_detail_scalers});
-	TH_LoadTHM* lvl = new TH_LoadTHM({"$level$", m_texture_details, m_detail_scalers});
-	thread_spawn(LoadTHMThread, "X-Ray THM Loader 1", 0, gtex);
-	thread_spawn(LoadTHMThread, "X-Ray THM Loader 2", 0, lvl);
-	Sleep(5);
+	// Load on the calling thread and return only when both passes are done. This used to start two
+	// detached threads ("X-Ray THM Loader 1/2") and Sleep(5) instead of joining them: both wrote the
+	// same two maps with no lock (xr_delete on shared entries = double free), UnLoad() cleared the maps
+	// under them, and the texture load workers read the maps through CTexture::Preload meanwhile.
+	// With thousands of loose .thm files on a slow disk the threads ran for a minute or more.
+	// Upstream does the same since 5656a93 ("Remove parallel thm loader").
+	LoadTHM("$game_textures$", m_texture_details, m_detail_scalers);
+	LoadTHM("$level$", m_texture_details, m_detail_scalers);
 }
 
 void CTextureDescrMngr::UnLoad()
