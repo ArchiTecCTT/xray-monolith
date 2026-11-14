@@ -326,6 +326,10 @@ static void *lua_alloc		(void *ud, void *ptr, size_t osize, size_t nsize) {
 // export
 extern int luaopen_lua_extensions(lua_State* L, bool IsDebug = false);
 
+#if RENDER==R_R1
+extern bool sm3_supported(); // ResourceManager_Resources.cpp
+#endif
+
 void CResourceManager::LS_Load()
 {
 #ifdef USE_GSC_MEM_ALLOC
@@ -412,6 +416,20 @@ void CResourceManager::LS_Load()
 			value("srcalphasat", int(D3DBLEND_SRCALPHASAT))
 		]
 	];
+
+#if RENDER==R_R1
+	// r1_sm3_postprocess: true when this exe compiles main_ps_3_0 / main_vs_3_0 (the GPU has vs 3.0 and ps 3.0) and
+	// draws the R1 post-process quad in clip space for a pass whose .s names a vertex shader; false on this exe with an
+	// older GPU. Set before any .s runs, so both a file's top level and its blender functions can read it. Exes
+	// without this line leave it undefined, and an undefined global reads nil in this (non-strict) Lua state, so
+	// `if r1_sm3_postprocess then ... else ... end` picks the old path there. See R1-SM3-DETECT-NOTES.md.
+	{
+		bool const sm3_pp = sm3_supported();
+		lua_pushboolean(LSVM, sm3_pp ? 1 : 0);
+		lua_setfield(LSVM, LUA_GLOBALSINDEX, "r1_sm3_postprocess");
+		Msg("* R1 shaders: r1_sm3_postprocess = %s", sm3_pp ? "true" : "false");
+	}
+#endif
 
 	// load shaders
 	xr_vector<char*>* folder = FS.file_list_open("$game_shaders$", ::Render->getShaderPath(),

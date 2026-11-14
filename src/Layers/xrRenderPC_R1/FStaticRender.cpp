@@ -864,6 +864,17 @@ HRESULT CRender::shader_compile(
 	sh_name[len] = '0' + char(4 == m_skinning);
 	++len;
 
+	// R1_SM3: set only for a shader-model-3 build (main_ps_3_0 / main_vs_3_0), so one file can keep its sm3 entry in
+	// #ifdef R1_SM3 and every ps_2_0 / vs_2_0 build (older exes, older GPUs) never sees it. Not part of sh_name: it
+	// follows from the target, which the sm3 cache key below already includes.
+	bool const sm3_target = pTarget && pTarget[0] && pTarget[1] == 's' && pTarget[2] == '_' && pTarget[3] == '3';
+	if (sm3_target)
+	{
+		defines[def_it].Name = "R1_SM3";
+		defines[def_it].Definition = "1";
+		def_it ++;
+	}
+
 	// finish
 	defines[def_it].Name = 0;
 	defines[def_it].Definition = 0;
@@ -912,9 +923,13 @@ HRESULT CRender::shader_compile(
 	{
 		source_crc = getShaderSourceCrc32(pSrcData, SrcDataLen, ::Render->getShaderPath());
 		// a shader-model-3 build keys its cache on the target too, so a file that carries both main_ps_3_0 and a
-		// lower entry never loads the other target's blob; every other target keeps the old key (no recompile)
-		if (pTarget && pTarget[0] && pTarget[1] == 's' && pTarget[2] == '_' && pTarget[3] == '3')
+		// lower entry never loads the other target's blob; every other target keeps the old key (no recompile).
+		// "R1_SM3" is mixed in as well, so sm3 blobs cached by an exe that did not set that define are rebuilt once.
+		if (sm3_target)
+		{
 			source_crc = crc32(pTarget, xr_strlen(pTarget), source_crc);
+			source_crc = crc32("R1_SM3", 6, source_crc);
+		}
 	}
 
 	if (FS.exist(file_name))

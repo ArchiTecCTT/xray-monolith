@@ -1,0 +1,67 @@
+// R1 post-process with two entries in one file:
+//   main         ps_2_0, the vanilla-style path: older exes, and this exe on a GPU without shader model 3
+//   main_ps_3_0  ps_3_0, only compiled when the engine sets R1_SM3 (r1-sm3-detect and later, GPU with vs/ps 3.0)
+// postprocess.s picks the matching vertex shader with `if r1_sm3_postprocess then ... end`.
+// Everything the ps_3_0 path needs (helpers, extra samplers, constants) goes inside #ifdef R1_SM3, so a ps_2_0 build
+// never sees it: older exes do not know R1_SM3, the preprocessor drops the block before the compiler parses it.
+
+struct v2p
+{
+	float4 color : COLOR0;  // rgb: colour base (0.5 = neutral), a: 1 - noise amount
+	float4 gray : COLOR1;   // rgb: gray weights, a: 1 - gray amount
+	float2 tc0 : TEXCOORD0; // duality tap 1
+	float2 tc1 : TEXCOORD1; // duality tap 2
+	float2 tc2 : TEXCOORD2; // noise
+};
+
+uniform sampler2D s_base0;
+uniform sampler2D s_base1;
+uniform sampler2D s_noise;
+uniform float4 c_brightness; // colour add
+
+float3 pp_finish(float3 image, v2p I)
+{
+	float gray = dot(image, I.gray.rgb);
+	image = lerp(gray.xxx, image, I.gray.a);
+
+	float3 noised = image * tex2D(s_noise, I.tc2).rgb * 2.0;
+	image = lerp(noised, image, I.color.a);
+
+	return (image * I.color.rgb + c_brightness.rgb) * 2.0;
+}
+
+// ps_2_0 (vanilla-compatible). Keep it within ps_2_0 limits: 64 arithmetic + 32 texture instructions,
+// no dynamic loops, no tex2Dlod / tex2Dgrad.
+float4 main(v2p I) : COLOR
+{
+	float3 image = (tex2D(s_base0, I.tc0).rgb + tex2D(s_base1, I.tc1).rgb) * 0.5;
+	return float4(pp_finish(image, I), 1.0);
+}
+
+#ifdef R1_SM3
+uniform sampler2D s_lum_adapt; // 1x1, see R1-PS3-LUM-ADAPT-NOTES.md
+uniform float4 lum_adapt_info; // x = 1 when s_lum_adapt is live this frame
+
+// Example of something ps_2_0 cannot do: a 12-tap halo with a real loop.
+float3 halo(float2 tc)
+{
+	float3 sum = 0;
+	for (int i = 0; i < 12; i++)
+	{
+		float a = i * (6.2831853 / 12.0);
+		sum += tex2Dlod(s_base0, float4(tc + float2(cos(a), sin(a)) * 0.01, 0, 0)).rgb;
+	}
+	return sum / 12.0;
+}
+
+float4 main_ps_3_0(v2p I) : COLOR
+{
+	float3 image = (tex2D(s_base0, I.tc0).rgb + tex2D(s_base1, I.tc1).rgb) * 0.5;
+	image += max(halo(I.tc0) - 0.8, 0.0) * 0.5;
+
+	float lum = tex2D(s_lum_adapt, float2(0.5, 0.5)).a;
+	image *= (lum_adapt_info.x > 0.5) ? clamp(0.35 / max(lum, 0.02), 0.5, 8.0) : 1.0;
+
+	return float4(pp_finish(image, I), 1.0);
+}
+#endif

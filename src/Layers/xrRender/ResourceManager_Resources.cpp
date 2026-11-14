@@ -146,8 +146,9 @@ void CResourceManager::_DeleteDecl(const SDeclaration* dcl)
 
 //--------------------------------------------------------------------------------------------------------------
 #ifndef _EDITOR
-// both halves of shader model 3 (D3D9 only accepts vs_3_0 together with ps_3_0)
-static bool sm3_supported()
+// both halves of shader model 3 (D3D9 only accepts vs_3_0 together with ps_3_0). Not static: R1's shader Lua state
+// (ResourceManager_Scripting.cpp) publishes the same answer to .s files as r1_sm3_postprocess.
+bool sm3_supported()
 {
 	return HW.Caps.raster_major >= 3 && HW.Caps.geometry_major >= 3;
 }
