@@ -69,6 +69,11 @@ CRenderTarget::CRenderTarget()
 	lum_time = 0.f;
 	lum_last_time = 0.f;
 	lum_info.set(0.f, 0.f, 0.f, 0.f);
+	for (u32 i = 0; i < LUM_RB_SLOTS; ++i)
+	{
+		lum_rb[i] = nullptr;
+		lum_rb_frame[i] = 0;
+	}
 
 	bAvailable = Create();
 	Msg("* SSample: %s", bAvailable ? "enabled" : "disabled");
@@ -643,7 +648,13 @@ void CRenderTarget::End()
 	curWidth = Device.dwWidth;
 	curHeight = Device.dwHeight;
 
-	if (!bPerform) return;
+	if (!bPerform)
+	{
+		// the adaptation starts over after more than 3 frames without the post-process quad; so does its CPU copy
+		if (lum_frame && (Device.dwFrame - lum_frame) > 3)
+			lum_readback_clear();
+		return;
+	}
 
 	// R1 luminance adaptation: does nothing (not even create its targets) unless r1_lum_adapt or the bus turns it on
 	lum_update();
@@ -816,6 +827,19 @@ bool CRenderTarget::lum_create()
 		return false;
 	}
 
+	// CPU copies for r1_lum_adapt_value (scripts). Optional: without them the adaptation still runs, the value stays 0
+	for (u32 i = 0; i < LUM_RB_SLOTS; ++i)
+	{
+		lum_rb_frame[i] = 0;
+		if (FAILED(HW.pDevice->CreateOffscreenPlainSurface(1, 1, f_hist, D3DPOOL_SYSTEMMEM, &lum_rb[i], NULL)) || !lum_rb[i])
+		{
+			Msg("! r1_lum_adapt: can't create the CPU copy, r1_lum_adapt_value stays 0");
+			for (u32 j = 0; j < LUM_RB_SLOTS; ++j)
+				_RELEASE(lum_rb[j]);
+			break;
+		}
+	}
+
 	b_lum = xr_new<CBlender_r1_lum_adapt>();
 	s_lum.create(b_lum, "r1\\lum_adapt");
 	if (DEV->_lua_HasShader("lum_adapt_meter"))
@@ -839,6 +863,9 @@ bool CRenderTarget::lum_create()
 
 void CRenderTarget::lum_destroy()
 {
+	lum_readback_clear();
+	for (u32 i = 0; i < LUM_RB_SLOTS; ++i)
+		_RELEASE(lum_rb[i]);
 	s_lum_meter.destroy();
 	s_lum.destroy();
 	xr_delete(b_lum);
@@ -891,7 +918,11 @@ void CRenderTarget::lum_update()
 
 	float speed_up, speed_down;
 	if (lum_state < 0 || !lum_wanted(speed_up, speed_down))
+	{
+		if (lum_state > 0)
+			lum_readback_clear();
 		return;
+	}
 	if (0 == lum_state)
 	{
 		lum_state = lum_create() ? 1 : -1;
@@ -906,7 +937,12 @@ void CRenderTarget::lum_update()
 	if (Device.m_SecondViewport.IsSVPFrame())
 	{
 		if (fresh)
+		{
 			lum_info.set(1.f, lum_time, speed_up, speed_down);
+			lum_readback(false); // nothing new to copy, but a copy of the main view may have finished
+		}
+		else
+			lum_readback_clear();
 		return;
 	}
 
@@ -921,6 +957,7 @@ void CRenderTarget::lum_update()
 	{
 		lum_time = 0.f;
 		adapt.set(1.f, 1.f, 0.f, 1.f);
+		lum_readback_clear(); // copies from before the gap are stale
 	}
 	lum_last_time = Device.fTimeGlobal;
 
@@ -938,4 +975,135 @@ void CRenderTarget::lum_update()
 
 	lum_frame = Device.dwFrame;
 	lum_info.set(1.f, lum_time, speed_up, speed_down);
+
+	lum_readback(true);
+}
+
+//////////////////////////////////////////////////////////////////////////
+// Async CPU copy of $user$lum_adapt for scripts: console outputs r1_lum_adapt_value (.a) and r1_lum_adapt_rgb (.rgb).
+// Each run queues GetRenderTargetData into one of LUM_RB_SLOTS 1x1 system-memory surfaces and reads the newest copy
+// that is at least 2 frames old with D3DLOCK_DONOTWAIT, which never waits: a copy the GPU has not finished answers
+// D3DERR_WASSTILLDRAWING and the previous value stays (an older copy is tried next). Four slots so that one copy is
+// always finished even with three frames queued ahead (the D3D9 default) on a GPU-bound machine.
+
+static float lum_half_to_float(u16 h)
+{
+	const u32 sign = u32(h & 0x8000) << 16;
+	u32 exp = (h >> 10) & 0x1f;
+	u32 man = h & 0x3ff;
+	u32 bits;
+	if (0 == exp)
+	{
+		if (0 == man)
+			bits = sign; // +-0
+		else
+		{
+			// denormal: normalise
+			exp = 127 - 15 + 1;
+			while (!(man & 0x400))
+			{
+				man <<= 1;
+				--exp;
+			}
+			man &= 0x3ff;
+			bits = sign | (exp << 23) | (man << 13);
+		}
+	}
+	else if (31 == exp)
+		bits = sign | 0x7f800000 | (man << 13); // inf / NaN
+	else
+		bits = sign | ((exp + 127 - 15) << 23) | (man << 13);
+	float f;
+	CopyMemory(&f, &bits, sizeof(f));
+	return f;
+}
+
+void CRenderTarget::lum_readback(bool queue)
+{
+	if (!lum_rb[0])
+		return; // no CPU copy (creation failed), r1_lum_adapt_value stays 0
+
+	const u32 now = Device.dwFrame;
+
+	// read: newest copy that is at least 2 frames old first, then older ones
+	u32 below = u32(-1); // only copies queued before this frame are still worth trying
+	for (;;)
+	{
+		u32 best = LUM_RB_SLOTS;
+		for (u32 i = 0; i < LUM_RB_SLOTS; ++i)
+		{
+			const u32 f = lum_rb_frame[i];
+			if (f && f < below && (now - f) >= 2 && (LUM_RB_SLOTS == best || f > lum_rb_frame[best]))
+				best = i;
+		}
+		if (LUM_RB_SLOTS == best)
+			break;
+
+		D3DLOCKED_RECT lr;
+		const HRESULT hr = lum_rb[best]->LockRect(&lr, NULL, D3DLOCK_READONLY | D3DLOCK_DONOTWAIT);
+		if (D3DERR_WASSTILLDRAWING == hr)
+		{
+			below = lum_rb_frame[best]; // not finished: keep it for next frame, try an older copy now
+			continue;
+		}
+		if (FAILED(hr))
+		{
+			lum_rb_frame[best] = 0; // lost copy, forget it
+			continue;
+		}
+
+		float v[4];
+		if (D3DFMT_A32B32G32R32F == rt_lum_adapt->fmt)
+			CopyMemory(v, lr.pBits, sizeof(v));
+		else
+		{
+			const u16* hv = (const u16*)lr.pBits;
+			for (u32 c = 0; c < 4; ++c)
+				v[c] = lum_half_to_float(hv[c]);
+		}
+		lum_rb[best]->UnlockRect();
+
+		if (_valid(v[0]) && _valid(v[1]) && _valid(v[2]) && _valid(v[3]))
+		{
+			ps_r1_lum_adapt_value = v[3];
+			ps_r1_lum_adapt_rgb.set(v[0], v[1], v[2]);
+		}
+
+		// this copy and every older one are done with
+		const u32 done = lum_rb_frame[best];
+		for (u32 i = 0; i < LUM_RB_SLOTS; ++i)
+		{
+			if (lum_rb_frame[i] && lum_rb_frame[i] <= done)
+				lum_rb_frame[i] = 0;
+		}
+		break;
+	}
+
+	if (!queue)
+		return;
+
+	// queue this frame's copy into a free slot, else over the oldest one
+	u32 slot = 0;
+	for (u32 i = 0; i < LUM_RB_SLOTS; ++i)
+	{
+		if (!lum_rb_frame[i])
+		{
+			slot = i;
+			break;
+		}
+		if (lum_rb_frame[i] < lum_rb_frame[slot])
+			slot = i;
+	}
+	if (SUCCEEDED(HW.pDevice->GetRenderTargetData(rt_lum_adapt->pRT, lum_rb[slot])))
+		lum_rb_frame[slot] = now ? now : 1;
+	else
+		lum_rb_frame[slot] = 0;
+}
+
+void CRenderTarget::lum_readback_clear()
+{
+	for (u32 i = 0; i < LUM_RB_SLOTS; ++i)
+		lum_rb_frame[i] = 0;
+	ps_r1_lum_adapt_value = 0.f;
+	ps_r1_lum_adapt_rgb.set(0.f, 0.f, 0.f);
 }

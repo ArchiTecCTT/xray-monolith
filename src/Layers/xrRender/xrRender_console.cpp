@@ -169,6 +169,8 @@ int ps_r1_SoftwareSkinning = 0; // r1-only
 int ps_r1_lum_adapt = 0; // r1-only: eye-like luminance adaptation for post-process shaders (s_lum_adapt), 0 = off
 float ps_r1_lum_adapt_speed = 4.f; // r1-only: rate (1/s) the adapted value follows a brighter scene
 float ps_r1_lum_adapt_speed_down = 2.f; // r1-only: rate (1/s) the adapted value follows a darker scene
+float ps_r1_lum_adapt_value = 0.f; // r1-only, output: adapted .a of $user$lum_adapt read back (~2 frames old), 0 = off/not ready
+Fvector ps_r1_lum_adapt_rgb = {0.f, 0.f, 0.f}; // r1-only, output: adapted .rgb of $user$lum_adapt read back
 
 // R2
 float ps_r2_ssaLOD_A = 64.f;
@@ -1251,6 +1253,37 @@ public:
 	}
 };
 
+// r1_lum_adapt_value / r1_lum_adapt_rgb: outputs the R1 renderer writes (read back from $user$lum_adapt). Readable
+// with get_console():get_float / get_string like any console var; a typed value is ignored (the engine owns it) and
+// they are never written to user.ltx. See R1-PS3-LUM-ADAPT-NOTES.md.
+class CCC_LumAdaptOutput : public CCC_Float
+{
+public:
+	CCC_LumAdaptOutput(LPCSTR N, float* V, float _min, float _max) : CCC_Float(N, V, _min, _max) {}
+
+	virtual void Execute(LPCSTR args)
+	{
+		Msg("~ %s is an output (the R1 luminance adaptation writes it every frame), value ignored", cName);
+	}
+
+	virtual void Info(TInfo& I) { xr_strcpy(I, "output only: adapted luminance (.a), 0 = adaptation off or not ready"); }
+	virtual void Save(IWriter* F) {}
+};
+
+class CCC_LumAdaptOutputRGB : public CCC_Vector3
+{
+public:
+	CCC_LumAdaptOutputRGB(LPCSTR N, Fvector* V, const Fvector _min, const Fvector _max) : CCC_Vector3(N, V, _min, _max) {}
+
+	virtual void Execute(LPCSTR args)
+	{
+		Msg("~ %s is an output (the R1 luminance adaptation writes it every frame), value ignored", cName);
+	}
+
+	virtual void Info(TInfo& I) { xr_strcpy(I, "output only: adapted mean colour (.rgb), 0 = adaptation off or not ready"); }
+	virtual void Save(IWriter* F) {}
+};
+
 //-----------------------------------------------------------------------
 void xrRender_initconsole()
 {
@@ -1343,6 +1376,15 @@ void xrRender_initconsole()
 	CMD4(CCC_Integer, "r1_lum_adapt", &ps_r1_lum_adapt, 0, 1);
 	CMD4(CCC_Float, "r1_lum_adapt_speed", &ps_r1_lum_adapt_speed, 0.05f, 60.f);
 	CMD4(CCC_Float, "r1_lum_adapt_speed_down", &ps_r1_lum_adapt_speed_down, 0.05f, 60.f);
+	// Outputs, for scripts (get_console():get_float("r1_lum_adapt_value")): the engine writes them every frame the
+	// adaptation runs (0 while it is off or not ready). Typing a value only prints a note; they are never saved.
+	CMD4(CCC_LumAdaptOutput, "r1_lum_adapt_value", &ps_r1_lum_adapt_value, -FLT_MAX, FLT_MAX);
+	{
+		Fvector rgb_min, rgb_max;
+		rgb_min.set(-FLT_MAX, -FLT_MAX, -FLT_MAX);
+		rgb_max.set(FLT_MAX, FLT_MAX, FLT_MAX);
+		CMD4(CCC_LumAdaptOutputRGB, "r1_lum_adapt_rgb", &ps_r1_lum_adapt_rgb, rgb_min, rgb_max);
+	}
 
 	// R2
 	CMD4(CCC_Float, "r2_ssa_lod_a", &ps_r2_ssaLOD_A, 16, 96);

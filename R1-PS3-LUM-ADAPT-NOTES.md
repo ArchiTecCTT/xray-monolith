@@ -129,6 +129,49 @@ float gain = (lum_adapt_info.x > 0.5) ? clamp(0.35 / max(lum, 0.02), 0.5, 8.0) :
 When the adaptation is off the texture holds an old value or nothing (reads as 0); always check
 `lum_adapt_info.x`. Works from `ps_2_0` too, it costs one texture read and a few instructions.
 
+### Reading it in a script (`r1_lum_adapt_value`)
+
+Branch `r1-lum-readback`. While the adaptation runs, the engine copies `$user$lum_adapt` to the CPU without stalling
+the GPU and publishes it in two console variables that are **outputs**:
+
+| console var | holds |
+|---|---|
+| `r1_lum_adapt_value` (float) | `.a` of `$user$lum_adapt`: the adapted value of what the meter wrote to alpha |
+| `r1_lum_adapt_rgb` (vector) | `.rgb` of `$user$lum_adapt`: the adapted mean colour |
+
+* Both read **0 whenever the adaptation is off or not ready**: switched off, files or formats missing, no
+  post-process quad for more than 3 frames, the first frames after a start-over, and after `vid_restart`.
+* **Latency: about 2 frames** (the copy queued this frame is read 2 frames later; on a GPU that runs 3 frames behind
+  an older copy is used, so up to about 4 frames). The value is the same one the post-process shader sampled then.
+* Typing a value in the console is harmless: it only prints `~ r1_lum_adapt_value is an output ...` and the engine
+  keeps writing it. Neither is saved to `user.ltx`. Typing the name alone shows the current value.
+* Cost: one 16-byte (or 8-byte) GPU-to-CPU copy per adapted frame, read with `D3DLOCK_DONOTWAIT` from a ring of four
+  1x1 system-memory surfaces created and released with the adaptation targets. Nothing at all while it is off.
+  Full-size scope (second viewport) frames copy nothing and keep the main view's value. R2-R4 never write it.
+
+```lua
+-- nil on an exe without this branch (get_string does not log for an unknown command; get_float would log
+-- "! [r1_lum_adapt_value] Failed to get float value" on every call there)
+local has_lum_readback = get_console():get_string("r1_lum_adapt_value") ~= nil
+
+local function nvg_adapted_lum()
+	if not has_lum_readback then return nil end
+	local lum = get_console():get_float("r1_lum_adapt_value")
+	if lum <= 0 then return nil end -- off / not ready (or a truly black scene): fall back to the manual gain
+	return lum
+end
+
+-- the same formula as the post-process shader, so the marker shows the gain actually applied (about 2 frames ago)
+local lum = nvg_adapted_lum()
+local gain = lum and clamp(0.35 / math.max(lum, 0.02), 0.5, 8.0) or manual_gain
+
+-- optional colour: get_string returns "(r, g, b)"
+local r, g, b = string.match(get_console():get_string("r1_lum_adapt_rgb") or "", "%(([^,]+),%s*([^,]+),%s*([^%)]+)%)")
+```
+
+A meter that can legitimately write 0 to alpha (a black scene) reads the same as "not ready"; write a small floor
+(e.g. `max(lum, 1e-4)`) in `lum_adapt_meter.ps` if the script must tell them apart.
+
 ### The metering shaders (mod-overridable)
 
 Vanilla has none of these files; the mod ships them in `gamedata\shaders\r1\`. If one of the three `.ps` files is
