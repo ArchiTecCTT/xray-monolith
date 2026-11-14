@@ -1,0 +1,25 @@
+// R1 luminance adaptation, step 2 of 3: 64x64 -> 8x8 (16 bilinear taps = an exact 8x8 texel average).
+// The engine also uses this file with a zero step (c_lum_step.xy = 0, point sampled) to copy the 1x1 result into the
+// history target, so it must stay "average of taps at tc + offset * c_lum_step.xy".
+
+uniform sampler2D s_image;
+uniform float4 c_lum_step; // x, y: one output pixel's footprint in source tc, z, w: output size
+
+struct v2p
+{
+	float2 tc : TEXCOORD0;
+};
+
+float4 main_ps_2_0(v2p I) : COLOR
+{
+	float4 sum = 0;
+	for (int y = 0; y < 4; y++)
+	{
+		for (int x = 0; x < 4; x++)
+		{
+			float2 o = (float2(x, y) + 0.5) / 4.0 - 0.5;
+			sum += tex2D(s_image, I.tc + o * c_lum_step.xy);
+		}
+	}
+	return sum / 16.0;
+}

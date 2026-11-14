@@ -507,6 +507,7 @@
     <ClInclude Include="Blender_LaEmB.h" />
     <ClInclude Include="Blender_Model.h" />
     <ClInclude Include="Blender_Screen_GRAY.h" />
+    <ClInclude Include="Blender_lum_adapt.h" />
     <ClInclude Include="Blender_Shadow_World.h" />
     <ClInclude Include="Blender_Vertex.h" />
     <ClInclude Include="Blender_Vertex_aref.h" />
@@ -642,6 +643,7 @@
     <ClCompile Include="Blender_LaEmB.cpp" />
     <ClCompile Include="Blender_Model.cpp" />
     <ClCompile Include="Blender_Screen_GRAY.cpp" />
+    <ClCompile Include="Blender_lum_adapt.cpp" />
     <ClCompile Include="Blender_Shadow_World.cpp" />
     <ClCompile Include="Blender_Vertex.cpp" />
     <ClCompile Include="Blender_Vertex_aref.cpp" />

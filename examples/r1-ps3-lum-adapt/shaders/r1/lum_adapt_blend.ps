@@ -1,0 +1,31 @@
+// R1 luminance adaptation, step 3 of 3: 8x8 -> 1x1, then ease the history towards it.
+// The engine sets c_lum_adapt.x/y = 1 - exp(-dt * speed) for a brighter/darker scene, and w = 1 (start over) on the
+// first frame after the adaptation was off or the post-process quad was not drawn for a while.
+
+uniform sampler2D s_image;    // 8x8
+uniform sampler2D s_lum_prev; // 1x1 history (last frame's result)
+uniform float4 c_lum_step;    // x, y = 1: one output pixel covers the whole 8x8
+uniform float4 c_lum_adapt;   // x: blend factor towards brighter, y: towards darker, z: dt (s), w: 1 = start over
+
+struct v2p
+{
+	float2 tc : TEXCOORD0;
+};
+
+float4 main_ps_2_0(v2p I) : COLOR
+{
+	float4 sum = 0;
+	for (int y = 0; y < 4; y++)
+	{
+		for (int x = 0; x < 4; x++)
+		{
+			float2 o = (float2(x, y) + 0.5) / 4.0 - 0.5;
+			sum += tex2D(s_image, I.tc + o * c_lum_step.xy);
+		}
+	}
+	float4 cur = sum / 16.0;
+	float4 prev = tex2D(s_lum_prev, float2(0.5, 0.5));
+	float k = (cur.a > prev.a) ? c_lum_adapt.x : c_lum_adapt.y;
+	float4 eased = prev + (cur - prev) * k;
+	return (c_lum_adapt.w > 0.5) ? cur : eased;
+}

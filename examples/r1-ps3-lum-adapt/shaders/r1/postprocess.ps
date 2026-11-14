@@ -1,0 +1,39 @@
+// Minimal R1 post-process in ps_3_0 that reads the adapted scene brightness (s_lum_adapt).
+// Needs the r1-ps3-lum-adapt engine build and postprocess.s naming "postprocess_vs3" as its vertex shader.
+// Same inputs as the vanilla R1 post-process: two duality taps, gray, noise, colour base/add.
+
+struct v2p
+{
+	float4 color : COLOR0; // rgb: colour base (0.5 = neutral), a: 1 - noise amount
+	float4 gray : COLOR1;  // rgb: gray weights, a: 1 - gray amount
+	float2 tc0 : TEXCOORD0; // duality tap 1
+	float2 tc1 : TEXCOORD1; // duality tap 2
+	float2 tc2 : TEXCOORD2; // noise
+};
+
+uniform sampler2D s_base0;
+uniform sampler2D s_base1;
+uniform sampler2D s_noise;
+uniform sampler2D s_lum_adapt;  // 1x1: rgb = adapted mean colour, a = adapted mean luminance (from lum_adapt_meter)
+uniform float4 lum_adapt_info;  // x = 1 when s_lum_adapt is live this frame, y = seconds since it (re)started,
+                                // z = speed up, w = speed down (1/s)
+uniform float4 c_brightness;    // colour add
+
+float4 main_ps_3_0(v2p I) : COLOR
+{
+	float3 image = (tex2D(s_base0, I.tc0).rgb + tex2D(s_base1, I.tc1).rgb) * 0.5;
+
+	// auto-gain: aim the adapted mean luminance at 0.35, between x0.5 and x8 (off: x1)
+	float lum = tex2D(s_lum_adapt, float2(0.5, 0.5)).a;
+	float gain = (lum_adapt_info.x > 0.5) ? clamp(0.35 / max(lum, 0.02), 0.5, 8.0) : 1.0;
+	image *= gain;
+
+	float gray = dot(image, I.gray.rgb);
+	image = lerp(gray.xxx, image, I.gray.a);
+
+	float3 noised = image * tex2D(s_noise, I.tc2).rgb * 2.0;
+	image = lerp(noised, image, I.color.a);
+
+	image = (image * I.color.rgb + c_brightness.rgb) * 2.0;
+	return float4(image, 1.0);
+}

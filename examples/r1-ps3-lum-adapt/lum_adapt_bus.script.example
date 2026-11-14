@@ -1,0 +1,26 @@
+-- Turning the R1 luminance adaptation on and off from Lua (r1-ps3-lum-adapt engine build).
+-- Preferred: the shader bus lane "lum_adapt" (lives only as long as the game process, nothing written to user.ltx).
+--   x > 0 = on, x < 0 = off, x = 0 = leave it to the r1_lum_adapt console var
+--   y > 0 = speed towards a brighter scene (1/s), z > 0 = speed towards a darker scene (1/s); 0 = console values
+-- Fallback without the bus: get_console():execute("r1_lum_adapt 1") / ("r1_lum_adapt 0") (saved to user.ltx).
+
+local lum_token = nil
+
+function on_game_start()
+	if shader_bus and shader_bus.try_register then
+		lum_token = shader_bus.try_register("lum_adapt", "zz NVG Overhaul",
+			"R1 luminance adaptation: x>0 on, x<0 off, y speed up, z speed down")
+	end
+end
+
+function nvg_lum_adapt(on)
+	if lum_token then
+		if on then
+			shader_bus.set(lum_token, 1, 6, 2, 0) -- on, ~0.4 s to brighten, ~1.2 s to darken (90%)
+		else
+			shader_bus.set(lum_token, 0, 0, 0, 0)
+		end
+	else
+		get_console():execute(on and "r1_lum_adapt 1" or "r1_lum_adapt 0")
+	end
+end

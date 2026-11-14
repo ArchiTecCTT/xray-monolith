@@ -35,6 +35,22 @@ private:
 	ref_shader s_postprocess[2]; //	Igor: 0 - plain, 1 - colormapped
 	ref_shader s_postprocess_D[2]; //	Igor: 0 - plain, 1 - colormapped
 	ref_geom g_postprocess;
+	// the same quad for a pass that names a vertex shader (ps_3_0 needs vs_3_0): POSITION in clip space, not XYZRHW
+	ref_geom g_postprocess_vs;
+
+	// R1 luminance adaptation (r1_lum_adapt / bus lane "lum_adapt"), see R1-PS3-LUM-ADAPT-NOTES.md
+	int lum_state; // 0 = not created yet, 1 = ready, -1 = unavailable (files or formats missing) until vid_restart
+	ref_rt rt_lum_64; // 64x64 metered scene
+	ref_rt rt_lum_8; // 8x8
+	ref_rt rt_lum_adapt; // 1x1 adapted value, sampled by post-process shaders as $user$lum_adapt
+	ref_rt rt_lum_prev; // 1x1 history (last frame's adapted value)
+	IBlender* b_lum;
+	ref_shader s_lum; // engine passes (reduce, blend, copy, default meter)
+	ref_shader s_lum_meter; // shaders\r1\lum_adapt_meter.s when a mod ships one
+	u32 lum_frame; // last frame the adaptation ran, 0 = never
+	float lum_time; // seconds since the adaptation (re)started
+	float lum_last_time; // Device.fTimeGlobal of the last run
+	Fvector4 lum_info; // post-process constant lum_adapt_info: live 0/1, lum_time, speed up, speed down
 
 	float im_noise_time;
 	u32 im_noise_shift_w;
@@ -70,6 +86,12 @@ private:
 	BOOL NeedPostProcess();
 	BOOL Available() { return bAvailable; }
 	BOOL Perform();
+
+	bool lum_wanted(float& speed_up, float& speed_down);
+	bool lum_create();
+	void lum_destroy();
+	void lum_update();
+	void lum_pass(ShaderElement* E, const ref_rt& target, float step_x, float step_y, const Fvector4* adapt);
 
 	void calc_tc_noise(Fvector2& p0, Fvector2& p1);
 	void calc_tc_duality_ss(Fvector2& r0, Fvector2& r1, Fvector2& l0, Fvector2& l1);
