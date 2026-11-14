@@ -1,4 +1,5 @@
 #include "stdafx.h"
+#include "../xrRender/ResourceManager.h"
 #include "../xrRender/fbasicvisual.h"
 #include "../../xrEngine/fmesh.h"
 #include "../../xrEngine/xrLevel.h"
@@ -108,6 +109,10 @@ void CRender::level_Unload()
 	if (0 == g_pGameLevel) return;
 	if (!b_loaded) return;
 
+	// Let queued background texture loads finish before anything below frees
+	// shaders/textures: a queued task holds a raw CTexture pointer.
+	dxRenderDeviceRender::Instance().Resources->WaitTextureLoads();
+
 	GMBase.clear();
 
 	u32 I;
@@ -166,6 +171,42 @@ void CRender::level_Unload()
 
 	//*** Shaders
 	Shaders.clear_and_free();
+
+	//*** Unused models / textures (r__clear_models_on_unload, r__clear_resources_on_unload)
+	// A save load only discards model clones (models_Clear(FALSE)), never the
+	// base models, so every model ever loaded - and its textures - stayed in
+	// memory until the game was closed. R2/R4 had this block, R1 did not.
+	const bool clearResources = psDeviceFlags2.test(rsClearAllResources);
+	if (psDeviceFlags2.test(rsClearModels) || clearResources)
+	{
+		CResourceManager* RM = dxRenderDeviceRender::Instance().Resources;
+
+		u32 tex_mem_before = 0, tex_cnt_before = 0, lm_mem = 0, lm_cnt = 0;
+		RM->_GetMemoryUsage(tex_mem_before, tex_cnt_before, lm_mem, lm_cnt);
+		tex_mem_before += lm_mem;
+		tex_cnt_before += lm_cnt;
+		const u32 models_before = Models->BaseModelsCount();
+
+		Models->ClearPool(FALSE); // clones parked since net_Stop
+		const u32 models_freed = Models->PurgeUnused();
+
+		if (clearResources)
+		{
+			RM->UnloadAllTexturesOnLevelUnload();
+			dxRenderDeviceRender::Instance().ResourcesDestroyNecessaryTextures();
+			RM->Evict();
+		}
+
+		u32 tex_mem_after = 0, tex_cnt_after = 0;
+		RM->_GetMemoryUsage(tex_mem_after, tex_cnt_after, lm_mem, lm_cnt);
+		tex_mem_after += lm_mem;
+		tex_cnt_after += lm_cnt;
+
+		Msg("* [R1 unload purge]: models %u -> %u (freed %u), textures %u -> %u, D3D textures %u K -> %u K%s",
+			models_before, Models->BaseModelsCount(), models_freed,
+			tex_cnt_before, tex_cnt_after, tex_mem_before / 1024, tex_mem_after / 1024,
+			clearResources ? " (surfaces unloaded, reload on use)" : "");
+	}
 
 	//. dbg
 #ifdef DEBUG

@@ -198,7 +198,14 @@ void CRender::level_Unload()
 	const bool clearResources = psDeviceFlags2.test(rsClearAllResources);
 	if (psDeviceFlags2.test(rsClearModels) || clearResources)
 	{
+		// No background texture load may still hold a texture we free below
+		dxRenderDeviceRender::Instance().Resources->WaitTextureLoads();
 		Models->ClearPool(true);
+		// ClearPool only sees clones still parked in the pool; net_Stop already
+		// emptied it with models_Clear(FALSE), which leaves the base models
+		// loaded at refs == 0. Free those too.
+		const u32 models_freed = Models->PurgeUnused();
+		Msg("* [unload purge]: freed %u unused base models, %u left", models_freed, Models->BaseModelsCount());
 		Visuals.clear_and_free();
 		if (clearResources)
 		{
