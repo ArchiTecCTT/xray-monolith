@@ -500,6 +500,7 @@ void CCameraManager::ApplyDevice(float _viewport_near)
 	Device.fFOV = m_cam_info.fFov;
 	Device.fASPECT = m_cam_info.fAspect;
 	float proj_far = m_cam_info.fFar;
+	bool svp_lens_fit = false;
 	//--#SM+# Begin-- +SecondVP+
 	// Recalculate scene FOV for SecondVP frame
 	if (Device.m_SecondViewport.IsSVPFrame())
@@ -513,11 +514,35 @@ void CCameraManager::ApplyDevice(float _viewport_near)
 
 		// Mark the second viewport camera as ready
 		Device.m_SecondViewport.isCamReady = true;
+
+		// SVP lens (R1, r1_svp_fit): the lens shaders show a square of the SVP image: its full height and the middle
+		// height/width of its width (tc.x = (tc.x - 0.5) / (screen_res.x / screen_res.y) + 0.5). With the normal
+		// projection that is |x/z| <= tan(fov/2) * (h/w) / fAspect and |y/z| <= tan(fov/2). Render only that square
+		// (plus the margin) into the square work target: same vertical FOV, same centre, aspect chosen so the
+		// horizontal extent matches too (1 for the usual fAspect = h/w).
+		CRenderDevice::CSecondVPParams& svp = Device.m_SecondViewport;
+		const u32 work = svp.lensWork;
+		if (ps_r1_svp_fit && work >= 64 && Device.fHeight_2 > 0.f && Device.fFOV > 0.f && Device.fFOV < 179.f)
+		{
+			const u32 margin = CRenderDevice::CSecondVPParams::LensMarginPx(work);
+			const u32 lens = work - 2 * margin;
+			// the lens square is 'lens' pixels of the 'work' pixel image: widen the half-angle tangent to match
+			const float hat = tanf(deg2rad(Device.fFOV) * .5f) * float(work) / float(lens);
+			const float aspect = m_cam_info.fAspect * (Device.fWidth_2 / Device.fHeight_2);
+			Device.mProject.build_projection_HAT(hat, aspect, _viewport_near, proj_far);
+			svp.lensFitFrame = Device.dwFrame;
+			svp.lensMarginPx = margin;
+			svp.lensHAT = hat;
+			svp.lensAspect = aspect;
+			svp.lensFov = Device.fFOV;
+			svp_lens_fit = true;
+		}
 	}
 	else
 		Device.m_SecondViewport.isCamReady = false;
 
-	Device.mProject.build_projection(deg2rad(Device.fFOV), m_cam_info.fAspect, _viewport_near, proj_far);
+	if (!svp_lens_fit)
+		Device.mProject.build_projection(deg2rad(Device.fFOV), m_cam_info.fAspect, _viewport_near, proj_far);
 	Device.mProjectHud.build_projection(deg2rad(psHUD_FOV * 83.f), Device.fASPECT, R_VIEWPORT_NEAR, m_cam_info.fFar);
 
 	Device.mInvProject.invert(Device.mProject);

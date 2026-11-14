@@ -160,6 +160,28 @@ public:
 			// minimum delay is 2 (every 2nd frame is the SVP frame)
 			frameDelay = (iDelay < 2) ? u8(2) : iDelay;
 		}
+
+		// SVP lens (R1, see SVP-LITE-NOTES.md "Lens fit and reprojection")
+		CSecondVPParams() : isActive(false), frameDelay(2), isCamReady(false), forceFrame(0), prevForceFrame(0),
+			lensWork(0), lensFitFrame(0), lensMarginPx(0), lensHAT(0.f), lensAspect(1.f), lensFov(0.f) {}
+
+		// ask for an SVP frame on the next frame (called by the renderer during a normal frame). A regular SVP frame
+		// that falls within frameDelay/2 frames after a forced one is skipped, so a forced frame replaces it.
+		void RequestSVPFrame();
+
+		u32 forceFrame; // the last forced SVP frame (may be the next frame), 0 = none
+		u32 prevForceFrame; // the forced SVP frame before it
+
+		u32 lensWork; // set by the R1 renderer: size of the square work target the SVP frame is drawn into, 0 = none
+		// set by CCameraManager::ApplyDevice when an SVP frame uses the lens-fitted projection (r1_svp_fit)
+		u32 lensFitFrame; // Device.dwFrame of that SVP frame
+		u32 lensMarginPx; // work-image pixels on each side of the lens square
+		float lensHAT; // tan of half the vertical angle the whole work image covers
+		float lensAspect; // projection aspect (1 for a square lens, see ApplyDevice)
+		float lensFov; // vertical lens FOV (degrees) of that frame, from hud_params.y
+
+		// pixels of margin on each side of the lens square in a work image of 'work' pixels (r1_svp_margin)
+		static u32 LensMarginPx(u32 work);
 	};	
 	
 private:
@@ -532,6 +554,10 @@ extern ENGINE_API int ps_r__svp_delay;
 extern ENGINE_API float ps_r__svp_far;
 extern ENGINE_API int ps_r__svp_skip_extras;
 extern ENGINE_API int ps_r1_svp_size; // R1: size (pixels) of the small SVP render target, 0 = off (needs vid_restart)
+extern ENGINE_API int ps_r1_svp_fit; // R1: lens-fitted square SVP frustum (needs r1_svp_size > 0)
+extern ENGINE_API float ps_r1_svp_margin; // R1: extra view around the lens square, fraction of the lens width per side
+extern ENGINE_API int ps_r1_svp_reproject; // R1: shift the last SVP image with the aim on frames in between
+extern ENGINE_API int ps_r1_svp_stats; // R1: log normal vs SVP frame timings every ~2 s
 
 #ifndef _EDITOR
 #define RDEVICE Device

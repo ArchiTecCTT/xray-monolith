@@ -431,11 +431,128 @@ extern float r_ssaLOD_A, r_ssaLOD_B;
 extern float r_ssaGLOD_start, r_ssaGLOD_end;
 extern float r_ssaHZBvsTEX;
 
+// r1_svp_stats: every ~2 s log normal vs scope SVP frames (see SVP-LITE-NOTES.md). A frame is measured from one
+// Calculate() to the next (wall time); "scene" is the CPU time of Calculate() + Render(); draw calls / triangles
+// are the backend counters at the end of Render() (3D scene only, the UI drawn after it is not counted).
+namespace
+{
+struct svp_stats_t
+{
+	bool running;
+	bool frame_svp; // the frame being measured is an SVP frame
+	bool scene_open; // Calculate() of this frame ran, Render() not yet
+	CTimerBase frame_timer;
+	CTimerBase scene_timer;
+	CTimerBase window_timer;
+	float frame_ms[2]; // [0] normal, [1] SVP
+	u32 frames[2];
+	float scene_ms[2];
+	u32 scenes[2];
+	double calls[2];
+	double polys[2];
+
+	void reset_sums()
+	{
+		for (int k = 0; k < 2; ++k)
+		{
+			frame_ms[k] = 0.f;
+			frames[k] = 0;
+			scene_ms[k] = 0.f;
+			scenes[k] = 0;
+			calls[k] = 0.0;
+			polys[k] = 0.0;
+		}
+	}
+};
+svp_stats_t svp_stats = {};
+
+void svp_stats_log(float window, CRenderTarget* T)
+{
+	float avg_ms[2], avg_scene[2], avg_calls[2], avg_ktris[2];
+	for (int k = 0; k < 2; ++k)
+	{
+		avg_ms[k] = svp_stats.frames[k] ? svp_stats.frame_ms[k] / float(svp_stats.frames[k]) : 0.f;
+		const float n = svp_stats.scenes[k] ? float(svp_stats.scenes[k]) : 1.f;
+		avg_scene[k] = svp_stats.scene_ms[k] / n;
+		avg_calls[k] = float(svp_stats.calls[k]) / n;
+		avg_ktris[k] = float(svp_stats.polys[k]) / n / 1000.f;
+	}
+	const u32 forced = T ? T->svp_stat_forced : 0;
+	const u32 copies = T ? T->svp_stat_copies : 0;
+	Msg("* SVP stats %.1fs: shown %.1f fps | normal %u fr %.1f ms (scene %.1f ms, %.0f calls, %.0fk tris) | "
+		"SVP %u fr %.1f ms (scene %.1f ms, %.0f calls, %.0fk tris) | SVP %.1f/s, forced %.1f/s, lens shifts %.1f/s",
+		window, float(svp_stats.frames[0]) / window,
+		svp_stats.frames[0], avg_ms[0], avg_scene[0], avg_calls[0], avg_ktris[0],
+		svp_stats.frames[1], avg_ms[1], avg_scene[1], avg_calls[1], avg_ktris[1],
+		float(svp_stats.frames[1]) / window, float(forced) / window, float(copies) / window);
+	if (T)
+	{
+		T->svp_stat_forced = 0;
+		T->svp_stat_copies = 0;
+	}
+}
+
+void svp_stats_begin(CRenderTarget* T)
+{
+	if (!ps_r1_svp_stats)
+	{
+		svp_stats.running = false;
+		return;
+	}
+	const bool svp = Device.m_SecondViewport.IsSVPFrame();
+	if (!svp_stats.running)
+	{
+		svp_stats.running = true;
+		svp_stats.reset_sums();
+		svp_stats.frame_timer.Start();
+		svp_stats.window_timer.Start();
+		if (T)
+		{
+			T->svp_stat_forced = 0;
+			T->svp_stat_copies = 0;
+		}
+	}
+	else
+	{
+		// the frame that just ended
+		const int k = svp_stats.frame_svp ? 1 : 0;
+		svp_stats.frame_ms[k] += svp_stats.frame_timer.GetElapsed_sec() * 1000.f;
+		svp_stats.frames[k]++;
+		svp_stats.frame_timer.Start();
+
+		const float window = svp_stats.window_timer.GetElapsed_sec();
+		if (window >= 2.f)
+		{
+			svp_stats_log(window, T);
+			svp_stats.reset_sums();
+			svp_stats.window_timer.Start();
+		}
+	}
+	svp_stats.frame_svp = svp;
+	svp_stats.scene_open = true;
+	svp_stats.scene_timer.Start();
+}
+
+void svp_stats_end()
+{
+	if (!svp_stats.running || !svp_stats.scene_open)
+		return;
+	svp_stats.scene_open = false;
+	const int k = svp_stats.frame_svp ? 1 : 0;
+	svp_stats.scene_ms[k] += svp_stats.scene_timer.GetElapsed_sec() * 1000.f;
+	svp_stats.scenes[k]++;
+	svp_stats.calls[k] += double(RCache.stat.calls);
+	svp_stats.polys[k] += double(RCache.stat.polys);
+}
+}
+
 void CRender::Calculate()
 {
 #ifdef _GPA_ENABLED
 	TAL_SCOPED_TASK_NAMED("CRender::Calculate()");
 #endif // _GPA_ENABLED
+
+	svp_stats_begin(Target);
 
 	Device.Statistic->RenderCALC.Begin();
 
@@ -600,6 +717,8 @@ void CRender::Render()
 
 	// HUD
 	Device.Statistic->RenderDUMP.End();
+
+	svp_stats_end();
 }
 
 void CRender::ApplyBlur4(FVF::TL4uv* pv, u32 w, u32 h, float k)

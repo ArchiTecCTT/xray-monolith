@@ -18,6 +18,24 @@ private:
 	u32 svp_h;
 	IDirect3DSurface9* zb_svp;
 
+	// SVP lens (r1_svp_fit / r1_svp_reproject), see SVP-LITE-NOTES.md
+	u32 svp_vp2_w; // size of $user$viewport2
+	u32 svp_vp2_h;
+	u32 svp_vp2_lens; // lens square (pixels) $user$viewport2 was shaped for, 0 = square viewport2 (old layout)
+	BOOL svp_lens_valid; // the work target holds a lens-fitted SVP image that can be shifted
+	u32 svp_lens_frame; // Device.dwFrame it was rendered on
+	u32 svp_lens_margin; // its margin (pixels on each side of the lens square)
+	float svp_lens_hat; // its projection: tan of half the vertical angle of the whole work image
+	float svp_lens_aspect; // its projection aspect
+	float svp_lens_fov; // the lens FOV (hud_params.y) it was rendered with
+	Fmatrix svp_lens_view; // its view matrix
+	int svp_shift_x; // shift (work pixels) of the lens square currently in $user$viewport2
+	int svp_shift_y;
+
+	void svp_lens_rect(u32 lens, RECT& r); // where the lens shaders read the lens square in $user$viewport2
+	void svp_publish(int shift_x, int shift_y); // copy the (shifted) lens square of the work image to $user$viewport2
+	void svp_reproject(); // normal frame: follow the aim, ask for a fresh SVP frame when needed
+
 	BOOL bAvailable;
 	u32 rtWidth;
 	u32 rtHeight;
@@ -107,6 +125,10 @@ public:
 	BOOL SVPSmallFrame(); // small SVP target is enabled and this frame is an SVP frame
 	u32 get_svp_width() { return svp_w; }
 	u32 get_svp_height() { return svp_h; }
+
+	// r1_svp_stats counters (reset by the stats log)
+	u32 svp_stat_forced; // forced SVP frames rendered (r1_svp_reproject)
+	u32 svp_stat_copies; // lens copies into $user$viewport2 on normal frames (r1_svp_reproject)
 
 	void DoAsyncScreenshot();
 

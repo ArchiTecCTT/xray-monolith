@@ -37,6 +37,20 @@ CRenderTarget::CRenderTarget()
 	svp_w = 0;
 	svp_h = 0;
 	zb_svp = 0;
+	svp_vp2_w = 0;
+	svp_vp2_h = 0;
+	svp_vp2_lens = 0;
+	svp_lens_valid = FALSE;
+	svp_lens_frame = 0;
+	svp_lens_margin = 0;
+	svp_lens_hat = 1.f;
+	svp_lens_aspect = 1.f;
+	svp_lens_fov = 0.f;
+	svp_lens_view.identity();
+	svp_shift_x = 0;
+	svp_shift_y = 0;
+	svp_stat_forced = 0;
+	svp_stat_copies = 0;
 
 	param_color_map_influence = 0.0f;
 	param_color_map_interpolate = 0.0f;
@@ -90,7 +104,32 @@ BOOL CRenderTarget::Create()
 	if (ps_r1_svp_size > 0)
 	{
 		const u32 svp_sz = u32(clampr(ps_r1_svp_size, 64, 2048));
-		rt_secondVP.create(RTname_SecondVP, svp_sz, svp_sz, HW.Caps.fTarget);
+		// SVP lens (r1_svp_fit): the lens shaders read the middle height/width of $user$viewport2's width and all of
+		// its height as the lens square. Shape viewport2 so that square is exactly the lens square of the work
+		// image (lens x lens pixels, copied 1:1): height = lens, width = lens * width/height of the screen.
+		u32 vp2_w = svp_sz, vp2_h = svp_sz, vp2_lens = 0;
+		if (ps_r1_svp_fit && Device.dwWidth > Device.dwHeight && Device.dwHeight > 0)
+		{
+			const u32 lens = svp_sz - 2 * CRenderDevice::CSecondVPParams::LensMarginPx(svp_sz);
+			const float wide = float(lens) * float(Device.dwWidth) / float(Device.dwHeight);
+			// same parity as 'lens', so the lens square sits exactly in the middle
+			const u32 w = lens + 2 * u32(iFloor((wide - float(lens)) * .5f + .5f));
+			if (w <= 4096)
+			{
+				vp2_w = w;
+				vp2_h = lens;
+				vp2_lens = lens;
+			}
+		}
+		rt_secondVP.create(RTname_SecondVP, vp2_w, vp2_h, HW.Caps.fTarget);
+		if (vp2_lens && !rt_secondVP->valid())
+		{
+			Msg("! SVP lens: can't create %ux%u lens-shaped second viewport, using %ux%u", vp2_w, vp2_h, svp_sz, svp_sz);
+			rt_secondVP.destroy();
+			vp2_w = vp2_h = svp_sz;
+			vp2_lens = 0;
+			rt_secondVP.create(RTname_SecondVP, vp2_w, vp2_h, HW.Caps.fTarget);
+		}
 		rt_svp_work.create(RTname_SecondVP_work, svp_sz, svp_sz, HW.Caps.fTarget);
 		HRESULT svp_hr = E_FAIL;
 		if (rt_secondVP->valid() && rt_svp_work->valid())
@@ -100,10 +139,17 @@ BOOL CRenderTarget::Create()
 			svp_small = TRUE;
 			svp_w = svp_sz;
 			svp_h = svp_sz;
+			svp_vp2_w = vp2_w;
+			svp_vp2_h = vp2_h;
+			svp_vp2_lens = vp2_lens;
 			Msg("* SVP-lite: small second viewport %ux%u", svp_sz, svp_sz);
+			if (vp2_lens)
+				Msg("* SVP lens: $user$viewport2 %ux%u, lens square %ux%u", vp2_w, vp2_h, vp2_lens, vp2_lens);
 			// default-pool targets start undefined; clear so the lens is black, not garbage, until the first SVP frame is published
 			HW.pDevice->ColorFill(rt_secondVP->pRT, nullptr, D3DCOLOR_XRGB(0, 0, 0));
 			HW.pDevice->ColorFill(rt_svp_work->pRT, nullptr, D3DCOLOR_XRGB(0, 0, 0));
+			// lets CCameraManager::ApplyDevice build the lens-fitted projection (r1_svp_fit)
+			Device.m_SecondViewport.lensWork = svp_sz;
 		}
 		else
 		{
@@ -114,7 +160,10 @@ BOOL CRenderTarget::Create()
 		}
 	}
 	if (!svp_small)
+	{
+		Device.m_SecondViewport.lensWork = 0;
 		rt_secondVP.create(RTname_SecondVP, Device.dwWidth, Device.dwHeight, HW.Caps.fTarget); //--#SM+#-- +SecondVP+
+	}
 	rt_ui_pda.create(RTname_pda_ui, Device.dwWidth, Device.dwHeight, HW.Caps.fTarget);
 
 	if ((rtHeight != Device.dwHeight) || (rtWidth != Device.dwWidth))
@@ -164,6 +213,7 @@ BOOL CRenderTarget::Create()
 
 CRenderTarget::~CRenderTarget()
 {
+	Device.m_SecondViewport.lensWork = 0;
 	_RELEASE(pFB);
 	_RELEASE(pTempZB);
 	_RELEASE(ZB);
@@ -311,6 +361,9 @@ void CRenderTarget::Begin()
 	}
 	*/
 
+	// SVP lens: on a normal frame, move the lens image with the aim (r1_svp_reproject)
+	svp_reproject();
+
 	// SVP-lite: SVP frame goes into the small offscreen RT (no supersample / post-process on it)
 	svp_small_frame = SVPSmallFrame();
 	if (svp_small_frame)
@@ -402,6 +455,118 @@ void CRenderTarget::DoAsyncScreenshot()
 	}
 }
 
+// copy a rect between two render-target surfaces: GPU StretchRect (point for a 1:1 copy, linear when scaled), the old
+// D3DX copy if the driver refuses
+static void svp_copy(IDirect3DSurface9* src, const RECT* src_rect, IDirect3DSurface9* dst, const RECT* dst_rect, bool same_size)
+{
+	if (SUCCEEDED(HW.pDevice->StretchRect(src, src_rect, dst, dst_rect, same_size ? D3DTEXF_POINT : D3DTEXF_LINEAR)))
+		return;
+	if (!same_size && SUCCEEDED(HW.pDevice->StretchRect(src, src_rect, dst, dst_rect, D3DTEXF_POINT)))
+		return;
+	D3DXLoadSurfaceFromSurface(dst, 0, dst_rect, src, 0, src_rect, D3DX_DEFAULT, 0);
+}
+
+void CRenderTarget::svp_lens_rect(u32 lens, RECT& r)
+{
+	const u32 W = svp_vp2_w, H = svp_vp2_h;
+	if (svp_vp2_lens && lens == svp_vp2_lens)
+	{
+		// viewport2 was shaped for this lens square: 1:1, in the middle
+		r.left = LONG((W - lens) / 2);
+		r.top = 0;
+		r.right = r.left + LONG(lens);
+		r.bottom = LONG(lens);
+		return;
+	}
+	// otherwise the lens shaders read the full height and the middle height/width of the width (scaled copy)
+	u32 w = u32(clampr(iFloor(float(W) * float(Device.dwHeight) / float(Device.dwWidth) + .5f), 1, int(W)));
+	if ((W - w) & 1)
+		w += (w < W) ? 1 : u32(-1);
+	r.left = LONG((W - w) / 2);
+	r.top = 0;
+	r.right = r.left + LONG(w);
+	r.bottom = LONG(H);
+}
+
+void CRenderTarget::svp_publish(int shift_x, int shift_y)
+{
+	const int M = int(svp_lens_margin);
+	const u32 lens = svp_w - 2 * svp_lens_margin;
+	RECT src;
+	src.left = M + shift_x;
+	src.top = M + shift_y;
+	src.right = src.left + LONG(lens);
+	src.bottom = src.top + LONG(lens);
+	RECT dst;
+	svp_lens_rect(lens, dst);
+	const bool same_size = u32(dst.right - dst.left) == lens && u32(dst.bottom - dst.top) == lens;
+	// the lens edge reads up to half a texel past the square (the width of viewport2 is rounded): copy one more
+	// column on each side when there is room, so bilinear filtering does not blend in the unused sides
+	if (same_size && dst.left >= 1 && u32(dst.right) + 1 <= svp_vp2_w && src.left >= 1 && u32(src.right) + 1 <= svp_w)
+	{
+		src.left--;
+		src.right++;
+		dst.left--;
+		dst.right++;
+	}
+	svp_copy(rt_svp_work->pRT, &src, rt_secondVP->pRT, &dst, same_size);
+}
+
+void CRenderTarget::svp_reproject()
+{
+	CRenderDevice::CSecondVPParams& svp = Device.m_SecondViewport;
+	// no margin = nothing to shift into (r1_svp_margin 0): keep the plain schedule
+	if (!svp_lens_valid || !svp_lens_margin || !ps_r1_svp_reproject || !svp.IsSVPActive() || svp.IsSVPFrame())
+		return;
+	if (!svp_small || !rt_svp_work._get() || !rt_svp_work->pRT || !rt_secondVP._get() || !rt_secondVP->pRT)
+		return;
+
+	bool fresh = false;
+
+	// an old image (the scope was lowered and raised again, a pause in SVP frames): render a new one
+	if (Device.dwFrame - svp_lens_frame > 2u * svp.GetSVPFrameDelay() + 2u)
+		fresh = true;
+
+	// the zoom changed: the shift would not be right any more
+	if (g_pGamePersistent && _abs(g_pGamePersistent->m_pGShaderConstants->hud_params.y - svp_lens_fov) > 0.01f)
+		fresh = true;
+
+	// where the current aim lands in the last SVP image (pure rotation; moving the camera is not compensated)
+	int sx = svp_shift_x, sy = svp_shift_y;
+	Fvector v;
+	svp_lens_view.transform_dir(v, Device.vCameraDirection);
+	if (v.z > EPS_L && svp_lens_hat > EPS_S)
+	{
+		const float half = float(svp_w) * .5f;
+		const float fx = (v.x / v.z) * svp_lens_aspect / svp_lens_hat * half; // + = right
+		const float fy = -(v.y / v.z) / svp_lens_hat * half; // + = down (pixel rows)
+		const int M = int(svp_lens_margin);
+		const float lim = float(M) + 1.f;
+		sx = iFloor(clampr(fx, -lim, lim) + .5f);
+		sy = iFloor(clampr(fy, -lim, lim) + .5f);
+		if (sx < -M || sx > M || sy < -M || sy > M)
+		{
+			// out of margin: show the edge of what we have and render a new image on the next frame
+			fresh = true;
+			sx = clampr(sx, -M, M);
+			sy = clampr(sy, -M, M);
+		}
+	}
+	else
+		fresh = true;
+
+	if (fresh)
+		svp.RequestSVPFrame();
+
+	if (sx != svp_shift_x || sy != svp_shift_y)
+	{
+		svp_shift_x = sx;
+		svp_shift_y = sy;
+		svp_publish(sx, sy);
+		svp_stat_copies++;
+	}
+}
+
 BOOL CRenderTarget::SVPSmallFrame()
 {
 	// the surfaces must exist (they are recreated with this object on every device reset)
@@ -432,9 +597,30 @@ void CRenderTarget::End()
 		D3DVIEWPORT9 base_vp = {0, 0, curWidth, curHeight, 0, 1.f};
 		CHK_DX(HW.pDevice->SetViewport(&base_vp));
 
-		// publish the finished image as $user$viewport2 (small, same-size GPU copy)
-		if (FAILED(HW.pDevice->StretchRect(rt_svp_work->pRT, nullptr, rt_secondVP->pRT, nullptr, D3DTEXF_POINT)))
-			D3DXLoadSurfaceFromSurface(rt_secondVP->pRT, 0, 0, rt_svp_work->pRT, 0, 0, D3DX_DEFAULT, 0);
+		CRenderDevice::CSecondVPParams& svp = Device.m_SecondViewport;
+		if (svp.forceFrame == Device.dwFrame)
+			svp_stat_forced++;
+
+		if (svp.lensFitFrame == Device.dwFrame && svp.lensMarginPx * 4 <= svp_w)
+		{
+			// SVP lens: this frame used the lens-fitted projection (CCameraManager::ApplyDevice): keep what is needed
+			// to shift it later and publish its lens square
+			svp_lens_valid = TRUE;
+			svp_lens_frame = Device.dwFrame;
+			svp_lens_margin = svp.lensMarginPx;
+			svp_lens_hat = svp.lensHAT;
+			svp_lens_aspect = svp.lensAspect;
+			svp_lens_fov = svp.lensFov;
+			svp_lens_view.set(Device.mView);
+			svp_shift_x = 0;
+			svp_shift_y = 0;
+			svp_publish(0, 0);
+			return;
+		}
+
+		// publish the finished image as $user$viewport2 (small GPU copy; scaled if viewport2 was shaped for the lens)
+		svp_lens_valid = FALSE;
+		svp_copy(rt_svp_work->pRT, nullptr, rt_secondVP->pRT, nullptr, svp_vp2_w == svp_w && svp_vp2_h == svp_h);
 		return;
 	}
 
