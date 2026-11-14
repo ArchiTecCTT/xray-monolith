@@ -33,6 +33,7 @@
 #include "HUDManager.h"
 #include "WeaponMagazinedWGrenade.h"
 #include "../xrEngine/GameMtlLib.h"
+#include "../xrEngine/svp_lens_zoom.h"
 #include "../Layers/xrRender/xrRender_console.h"
 #include "pch_script.h"
 #include "script_game_object.h"
@@ -133,6 +134,12 @@ CWeapon::CWeapon()
 	m_zoom_params.m_pVision = NULL;
 	m_zoom_params.m_pNight_vision = NULL;
 	m_zoom_params.m_fSecondVPFovFactor = 0.0f;
+	m_zoom_params.m_fSecondVPFovMax = 0.f;
+	m_zoom_params.m_iSecondVPZoomSteps = 0;
+	m_zoom_params.m_iSecondVPZoomStartStep = 0;
+	m_lens_zoom_step = 0;
+	m_lens_fov_cur = 0.f;
+	m_lens_fov_frame = 0;
 
 	m_altAimPos = false;
 	m_zoomtype = 0;
@@ -381,7 +388,7 @@ void CWeapon::UpdateZoomParams() {
 		}
 
 
-		if (m_zoom_params.m_bUseDynamicZoom) {
+		if (m_zoom_params.m_bUseDynamicZoom && !LensZoomApplies()) {
 			SetZoomFactor(m_fRTZoomFactor / zoom_multiple);
 		} else {
 			SetZoomFactor(m_zoom_params.m_fScopeZoomFactor);
@@ -899,6 +906,7 @@ void CWeapon::Load(LPCSTR section)
 		m_bAutoSpawnAmmo = TRUE;
 
 	m_zoom_params.m_fSecondVPFovFactor = READ_IF_EXISTS(pSettings, r_float, section, "scope_lense_fov", 0.0f);
+	LoadLensZoom(section);
 	m_zoom_params.m_bHideCrosshairInZoom = true;
 
 	if (pSettings->line_exist(hud_sect, "zoom_hide_crosshair"))
@@ -1346,6 +1354,8 @@ void CWeapon::OnH_A_Chield()
 
 void CWeapon::OnActiveItem()
 {
+	// scroll-wheel lens zoom: kept while equipped, back to the start zoom when equipped again
+	ResetLensZoom();
 	//. from Activate
 	UpdateAddonsVisibility();
 	m_BriefInfo_CalcFrame = 0;
@@ -2192,7 +2202,8 @@ void CWeapon::OnZoomIn()
 
 	//Msg("m_fRTZoomFactor %f, scope_scrollpower %f", m_fRTZoomFactor, scope_scrollpower);
 
-	if (m_zoom_params.m_bUseDynamicZoom)
+	// scroll-wheel lens zoom: the wheel zooms the lens, the main camera keeps scope_zoom_factor
+	if (m_zoom_params.m_bUseDynamicZoom && !LensZoomApplies())
 		SetZoomFactor(scope_radius > 0.0 ? m_fRTZoomFactor / scope_scrollpower : m_fRTZoomFactor);
 	else
 		SetZoomFactor(CurrentZoomFactor());
@@ -2225,7 +2236,7 @@ void CWeapon::OnZoomIn()
 void CWeapon::OnZoomOut()
 {
 	m_zoom_params.m_bIsZoomModeNow = false;
-    if (m_zoom_params.m_bUseDynamicZoom)
+    if (m_zoom_params.m_bUseDynamicZoom && !LensZoomApplies())
     {
         m_fRTZoomFactor = scope_radius > 0.0 ? GetZoomFactor() * scope_scrollpower : GetZoomFactor(); //store current
     }
@@ -3393,6 +3404,8 @@ float CWeapon::GetMinScopeZoomFactor() const
 
 void CWeapon::ZoomInc()
 {
+	// scroll-wheel lens zoom takes the wheel (also over scope_dynamic_zoom); the main camera FOV stays
+	if (LensZoomApplies()) { LensZoomStep(-1); return; }
 	if (!IsScopeAttached()) return;
 	if (!m_zoom_params.m_bUseDynamicZoom) return;
 	float delta, min_zoom_factor;
@@ -3416,6 +3429,7 @@ void CWeapon::ZoomInc()
 
 void CWeapon::ZoomDec()
 {
+	if (LensZoomApplies()) { LensZoomStep(+1); return; }
 	if (!IsScopeAttached()) return;
 	if (!m_zoom_params.m_bUseDynamicZoom) return;
 	float delta, min_zoom_factor;
@@ -3476,8 +3490,84 @@ void CWeapon::UpdateSecondVP()
 	if (!(ParentIsActor() && (m_pInventory != NULL) && (m_pInventory->ActiveItem() == this)))
 		return;
 
+	UpdateLensZoom();
+
 	CActor* pActor = smart_cast<CActor*>(H_Parent());
 	Device.m_SecondViewport.SetSVPActive(m_zoomtype == 0 && pActor->cam_Active() == pActor->cam_FirstEye() && IsSecondVPZoomPresent() && m_zoom_params.m_fZoomRotationFactor > 0.05f);
+}
+
+// ---- scroll-wheel lens zoom (scope_lense_fov_max), see SVP-LITE-NOTES.md "Scroll-wheel lens zoom" ----
+
+void CWeapon::LoadLensZoom(LPCSTR section)
+{
+	const float fov_min = m_zoom_params.m_fSecondVPFovFactor;
+	float fov_max = READ_IF_EXISTS(pSettings, r_float, section, "scope_lense_fov_max", 0.f);
+	int steps = READ_IF_EXISTS(pSettings, r_s32, section, "scope_lense_zoom_steps", 6);
+	clamp(steps, 1, 50);
+	if (fov_max > 0.f && !(fov_min > 0.005f && fov_max > fov_min + 0.005f && fov_max < 179.f))
+	{
+		Msg("! [%s] scope_lense_fov_max = %.3f ignored: needs scope_lense_fov > 0 and scope_lense_fov < scope_lense_fov_max < 179",
+			section, fov_max);
+		fov_max = 0.f;
+	}
+	m_zoom_params.m_fSecondVPFovMax = fov_max;
+	m_zoom_params.m_iSecondVPZoomSteps = fov_max > 0.f ? steps : 0;
+	const float fov_start = READ_IF_EXISTS(pSettings, r_float, section, "scope_lense_fov_start", fov_min);
+	m_zoom_params.m_iSecondVPZoomStartStep = svp_lens_zoom::NearestStep(fov_min, fov_max, m_zoom_params.m_iSecondVPZoomSteps, fov_start);
+
+	if (LensZoomEnabled() && pSettings->line_exist(section, "snd_lense_zoom"))
+		m_sounds.LoadSound(section, "snd_lense_zoom", "sndLenseZoom", false, SOUND_TYPE_ITEM_USING);
+
+	ResetLensZoom();
+}
+
+void CWeapon::ResetLensZoom()
+{
+	m_lens_zoom_step = LensZoomEnabled() ? m_zoom_params.m_iSecondVPZoomStartStep : 0;
+	m_lens_fov_cur = GetLensFovTarget();
+}
+
+float CWeapon::GetLensFovTarget() const
+{
+	if (!LensZoomEnabled())
+		return GetSecondVPZoomFactor();
+	return svp_lens_zoom::StepFov(GetSecondVPZoomFactor(), m_zoom_params.m_fSecondVPFovMax, m_zoom_params.m_iSecondVPZoomSteps,
+		m_lens_zoom_step);
+}
+
+float CWeapon::GetSecondVPLensFov() const
+{
+	if (!LensZoomEnabled() || !(m_lens_fov_cur > 0.f))
+		return GetSecondVPZoomFactor();
+	return m_lens_fov_cur;
+}
+
+void CWeapon::UpdateLensZoom()
+{
+	if (!LensZoomEnabled() || m_lens_fov_frame == Device.dwFrame)
+		return;
+	m_lens_fov_frame = Device.dwFrame;
+	const float target = GetLensFovTarget();
+	// not looking through the lens: no easing, the next aim starts at the picked zoom
+	if (!IsZoomed() || !LensZoomApplies() || !(m_lens_fov_cur > 0.f))
+		m_lens_fov_cur = target;
+	else
+		m_lens_fov_cur = svp_lens_zoom::Ease(m_lens_fov_cur, target, Device.fTimeDelta);
+}
+
+bool CWeapon::LensZoomStep(int dir)
+{
+	int s = m_lens_zoom_step + dir;
+	clamp(s, 0, m_zoom_params.m_iSecondVPZoomSteps);
+	if (s == m_lens_zoom_step)
+		return false;
+	m_lens_zoom_step = s;
+	if (H_Parent() && m_sounds.FindSoundItem("sndLenseZoom", false))
+	{
+		const bool b_hud_mode = (Level().CurrentEntity() == H_Parent());
+		m_sounds.PlaySound("sndLenseZoom", H_Parent()->Position(), H_Parent(), b_hud_mode);
+	}
+	return true;
 }
 
 Fmatrix CWeapon::RayTransform()

@@ -2,6 +2,7 @@
 #include "fstaticrender_rendertarget.h"
 #include "../../xrEngine/IGame_Persistent.h"
 #include "../../xrEngine/shader_bus.h"
+#include "../../xrEngine/svp_lens_zoom.h"
 #include "../xrRender/dxRenderDeviceRender.h"
 #include "Blender_lum_adapt.h"
 
@@ -49,6 +50,7 @@ CRenderTarget::CRenderTarget()
 	svp_lens_view.identity();
 	svp_shift_x = 0;
 	svp_shift_y = 0;
+	svp_grow = 0;
 	svp_stat_forced = 0;
 	svp_stat_copies = 0;
 
@@ -493,18 +495,21 @@ void CRenderTarget::svp_lens_rect(u32 lens, RECT& r)
 	r.bottom = LONG(H);
 }
 
-void CRenderTarget::svp_publish(int shift_x, int shift_y)
+void CRenderTarget::svp_publish(int shift_x, int shift_y, int grow)
 {
 	const int M = int(svp_lens_margin);
 	const u32 lens = svp_w - 2 * svp_lens_margin;
+	// scroll-wheel lens zoom: the lens FOV changed since this image was rendered: take a bigger (zoom out) or smaller
+	// (zoom in) square around the same centre and scale it into the lens (svp_reproject keeps it inside the image)
+	const u32 src_size = u32(int(lens) + 2 * grow);
 	RECT src;
-	src.left = M + shift_x;
-	src.top = M + shift_y;
-	src.right = src.left + LONG(lens);
-	src.bottom = src.top + LONG(lens);
+	src.left = M - grow + shift_x;
+	src.top = M - grow + shift_y;
+	src.right = src.left + LONG(src_size);
+	src.bottom = src.top + LONG(src_size);
 	RECT dst;
 	svp_lens_rect(lens, dst);
-	const bool same_size = u32(dst.right - dst.left) == lens && u32(dst.bottom - dst.top) == lens;
+	const bool same_size = u32(dst.right - dst.left) == src_size && u32(dst.bottom - dst.top) == src_size;
 	// the lens edge reads up to half a texel past the square (the width of viewport2 is rounded): copy one more
 	// column on each side when there is room, so bilinear filtering does not blend in the unused sides
 	if (same_size && dst.left >= 1 && u32(dst.right) + 1 <= svp_vp2_w && src.left >= 1 && u32(src.right) + 1 <= svp_w)
@@ -532,10 +537,22 @@ void CRenderTarget::svp_reproject()
 	if (Device.dwFrame - svp_lens_frame > 2u * svp.GetSVPFrameDelay() + 2u)
 		fresh = true;
 
-	// the zoom changed: the shift would not be right any more
-	if (g_pGamePersistent && _abs(g_pGamePersistent->m_pGShaderConstants->hud_params.y - svp_lens_fov) > 0.01f)
-		fresh = true;
+	// the lens FOV changed (scroll-wheel lens zoom easing, or another weapon): render a new image on the next frame,
+	// and until then show the last one scaled to the new FOV (grow: bigger square = zoom out, smaller = zoom in), so
+	// the lens follows the zoom at the full frame rate instead of jumping when the new image comes
+	int grow = 0;
+	if (g_pGamePersistent)
+	{
+		const float fov_now = g_pGamePersistent->m_pGShaderConstants->hud_params.y;
+		if (_abs(fov_now - svp_lens_fov) > 0.01f)
+		{
+			fresh = true;
+			grow = svp_lens_zoom::LensGrowPx(svp_w - 2 * svp_lens_margin, svp_lens_margin, svp_lens_fov, fov_now);
+		}
+	}
 
+	// room left to shift into: the margin minus what a zoomed-out (grown) square already uses
+	const int M = int(svp_lens_margin) - grow;
 	// where the current aim lands in the last SVP image (pure rotation; moving the camera is not compensated)
 	int sx = svp_shift_x, sy = svp_shift_y;
 	Fvector v;
@@ -545,7 +562,6 @@ void CRenderTarget::svp_reproject()
 		const float half = float(svp_w) * .5f;
 		const float fx = (v.x / v.z) * svp_lens_aspect / svp_lens_hat * half; // + = right
 		const float fy = -(v.y / v.z) / svp_lens_hat * half; // + = down (pixel rows)
-		const int M = int(svp_lens_margin);
 		const float lim = float(M) + 1.f;
 		sx = iFloor(clampr(fx, -lim, lim) + .5f);
 		sy = iFloor(clampr(fy, -lim, lim) + .5f);
@@ -558,16 +574,22 @@ void CRenderTarget::svp_reproject()
 		}
 	}
 	else
+	{
 		fresh = true;
+		// the kept shift must still fit next to a grown square
+		sx = clampr(sx, -M, M);
+		sy = clampr(sy, -M, M);
+	}
 
 	if (fresh)
 		svp.RequestSVPFrame();
 
-	if (sx != svp_shift_x || sy != svp_shift_y)
+	if (sx != svp_shift_x || sy != svp_shift_y || grow != svp_grow)
 	{
 		svp_shift_x = sx;
 		svp_shift_y = sy;
-		svp_publish(sx, sy);
+		svp_grow = grow;
+		svp_publish(sx, sy, grow);
 		svp_stat_copies++;
 	}
 }
@@ -619,6 +641,7 @@ void CRenderTarget::End()
 			svp_lens_view.set(Device.mView);
 			svp_shift_x = 0;
 			svp_shift_y = 0;
+			svp_grow = 0;
 			svp_publish(0, 0);
 			return;
 		}
