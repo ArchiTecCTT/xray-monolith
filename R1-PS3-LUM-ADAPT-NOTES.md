@@ -52,6 +52,10 @@ So a mod's post-process needs three things:
 3. In `postprocess.ps` / `postprocess_d.ps`: the entry `main_ps_3_0` (same `v2p` input struct as before:
    `COLOR0`, `COLOR1`, `TEXCOORD0..2`; no `POSITION` input).
 
+To ship one set of files that uses this on new exes and stays vanilla on older exes / older GPUs, branch the `.s` on
+the global `r1_sm3_postprocess` and keep `main_ps_3_0` inside `#ifdef R1_SM3` (branch `r1-sm3-detect`; see
+`R1-SM3-DETECT-NOTES.md`).
+
 Pitfalls:
 
 * A `.s` that names a vertex shader always gets the clip-space quad, whatever its target. A vertex shader that
