@@ -1,0 +1,28 @@
+// R1 luminance adaptation, step 1 of 3: meter the scene into a 64x64 target.
+// s_image is the finished scene ($user$rendertarget) before the post-process quad.
+// Output: rgb = mean colour of this pixel's footprint, a = what the adaptation follows (here: luminance).
+// Override this file (and optionally ship lum_adapt_meter.s to add samplers, e.g. a tube mask) to change what is
+// metered. Weighted example with a mask sampler s_mask: sum += c * m; wsum += m; ... return sum / max(wsum, 1e-4).
+
+uniform sampler2D s_image;
+uniform float4 c_lum_step; // x, y: one output pixel's footprint in source tc (1/64), z, w: output size (64)
+
+struct v2p
+{
+	float2 tc : TEXCOORD0; // centre of this output pixel's footprint in the source
+};
+
+float4 main_ps_2_0(v2p I) : COLOR
+{
+	float3 sum = 0;
+	for (int y = 0; y < 4; y++)
+	{
+		for (int x = 0; x < 4; x++)
+		{
+			float2 o = (float2(x, y) + 0.5) / 4.0 - 0.5; // 4x4 bilinear taps spread over the footprint
+			sum += tex2D(s_image, I.tc + o * c_lum_step.xy).rgb;
+		}
+	}
+	float3 avg = sum / 16.0;
+	return float4(avg, dot(avg, float3(0.2126, 0.7152, 0.0722)));
+}

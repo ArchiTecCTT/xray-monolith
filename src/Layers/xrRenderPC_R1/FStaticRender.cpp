@@ -909,7 +909,13 @@ HRESULT CRender::shader_compile(
 
 	u32 source_crc = 0;
 	if (useGeneratedShaderCache)
+	{
 		source_crc = getShaderSourceCrc32(pSrcData, SrcDataLen, ::Render->getShaderPath());
+		// a shader-model-3 build keys its cache on the target too, so a file that carries both main_ps_3_0 and a
+		// lower entry never loads the other target's blob; every other target keeps the old key (no recompile)
+		if (pTarget && pTarget[0] && pTarget[1] == 's' && pTarget[2] == '_' && pTarget[3] == '3')
+			source_crc = crc32(pTarget, xr_strlen(pTarget), source_crc);
+	}
 
 	if (FS.exist(file_name))
 	{

@@ -1,6 +1,9 @@
 #include "stdafx.h"
 #include "fstaticrender_rendertarget.h"
 #include "../../xrEngine/IGame_Persistent.h"
+#include "../../xrEngine/shader_bus.h"
+#include "../xrRender/dxRenderDeviceRender.h"
+#include "Blender_lum_adapt.h"
 
 
 static LPCSTR RTname = "$user$rendertarget";
@@ -45,6 +48,13 @@ CRenderTarget::CRenderTarget()
 	param_color_base = color_rgba(127, 127, 127, 0);
 	param_color_gray = color_rgba(85, 85, 85, 0);
 	param_color_add.set(0.0f, 0.0f, 0.0f);
+
+	lum_state = 0;
+	b_lum = nullptr;
+	lum_frame = 0;
+	lum_time = 0.f;
+	lum_last_time = 0.f;
+	lum_info.set(0.f, 0.f, 0.f, 0.f);
 
 	bAvailable = Create();
 	Msg("* SSample: %s", bAvailable ? "enabled" : "disabled");
@@ -136,6 +146,19 @@ BOOL CRenderTarget::Create()
 	}
 	g_postprocess.create(D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_SPECULAR | D3DFVF_TEX3, RCache.Vertex.Buffer(),
 	                     RCache.QuadIB);
+	// Same 48-byte vertex as above, but POSITION instead of POSITIONT: used when the pass names a vertex shader
+	// (a ps_3_0 needs a vs_3_0, and D3D9 skips the vertex shader for pre-transformed XYZRHW vertices).
+	static D3DVERTEXELEMENT9 dcl_postprocess_vs[] =
+	{
+		{0, 0, D3DDECLTYPE_FLOAT4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+		{0, 16, D3DDECLTYPE_D3DCOLOR, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_COLOR, 0},
+		{0, 20, D3DDECLTYPE_D3DCOLOR, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_COLOR, 1},
+		{0, 24, D3DDECLTYPE_FLOAT2, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 0},
+		{0, 32, D3DDECLTYPE_FLOAT2, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 1},
+		{0, 40, D3DDECLTYPE_FLOAT2, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 2},
+		D3DDECL_END()
+	};
+	g_postprocess_vs.create(dcl_postprocess_vs, RCache.Vertex.Buffer(), RCache.QuadIB);
 	return RT->valid() && RT_distort->valid();
 }
 
@@ -146,6 +169,8 @@ CRenderTarget::~CRenderTarget()
 	_RELEASE(ZB);
 	_RELEASE(zb_svp);
 	rt_svp_work.destroy();
+	lum_destroy();
+	g_postprocess_vs.destroy();
 	s_postprocess_D[1].destroy();
 	s_postprocess[1].destroy();
 	s_postprocess_D[0].destroy();
@@ -336,6 +361,24 @@ struct TL_2c3uv
 	}
 };
 
+// D3D9 puts pixel centres on integer XYZRHW coordinates and maps clip-space -1 to pixel -0.5, so this is the clip
+// position that rasterises exactly where the XYZRHW vertex would (w, h: the size of the render target)
+static void tl_to_clip(TL_2c3uv& v, float w, float h)
+{
+	v.p.x = (v.p.x + .5f) * 2.f / w - 1.f;
+	v.p.y = 1.f - (v.p.y + .5f) * 2.f / h;
+	v.p.z = 0.f;
+	v.p.w = 1.f;
+}
+
+// the element's first pass runs a vertex shader (its .s named one instead of "null")
+static bool element_has_vs(ShaderElement* E)
+{
+	if (!E || 0 == E->passes.size()) return false;
+	SPass* P = E->passes[0]._get();
+	return P && P->vs._get() && P->vs->vs;
+}
+
 void CRenderTarget::DoAsyncScreenshot()
 {
 	//	Igor: screenshot will not have postprocess applied.
@@ -416,6 +459,9 @@ void CRenderTarget::End()
 
 	if (!bPerform) return;
 
+	// R1 luminance adaptation: does nothing (not even create its targets) unless r1_lum_adapt or the bus turns it on
+	lum_update();
+
 	int gblend = clampr(iFloor((1 - param_gray) * 255.f), 0, 255);
 	int nblend = clampr(iFloor((1 - param_noise) * 255.f), 0, 255);
 	u32 p_color = subst_alpha(param_color_base, nblend);
@@ -435,29 +481,43 @@ void CRenderTarget::End()
 	calc_tc_duality_ss(r0, r1, l0, l1);
 	calc_tc_noise(n0, n1);
 
+	// A pass that names a vertex shader (ps_3_0 + vs_3_0) gets the same quad in clip space, 4 vertices after the
+	// XYZRHW ones; with only vertex shader "null" passes (vanilla) the buffer holds the 4 XYZRHW vertices as before.
+	ShaderElement* E_cmap = bCMap ? (bDistort ? s_postprocess_D[1]->E[4]._get() : s_postprocess[1]->E[4]._get()) : nullptr;
+	ShaderElement* E_main = (bDistort ? s_postprocess_D[bCMap] : s_postprocess[bCMap])->E[0]._get();
+	const bool vs_cmap = element_has_vs(E_cmap);
+	const bool vs_main = element_has_vs(E_main);
+	const u32 n_verts = (vs_cmap || vs_main) ? 8 : 4;
+
 	// Fill vertex buffer
 	float du = ps_r1_pps_u, dv = ps_r1_pps_v;
-	TL_2c3uv* pv = (TL_2c3uv*)RCache.Vertex.Lock(4, g_postprocess.stride(), Offset);
-	pv->set(du + 0, dv + float(_h), p_color, p_gray, r0.x, r1.y, l0.x, l1.y, n0.x, n1.y);
-	pv++;
-	pv->set(du + 0, dv + 0, p_color, p_gray, r0.x, r0.y, l0.x, l0.y, n0.x, n0.y);
-	pv++;
-	pv->set(du + float(_w), dv + float(_h), p_color, p_gray, r1.x, r1.y, l1.x, l1.y, n1.x, n1.y);
-	pv++;
-	pv->set(du + float(_w), dv + 0, p_color, p_gray, r1.x, r0.y, l1.x, l0.y, n1.x, n0.y);
-	pv++;
-	RCache.Vertex.Unlock(4, g_postprocess.stride());
+	TL_2c3uv quad[4];
+	quad[0].set(du + 0, dv + float(_h), p_color, p_gray, r0.x, r1.y, l0.x, l1.y, n0.x, n1.y);
+	quad[1].set(du + 0, dv + 0, p_color, p_gray, r0.x, r0.y, l0.x, l0.y, n0.x, n0.y);
+	quad[2].set(du + float(_w), dv + float(_h), p_color, p_gray, r1.x, r1.y, l1.x, l1.y, n1.x, n1.y);
+	quad[3].set(du + float(_w), dv + 0, p_color, p_gray, r1.x, r0.y, l1.x, l0.y, n1.x, n0.y);
+	TL_2c3uv* pv = (TL_2c3uv*)RCache.Vertex.Lock(n_verts, g_postprocess.stride(), Offset);
+	CopyMemory(pv, quad, sizeof(quad));
+	if (8 == n_verts)
+	{
+		for (u32 i = 0; i < 4; ++i)
+			tl_to_clip(quad[i], _w, _h);
+		CopyMemory(pv + 4, quad, sizeof(quad));
+	}
+	RCache.Vertex.Unlock(n_verts, g_postprocess.stride());
 
 	static shared_str s_colormap = "c_colormap";
+	static shared_str s_lum_info = "lum_adapt_info";
 	if (bCMap)
 	{
 		RCache.set_RT(RT_color_map->pRT);
 
 		//	Prepare colormapped buffer
-		RCache.set_Element(bDistort ? s_postprocess_D[1]->E[4] : s_postprocess[1]->E[4]);
-		RCache.set_Geometry(g_postprocess);
+		RCache.set_Element(E_cmap);
+		RCache.set_Geometry(vs_cmap ? g_postprocess_vs : g_postprocess);
 		RCache.set_c(s_colormap, param_color_map_influence, param_color_map_interpolate, 0, 0);
-		RCache.Render(D3DPT_TRIANGLELIST, Offset, 0, 4, 0, 2);
+		RCache.set_c(s_lum_info, lum_info.x, lum_info.y, lum_info.z, lum_info.w);
+		RCache.Render(D3DPT_TRIANGLELIST, vs_cmap ? Offset + 4 : Offset, 0, 4, 0, 2);
 
 		RCache.set_RT(HW.pBaseRT);
 		//return;
@@ -477,8 +537,9 @@ void CRenderTarget::End()
 	static shared_str s_brightness = "c_brightness";
 	RCache.set_c(s_brightness, p_brightness.x, p_brightness.y, p_brightness.z, 0);
 	RCache.set_c(s_colormap, param_color_map_influence, param_color_map_interpolate, 0, 0);
-	RCache.set_Geometry(g_postprocess);
-	RCache.Render(D3DPT_TRIANGLELIST, Offset, 0, 4, 0, 2);
+	RCache.set_c(s_lum_info, lum_info.x, lum_info.y, lum_info.z, lum_info.w);
+	RCache.set_Geometry(vs_main ? g_postprocess_vs : g_postprocess);
+	RCache.Render(D3DPT_TRIANGLELIST, vs_main ? Offset + 4 : Offset, 0, 4, 0, 2);
 }
 
 void CRenderTarget::phase_distortion()
@@ -502,4 +563,193 @@ void CRenderTarget::phase_distortion()
 	}
 
 	if (g_pGamePersistent) g_pGamePersistent->OnRenderPPUI_PP(); // PP-UI
+}
+
+//////////////////////////////////////////////////////////////////////////
+// R1 luminance adaptation (r1_lum_adapt). See R1-PS3-LUM-ADAPT-NOTES.md.
+// Runs inside End() only on frames that draw the post-process quad (the only pass that can read it), and only when
+// switched on. Off, it creates nothing and draws nothing.
+
+bool CRenderTarget::lum_wanted(float& speed_up, float& speed_down)
+{
+	bool on = ps_r1_lum_adapt != 0;
+	speed_up = ps_r1_lum_adapt_speed;
+	speed_down = ps_r1_lum_adapt_speed_down;
+
+	// bus lane "lum_adapt": x > 0 on, x < 0 off, x == 0 (or no such lane) leaves it to the console;
+	// y > 0 / z > 0 replace the speeds while the lane holds them
+	Fvector4 lane;
+	if (ShaderBus::get("lum_adapt", lane))
+	{
+		if (lane.x > 0.f) on = true;
+		else if (lane.x < 0.f) on = false;
+		if (lane.y > 0.f) speed_up = lane.y;
+		if (lane.z > 0.f) speed_down = lane.z;
+	}
+	return on;
+}
+
+bool CRenderTarget::lum_create()
+{
+	// Vanilla ships none of these; the mod that wants the adaptation ships them in gamedata\shaders\r1\.
+	static const LPCSTR files[] = {"lum_adapt_meter", "lum_adapt_reduce", "lum_adapt_blend"};
+	for (u32 i = 0; i < sizeof(files) / sizeof(files[0]); ++i)
+	{
+		string_path fn;
+		strconcat(sizeof(fn), fn, ::Render->getShaderPath(), files[i], ".ps");
+		if (!FS.exist("$game_shaders$", fn))
+		{
+			Msg("! r1_lum_adapt: shaders\\%s is missing, luminance adaptation stays off until vid_restart", fn);
+			return false;
+		}
+	}
+
+	const D3DFORMAT f16 = D3DFMT_A16B16G16R16F;
+	const D3DFORMAT f32 = D3DFMT_A32B32G32R32F;
+	const bool rt16 = !!HW.support(f16, D3DRTYPE_TEXTURE, D3DUSAGE_RENDERTARGET);
+	const bool filter16 = rt16 && HW.support(f16, D3DRTYPE_TEXTURE, D3DUSAGE_QUERY_FILTER);
+	const bool rt32 = !!HW.support(f32, D3DRTYPE_TEXTURE, D3DUSAGE_RENDERTARGET);
+	if (!rt16 && !rt32)
+	{
+		Msg("! r1_lum_adapt: the GPU has no floating-point render target, luminance adaptation stays off");
+		return false;
+	}
+	// the metered images are sampled bilinearly, the 1x1 history only by point; it needs float so that a slow
+	// adaptation never stalls on 8-bit steps
+	const D3DFORMAT f_small = filter16 ? f16 : D3DFMT_A8R8G8B8;
+	const D3DFORMAT f_hist = rt32 ? f32 : f16;
+
+	rt_lum_64.create(R1_RT_LUM_64, 64, 64, f_small);
+	rt_lum_8.create(R1_RT_LUM_8, 8, 8, f_small);
+	rt_lum_adapt.create(R1_RT_LUM_ADAPT, 1, 1, f_hist);
+	rt_lum_prev.create(R1_RT_LUM_PREV, 1, 1, f_hist);
+	if (!rt_lum_64->valid() || !rt_lum_8->valid() || !rt_lum_adapt->valid() || !rt_lum_prev->valid())
+	{
+		Msg("! r1_lum_adapt: can't create the adaptation render targets, luminance adaptation stays off");
+		lum_destroy();
+		return false;
+	}
+
+	b_lum = xr_new<CBlender_r1_lum_adapt>();
+	s_lum.create(b_lum, "r1\\lum_adapt");
+	if (DEV->_lua_HasShader("lum_adapt_meter"))
+		s_lum_meter.create("lum_adapt_meter");
+
+	// the history starts at zero, never at undefined (possibly NaN) memory
+	RCache.set_ZB(NULL);
+	RCache.set_RT(rt_lum_prev->pRT);
+	CHK_DX(HW.pDevice->Clear(0L, NULL, D3DCLEAR_TARGET, 0, 1.0f, 0L));
+	RCache.set_RT(rt_lum_adapt->pRT);
+	CHK_DX(HW.pDevice->Clear(0L, NULL, D3DCLEAR_TARGET, 0, 1.0f, 0L));
+	RCache.set_RT(HW.pBaseRT);
+	RCache.set_ZB(HW.pBaseZB);
+
+	lum_frame = 0;
+	Msg("* r1_lum_adapt: ready (meter %s, %s 64x64/8x8, %s 1x1)",
+	    s_lum_meter._get() ? "lum_adapt_meter.s" : "built-in binding",
+	    filter16 ? "A16B16G16R16F" : "A8R8G8B8", rt32 ? "A32B32G32R32F" : "A16B16G16R16F");
+	return true;
+}
+
+void CRenderTarget::lum_destroy()
+{
+	s_lum_meter.destroy();
+	s_lum.destroy();
+	xr_delete(b_lum);
+	rt_lum_prev.destroy();
+	rt_lum_adapt.destroy();
+	rt_lum_8.destroy();
+	rt_lum_64.destroy();
+}
+
+void CRenderTarget::lum_pass(ShaderElement* E, const ref_rt& target, float step_x, float step_y, const Fvector4* adapt)
+{
+	if (!E || 0 == E->passes.size()) return;
+
+	const float w = float(target->dwWidth);
+	const float h = float(target->dwHeight);
+
+	// shifted half a pixel: every pixel's tc is the centre of its footprint (0..1 spans the whole source)
+	const u32 white = 0xffffffff;
+	TL_2c3uv quad[4];
+	quad[0].set(-.5f, h - .5f, white, white, 0.f, 1.f, 0.f, 1.f, 0.f, 1.f);
+	quad[1].set(-.5f, -.5f, white, white, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f);
+	quad[2].set(w - .5f, h - .5f, white, white, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f);
+	quad[3].set(w - .5f, -.5f, white, white, 1.f, 0.f, 1.f, 0.f, 1.f, 0.f);
+	const bool vs = element_has_vs(E);
+	if (vs)
+	{
+		for (u32 i = 0; i < 4; ++i)
+			tl_to_clip(quad[i], w, h);
+	}
+
+	u32 Offset;
+	TL_2c3uv* pv = (TL_2c3uv*)RCache.Vertex.Lock(4, g_postprocess.stride(), Offset);
+	CopyMemory(pv, quad, sizeof(quad));
+	RCache.Vertex.Unlock(4, g_postprocess.stride());
+
+	static shared_str s_step = "c_lum_step";
+	static shared_str s_adapt = "c_lum_adapt";
+	RCache.set_RT(target->pRT);
+	RCache.set_Element(E);
+	RCache.set_c(s_step, step_x, step_y, w, h);
+	if (adapt)
+		RCache.set_c(s_adapt, adapt->x, adapt->y, adapt->z, adapt->w);
+	RCache.set_Geometry(vs ? g_postprocess_vs : g_postprocess);
+	RCache.Render(D3DPT_TRIANGLELIST, Offset, 0, 4, 0, 2);
+}
+
+void CRenderTarget::lum_update()
+{
+	lum_info.set(0.f, 0.f, 0.f, 0.f);
+
+	float speed_up, speed_down;
+	if (lum_state < 0 || !lum_wanted(speed_up, speed_down))
+		return;
+	if (0 == lum_state)
+	{
+		lum_state = lum_create() ? 1 : -1;
+		if (lum_state < 0)
+			return;
+	}
+
+	// a gap (adaptation was off, or no post-process for a while) starts over at the metered value
+	const bool fresh = lum_frame && (Device.dwFrame - lum_frame) <= 3;
+
+	// the scope picture of a full-size second viewport frame is not metered, it reuses the value of the main view
+	if (Device.m_SecondViewport.IsSVPFrame())
+	{
+		if (fresh)
+			lum_info.set(1.f, lum_time, speed_up, speed_down);
+		return;
+	}
+
+	Fvector4 adapt; // c_lum_adapt: blend factor towards a brighter / darker scene, dt, 1 = start over
+	if (fresh)
+	{
+		const float dt = clampr(Device.fTimeGlobal - lum_last_time, 0.f, 0.25f);
+		lum_time += dt;
+		adapt.set(1.f - expf(-dt * speed_up), 1.f - expf(-dt * speed_down), dt, 0.f);
+	}
+	else
+	{
+		lum_time = 0.f;
+		adapt.set(1.f, 1.f, 0.f, 1.f);
+	}
+	lum_last_time = Device.fTimeGlobal;
+
+	ShaderElement* meter = s_lum_meter._get() ? s_lum_meter->E[0]._get() : nullptr;
+	if (!meter || 0 == meter->passes.size())
+		meter = s_lum->E[3]._get();
+
+	RCache.set_ZB(NULL);
+	lum_pass(meter, rt_lum_64, 1.f / 64.f, 1.f / 64.f, nullptr); // scene -> 64x64
+	lum_pass(s_lum->E[0]._get(), rt_lum_8, 1.f / 8.f, 1.f / 8.f, nullptr); // 64x64 -> 8x8
+	lum_pass(s_lum->E[1]._get(), rt_lum_adapt, 1.f, 1.f, &adapt); // 8x8 -> 1x1, blended with the history
+	lum_pass(s_lum->E[2]._get(), rt_lum_prev, 0.f, 0.f, nullptr); // 1x1 -> history
+	RCache.set_RT(HW.pBaseRT);
+	RCache.set_ZB(HW.pBaseZB);
+
+	lum_frame = Device.dwFrame;
+	lum_info.set(1.f, lum_time, speed_up, speed_down);
 }

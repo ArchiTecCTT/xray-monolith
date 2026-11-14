@@ -166,6 +166,9 @@ float ps_r1_pps_v = 0.f;
 int ps_r1_GlowsPerFrame = 16; // r1-only
 float ps_r1_fog_luminance = 1.1f; // r1-only
 int ps_r1_SoftwareSkinning = 0; // r1-only
+int ps_r1_lum_adapt = 0; // r1-only: eye-like luminance adaptation for post-process shaders (s_lum_adapt), 0 = off
+float ps_r1_lum_adapt_speed = 4.f; // r1-only: rate (1/s) the adapted value follows a brighter scene
+float ps_r1_lum_adapt_speed_down = 2.f; // r1-only: rate (1/s) the adapted value follows a darker scene
 
 // R2
 float ps_r2_ssaLOD_A = 64.f;
@@ -1334,6 +1337,12 @@ void xrRender_initconsole()
 	// 1 - enabled
 	// 2 - forced hardware skinning (renderer can not override)
 	CMD4(CCC_Integer, "r1_software_skinning", &ps_r1_SoftwareSkinning, 0, 2);
+
+	// Luminance adaptation for R1 post-process shaders (s_lum_adapt). Runs only while it is on AND the post-process
+	// pass draws; the bus lane "lum_adapt" (x > 0) turns it on too. See R1-PS3-LUM-ADAPT-NOTES.md.
+	CMD4(CCC_Integer, "r1_lum_adapt", &ps_r1_lum_adapt, 0, 1);
+	CMD4(CCC_Float, "r1_lum_adapt_speed", &ps_r1_lum_adapt_speed, 0.05f, 60.f);
+	CMD4(CCC_Float, "r1_lum_adapt_speed_down", &ps_r1_lum_adapt_speed_down, 0.05f, 60.f);
 
 	// R2
 	CMD4(CCC_Float, "r2_ssa_lod_a", &ps_r2_ssaLOD_A, 16, 96);

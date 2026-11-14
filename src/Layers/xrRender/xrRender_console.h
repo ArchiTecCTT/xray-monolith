@@ -118,6 +118,9 @@ extern ECORE_API Flags32 ps_r1_flags; // r1-only
 
 extern ECORE_API float ps_r1_fog_luminance; //1.f r1-only
 extern ECORE_API int ps_r1_SoftwareSkinning; // r1-only
+extern ECORE_API int ps_r1_lum_adapt; // r1-only
+extern ECORE_API float ps_r1_lum_adapt_speed; // r1-only
+extern ECORE_API float ps_r1_lum_adapt_speed_down; // r1-only
 
 enum
 {

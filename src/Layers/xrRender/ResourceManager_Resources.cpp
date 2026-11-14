@@ -146,6 +146,12 @@ void CResourceManager::_DeleteDecl(const SDeclaration* dcl)
 
 //--------------------------------------------------------------------------------------------------------------
 #ifndef _EDITOR
+// both halves of shader model 3 (D3D9 only accepts vs_3_0 together with ps_3_0)
+static bool sm3_supported()
+{
+	return HW.Caps.raster_major >= 3 && HW.Caps.geometry_major >= 3;
+}
+
 SVS* CResourceManager::_CreateVS(LPCSTR _name)
 {
 	xrCriticalSectionGuard guard(creationGuard);
@@ -204,6 +210,18 @@ SVS* CResourceManager::_CreateVS(LPCSTR _name)
 		{
 			c_target = "vs_2_0";
 			c_entry = "main_vs_2_0";
+		}
+		// Shader model 3: picked only when the GPU runs both vs_3_0 and ps_3_0 (D3D9 pairs them: a vs_3_0 needs a
+		// ps_3_0 and the other way round). Without it the entry chosen above stays (main_vs_2_0, main_vs_1_1 or main).
+		if (strstr(data, "main_vs_3_0"))
+		{
+			if (sm3_supported())
+			{
+				c_target = "vs_3_0";
+				c_entry = "main_vs_3_0";
+			}
+			else
+				Msg("~ %s.vs: GPU has no vs_3_0/ps_3_0, using entry '%s' (%s)", _name, c_entry, c_target);
 		}
 
 		Msg("compiling shader %s", name);
@@ -300,6 +318,18 @@ SPS* CResourceManager::_CreatePS(LPCSTR name)
 		{
 			c_target = "ps_2_0";
 			c_entry = "main_ps_2_0";
+		}
+		// Shader model 3 (see _CreateVS). A ps_3_0 cannot run with fixed-function vertex processing or a vs_2_x, so the
+		// pass that uses it must name a vs_3_0 (R1 post-process: see R1-PS3-LUM-ADAPT-NOTES.md).
+		if (strstr(data, "main_ps_3_0"))
+		{
+			if (sm3_supported())
+			{
+				c_target = "ps_3_0";
+				c_entry = "main_ps_3_0";
+			}
+			else
+				Msg("~ %s.ps: GPU has no vs_3_0/ps_3_0, using entry '%s' (%s)", name, c_entry, c_target);
 		}
 
 		Msg("compiling shader %s", name);
