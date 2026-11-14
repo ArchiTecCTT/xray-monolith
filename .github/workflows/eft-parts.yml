@@ -6,13 +6,34 @@ name: eft-parts
 
 on:
   push:
-    branches: [eft-parts-engine, svp-lite-mt-parts, svp-lite-mt-parts-canted, svp-lite-mt-parts-aimsettle, svp-lite-mt-parts-zero, svp-lite-mt-parts-zero-texfix, r1-ps3-lum-adapt, r1-sm3-detect, r1-svp-lens, r1-lum-readback]
+    branches: [eft-parts-engine, svp-lite-mt-parts, svp-lite-mt-parts-canted, svp-lite-mt-parts-aimsettle, svp-lite-mt-parts-zero, svp-lite-mt-parts-zero-texfix, r1-ps3-lum-adapt, r1-sm3-detect, r1-svp-lens, r1-lum-readback, r1-svp-zoom]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
+  tests:
+    # the standalone math checks in tests/ (no engine build; g++ on Linux, a few seconds)
+    name: lens math tests
+    if: github.repository == 'ArchiTecCTT/xray-monolith'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        # actions/checkout v4.2.2
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      - name: svp_lens_test and svp_lens_zoom_test
+        run: |
+          set -e
+          for t in svp_lens_test svp_lens_zoom_test; do
+            g++ -std=c++17 -g -Wall -fsanitize=address,undefined "tests/$t.cpp" -o "/tmp/$t"
+            "/tmp/$t" .
+          done
+
   build:
     name: build ${{ matrix.buildconf }}
     if: github.repository == 'ArchiTecCTT/xray-monolith'

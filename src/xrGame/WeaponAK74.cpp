@@ -91,6 +91,10 @@ void CWeaponAK74::script_register	(lua_State *L)
 			.def("ModeRPM", &CWeapon::ModeRPMScript)
 			.def("ModeRealRPM", &CWeapon::ModeRealRPMScript)
 			.def("GetZoomType", &CWeapon::GetZoomType)
+			// scroll-wheel lens zoom (scope_lense_fov_max): lens FOV in degrees, shown (eased) and picked
+			.def("GetLensFov", &CWeapon::GetSecondVPLensFov)
+			.def("GetLensFovTarget", &CWeapon::GetLensFovTarget)
+			.def("GetLensZoomStep", &CWeapon::GetLensZoomStep)
 			
 			.def("Get_PDM_Base", &CWeapon::Get_PDM_Base)
 			.def("Get_Silencer_PDM_Base", &CWeapon::Get_Silencer_PDM_Base)

@@ -363,8 +363,8 @@ static void part2(const std::string& root)
 	HAS(rt, "const float wide = float(lens) * float(Device.dwWidth) / float(Device.dwHeight);");
 	HAS(rt, "r.left = LONG((W - lens) / 2);");
 	HAS(rt, "u32 w = u32(clampr(iFloor(float(W) * float(Device.dwHeight) / float(Device.dwWidth) + .5f), 1, int(W)));");
-	HAS(rt, "src.left = M + shift_x;");
-	HAS(rt, "src.top = M + shift_y;");
+	HAS(rt, "src.left = M - grow + shift_x;"); // grow = 0 unless the lens FOV changed (svp_lens_zoom_test.cpp)
+	HAS(rt, "src.top = M - grow + shift_y;");
 	HAS(rt, "if (same_size && dst.left >= 1 && u32(dst.right) + 1 <= svp_vp2_w && src.left >= 1 && u32(src.right) + 1 <= svp_w)");
 	HAS(rt, "const float fx = (v.x / v.z) * svp_lens_aspect / svp_lens_hat * half; // + = right");
 	HAS(rt, "const float fy = -(v.y / v.z) / svp_lens_hat * half; // + = down (pixel rows)");

@@ -31,9 +31,12 @@ private:
 	Fmatrix svp_lens_view; // its view matrix
 	int svp_shift_x; // shift (work pixels) of the lens square currently in $user$viewport2
 	int svp_shift_y;
+	int svp_grow; // pixels the lens square in $user$viewport2 is grown (+, zoom out) or shrunk (-, zoom in) on each
+	              // side, for a lens FOV change since the image was rendered (scroll-wheel lens zoom; scaled copy)
 
 	void svp_lens_rect(u32 lens, RECT& r); // where the lens shaders read the lens square in $user$viewport2
-	void svp_publish(int shift_x, int shift_y); // copy the (shifted) lens square of the work image to $user$viewport2
+	// copy the (shifted, grown by 'grow' pixels on each side) lens square of the work image to $user$viewport2
+	void svp_publish(int shift_x, int shift_y, int grow = 0);
 	void svp_reproject(); // normal frame: follow the aim, ask for a fresh SVP frame when needed
 
 	BOOL bAvailable;

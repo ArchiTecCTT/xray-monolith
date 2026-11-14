@@ -95,6 +95,22 @@ public:
 	IC float GetSecondVPZoomFactor() const { return m_zoom_params.m_fSecondVPFovFactor; }
 	IC float IsSecondVPZoomPresent() const { return GetSecondVPZoomFactor() > 0.005f; }
 
+	// Scroll-wheel lens zoom (scope_lense_fov_max, see SVP-LITE-NOTES.md): the wheel changes the SVP lens FOV between
+	// scope_lense_fov (most zoom) and scope_lense_fov_max; the main camera keeps the normal aim FOV.
+	IC bool LensZoomEnabled() const
+	{
+		return IsSecondVPZoomPresent() && m_zoom_params.m_iSecondVPZoomSteps > 0 &&
+			m_zoom_params.m_fSecondVPFovMax > GetSecondVPZoomFactor() + 0.005f;
+	}
+	IC bool LensZoomApplies() const { return LensZoomEnabled() && m_zoomtype == 0; } // main sight only (SVP is drawn for it)
+	float GetLensFovTarget() const; // the lens FOV the wheel picked (degrees)
+	float GetSecondVPLensFov() const; // the lens FOV shown now (eased toward the target; = scope_lense_fov without lens zoom)
+	int GetLensZoomStep() const { return m_lens_zoom_step; } // 0 = most zoom .. scope_lense_zoom_steps = least zoom
+	void UpdateLensZoom(); // once a frame: ease the shown lens FOV
+	bool LensZoomStep(int dir); // -1 = zoom in, +1 = zoom out; true if the step changed
+	void LoadLensZoom(LPCSTR section);
+	void ResetLensZoom(); // back to the start step, shown FOV snapped to it
+
 	// Up
 	// Magazine system & etc
 	xr_vector<shared_str> bullets_bones;
@@ -396,6 +412,9 @@ protected:
 		float m_fScopeZoomFactor;
 		float m_fZoomRotationFactor;
 		float m_fSecondVPFovFactor;
+		float m_fSecondVPFovMax; // scope_lense_fov_max (degrees), 0 = no scroll-wheel lens zoom
+		int m_iSecondVPZoomSteps; // scope_lense_zoom_steps
+		int m_iSecondVPZoomStartStep; // step of scope_lense_fov_start (0 = scope_lense_fov)
 		Fvector m_ZoomDof;
 		Fvector4 m_ReloadDof;
 		Fvector4 m_ReloadEmptyDof; //Swartz: reload when empty mag. DOF
@@ -411,6 +430,11 @@ protected:
 
 	float m_fRTZoomFactor; //run-time zoom factor
 	CUIWindow* m_UIScope;
+
+	// scroll-wheel lens zoom state (kept while the weapon stays equipped, reset when it is equipped again)
+	int m_lens_zoom_step;
+	float m_lens_fov_cur; // shown (eased) lens FOV
+	u32 m_lens_fov_frame; // Device.dwFrame of the last UpdateLensZoom
 
 private:
 	bool firstZoomDone;

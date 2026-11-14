@@ -1232,7 +1232,7 @@ void CActor::UpdateCL()
 
 			// Apply Weapon Data in Shaders
 			g_pGamePersistent->m_pGShaderConstants->hud_params.x = pWeapon->GetZRotatingFactor();
-			g_pGamePersistent->m_pGShaderConstants->hud_params.y = pWeapon->GetSecondVPZoomFactor();
+			g_pGamePersistent->m_pGShaderConstants->hud_params.y = pWeapon->GetSecondVPLensFov(); // = scope_lense_fov, or the eased scroll-wheel lens zoom
 			g_pGamePersistent->m_pGShaderConstants->hud_params.z = pWeapon->GetHudFov();
 			g_pGamePersistent->m_pGShaderConstants->hud_params.w = Device.m_SecondViewport.IsSVPFrame();
 

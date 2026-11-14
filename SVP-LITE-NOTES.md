@@ -155,3 +155,49 @@ angular square `|x/z|, |y/z| <= tan(fov/2)`; the sides of the image (44 % at 16:
 
 For low zoom (~1.5-2x) skip the SVP render entirely and magnify the middle of the main frame into the lens instead
 (no second scene at all; less detail than a real zoomed render, and the main frame's post-process/HUD would need care).
+
+## Scroll-wheel lens zoom (`r1-svp-zoom` branch)
+
+A weapon with a 3D (SVP) lens can zoom the lens picture with the mouse wheel while aiming. Opt-in per weapon: nothing
+changes for a weapon without `scope_lense_fov_max`. Works in every renderer (the lens FOV is `hud_params.y`, which
+`CCameraManager::ApplyDevice` uses on SVP frames); the smooth in-between frames below are R1 only.
+
+### Weapon keys (weapon section, next to `scope_lense_fov`)
+
+| key | default | what it does |
+|---|---|---|
+| `scope_lense_fov` | (as before) | Lens FOV (vertical degrees) = the **most** zoom. |
+| `scope_lense_fov_max` | none (off) | Lens FOV of the **least** zoom. Must be bigger than `scope_lense_fov` and below 179, otherwise it is ignored (with a `!` log line). Magnification range = `scope_lense_fov_max / scope_lense_fov` (for these small angles), e.g. 3.66 -> 14.64 is 4x. |
+| `scope_lense_zoom_steps` | 6 | Wheel notches from most to least zoom (1..50). The steps are geometric: every notch changes the magnification by the same factor. |
+| `scope_lense_fov_start` | `scope_lense_fov` | Lens FOV when the weapon is equipped (rounded to the nearest step). |
+| `snd_lense_zoom` | none | Sound played on each wheel notch that changes the zoom (normal weapon sound line, e.g. `ATS_scope_sounds\ATS_zoom_sound_1`). |
+
+### Behaviour
+
+* While aiming with the main sight (`m_zoomtype` 0, the one that has the SVP lens), the zoom-in / zoom-out actions
+  (mouse wheel) step the lens FOV between `scope_lense_fov` and `scope_lense_fov_max`. The main camera FOV stays at
+  the normal aim value (`scope_zoom_factor` * 0.75) and does not change on scroll. `scope_dynamic_zoom` is not needed;
+  if it is also on, the lens zoom takes over the wheel for this weapon (main sight only).
+* The shown lens FOV eases toward the picked one (about 95% of the way in 0.15 s at any frame rate, then snaps).
+* The picked zoom is kept while the weapon stays equipped (un-aim and re-aim keeps it); it goes back to the start zoom
+  when the weapon is equipped again.
+* Alt aim (`m_zoomtype` 1), grenade-launcher aim (`m_zoomtype` 2), 2D scopes and the 3DSS `scope_radius` path keep
+  their old wheel behaviour (`ZoomInc` / `ZoomDec` only branch off when `LensZoomApplies()`).
+* Lua (weapon object, `wpn:cast_Weapon()`): `GetLensFov()` (shown, eased, degrees), `GetLensFovTarget()` (picked),
+  `GetLensZoomStep()` (0 = most zoom). Without lens zoom both FOVs are `scope_lense_fov`. Zoom relative to the
+  least zoom = `scope_lense_fov_max / wpn:GetLensFov()`.
+  Note: scripts that click by watching `GetZoomFactor()` (ATS dynamic zoom sound) do not click for the lens zoom,
+  because the main zoom does not change; use `snd_lense_zoom`.
+* The math is in `src/xrEngine/svp_lens_zoom.h` (`StepFov`, `NearestStep`, `Ease`, `LensGrowPx`), checked by
+  `tests/svp_lens_zoom_test.cpp` (`g++ -std=c++17 tests/svp_lens_zoom_test.cpp -o t && ./t .`).
+
+### R1: no stale or stretched lens while the zoom changes
+
+`svp_reproject` already asked for a fresh SVP frame on the next frame when `hud_params.y` differed from the FOV of the
+last SVP image. While the FOV eases that happens every other frame (like `r__svp_delay 2`, for ~0.4 s). New: on the
+normal frames in between, the last image is **scaled** into the lens instead of shown unchanged: `LensGrowPx` grows
+(zoom out) or shrinks (zoom in) the copied square by `k` work pixels on each side, `k = round(lens * (tan(fov_now/2) /
+tan(fov_img/2) - 1) / 2)`, around the same (shifted) centre, and `svp_publish` copies it with a linear `StretchRect`.
+Zooming out uses the margin, so the room left for the aim shift is `margin - k`; past the margin the square is clamped
+(the lens shows a bit less zoom-out for that one frame). With `r1_svp_reproject 0`, `r1_svp_fit 0` or in R2/R3/R4 the
+lens image updates at the SVP rate during the ease, as before.
