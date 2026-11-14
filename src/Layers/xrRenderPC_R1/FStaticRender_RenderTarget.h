@@ -69,6 +69,10 @@ private:
 	float lum_time; // seconds since the adaptation (re)started
 	float lum_last_time; // Device.fTimeGlobal of the last run
 	Fvector4 lum_info; // post-process constant lum_adapt_info: live 0/1, lum_time, speed up, speed down
+	// async CPU copy of $user$lum_adapt for scripts (console outputs r1_lum_adapt_value / r1_lum_adapt_rgb)
+	enum { LUM_RB_SLOTS = 4 };
+	IDirect3DSurface9* lum_rb[LUM_RB_SLOTS]; // 1x1 D3DPOOL_SYSTEMMEM copies, same format as rt_lum_adapt
+	u32 lum_rb_frame[LUM_RB_SLOTS]; // Device.dwFrame the copy was queued on, 0 = empty / already read
 
 	float im_noise_time;
 	u32 im_noise_shift_w;
@@ -110,6 +114,8 @@ private:
 	void lum_destroy();
 	void lum_update();
 	void lum_pass(ShaderElement* E, const ref_rt& target, float step_x, float step_y, const Fvector4* adapt);
+	void lum_readback(bool queue); // read a finished copy (never waits), then optionally queue this frame's one
+	void lum_readback_clear(); // forget queued copies and publish 0 (adaptation off / restarting)
 
 	void calc_tc_noise(Fvector2& p0, Fvector2& p1);
 	void calc_tc_duality_ss(Fvector2& r0, Fvector2& r1, Fvector2& l0, Fvector2& l1);

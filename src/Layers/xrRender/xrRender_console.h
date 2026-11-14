@@ -121,6 +121,8 @@ extern ECORE_API int ps_r1_SoftwareSkinning; // r1-only
 extern ECORE_API int ps_r1_lum_adapt; // r1-only
 extern ECORE_API float ps_r1_lum_adapt_speed; // r1-only
 extern ECORE_API float ps_r1_lum_adapt_speed_down; // r1-only
+extern ECORE_API float ps_r1_lum_adapt_value; // r1-only, output: adapted .a read back from $user$lum_adapt, 0 = off/not ready
+extern ECORE_API Fvector ps_r1_lum_adapt_rgb; // r1-only, output: adapted .rgb read back from $user$lum_adapt
 
 enum
 {
