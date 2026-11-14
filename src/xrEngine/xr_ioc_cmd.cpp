@@ -1078,6 +1078,42 @@ public:
 	}
 };
 
+// SVP lens (R1) cvars: an integer / float with a fixed help text per name
+static LPCSTR svp_lens_info(LPCSTR name)
+{
+	if (0 == xr_strcmp(name, "r1_svp_fit"))
+		return "R1: scope SVP frame renders only the square the lens shows (plus r1_svp_margin) at full work-target resolution, needs r1_svp_size > 0";
+	if (0 == xr_strcmp(name, "r1_svp_margin"))
+		return "R1: extra view rendered around the lens square, fraction of the lens width on each side (room for r1_svp_reproject)";
+	if (0 == xr_strcmp(name, "r1_svp_reproject"))
+		return "R1: between scope SVP frames shift the last lens image with the aim; a fresh SVP frame is rendered when the margin runs out or the zoom changes";
+	if (0 == xr_strcmp(name, "r1_svp_stats"))
+		return "R1: every ~2 s log frame time, scene CPU time and draw calls of normal vs scope SVP frames";
+	return "";
+}
+
+class CCC_SVPInfoInt : public CCC_Integer
+{
+public:
+	CCC_SVPInfoInt(LPCSTR N, int* V, int _min = 0, int _max = 999) : CCC_Integer(N, V, _min, _max) {};
+
+	virtual void Info(TInfo& I)
+	{
+		xr_sprintf(I, sizeof(I), "%s, integer in range [%d,%d]", svp_lens_info(cName), min, max);
+	}
+};
+
+class CCC_SVPInfoFloat : public CCC_Float
+{
+public:
+	CCC_SVPInfoFloat(LPCSTR N, float* V, float _min = 0, float _max = 1) : CCC_Float(N, V, _min, _max) {};
+
+	virtual void Info(TInfo& I)
+	{
+		xr_sprintf(I, sizeof(I), "%s, float in range [%3.2f,%3.2f]", svp_lens_info(cName), min, max);
+	}
+};
+
 class CCC_Editor : public IConsole_Command
 {
 public:
@@ -1122,6 +1158,11 @@ ENGINE_API int ps_r__svp_delay = 3;       // SVP frame is rendered every N-th fr
 ENGINE_API float ps_r__svp_far = 0.f;     // far plane (m) for SVP frames, 0 = off
 ENGINE_API int ps_r__svp_skip_extras = 1; // skip grass and HUD/UI passes on SVP frames (R1)
 ENGINE_API int ps_r1_svp_size = 512;      // R1: SVP is rendered into a square RT of this many pixels, 0 = off
+// SVP lens (R1): lens-fitted frustum, reprojection between SVP frames, timing log
+ENGINE_API int ps_r1_svp_fit = 1;         // R1: SVP frame renders only the square the lens shows (+ margin)
+ENGINE_API float ps_r1_svp_margin = 0.15f; // R1: margin around the lens square, fraction of its width per side
+ENGINE_API int ps_r1_svp_reproject = 1;   // R1: shift the last SVP image with the aim on the frames in between
+ENGINE_API int ps_r1_svp_stats = 0;       // R1: log normal vs SVP frame timings every ~2 s
 extern u32 g_crosshair_color;
 float g_freelook_z_offset;
 float g_ironsights_factor = 1.25f;
@@ -1355,6 +1396,10 @@ void CCC_Register()
 	CMD4(CCC_SVPFar, "r__svp_far", &ps_r__svp_far, 0.f, 5000.f); // scope SVP: far plane in metres, 0 = off
 	CMD4(CCC_SVPSize, "r1_svp_size", &ps_r1_svp_size, 0, 2048); // scope SVP (R1): small render target size in pixels, 0 = off
 	CMD4(CCC_SVPSkipExtras, "r__svp_skip_extras", &ps_r__svp_skip_extras, 0, 1); // scope SVP: skip grass and HUD/UI passes on SVP frames (R1)
+	CMD4(CCC_SVPInfoInt, "r1_svp_fit", &ps_r1_svp_fit, 0, 1); // scope SVP (R1): lens-fitted square frustum
+	CMD4(CCC_SVPInfoFloat, "r1_svp_margin", &ps_r1_svp_margin, 0.f, 0.5f); // scope SVP (R1): margin around the lens square
+	CMD4(CCC_SVPInfoInt, "r1_svp_reproject", &ps_r1_svp_reproject, 0, 1); // scope SVP (R1): follow the aim between SVP frames
+	CMD4(CCC_SVPInfoInt, "r1_svp_stats", &ps_r1_svp_stats, 0, 1); // scope SVP (R1): timing log every ~2 s
 	CMD3(CCC_Mask, "rs_refresh_60hz", &psDeviceFlags, rsRefresh60hz);
 	CMD2(CCC_Color, "g_crosshair_color", &g_crosshair_color);
 	CMD4(CCC_Float, "mouse_sens_aim", &g_AimLookFactor, 0.01f, 5.0f);

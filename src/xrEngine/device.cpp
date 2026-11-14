@@ -932,5 +932,36 @@ void CRenderDevice::CSecondVPParams::SetSVPActive(bool bState) //--#SM+#-- +Seco
 
 bool CRenderDevice::CSecondVPParams::IsSVPFrame() //--#SM+#-- +SecondVP+
 {
-	return IsSVPActive() && Device.dwFrame % frameDelay == 0;
+	if (!IsSVPActive())
+		return false;
+	const u32 f = Device.dwFrame;
+	if (forceFrame == 0) // nothing was ever forced: the plain schedule
+		return f % frameDelay == 0;
+	if (f == forceFrame)
+		return true;
+	if (f % frameDelay != 0)
+		return false;
+	// a forced SVP frame shortly before stands in for this regular one. The forced frame requested during this
+	// frame (forceFrame == f + 1) is not "before", so the answer does not change in the middle of a frame.
+	const u32 last_forced = (forceFrame <= f) ? forceFrame : prevForceFrame;
+	return !(last_forced && last_forced < f && f - last_forced <= u32(frameDelay / 2));
+}
+
+void CRenderDevice::CSecondVPParams::RequestSVPFrame()
+{
+	const u32 next = Device.dwFrame + 1;
+	if (forceFrame == next)
+		return;
+	prevForceFrame = forceFrame;
+	forceFrame = next;
+}
+
+u32 CRenderDevice::CSecondVPParams::LensMarginPx(u32 work)
+{
+	const float m = clampr(ps_r1_svp_margin, 0.f, 0.5f);
+	u32 px = u32(iFloor(float(work) * m / (1.f + 2.f * m) + .5f));
+	// keep a lens square of at least half the work image
+	if (2 * px > work / 2)
+		px = work / 4;
+	return px;
 }
