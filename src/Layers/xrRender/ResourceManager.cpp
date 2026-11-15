@@ -432,10 +432,24 @@ void CResourceManager::DeferredUnload()
 	});
 }
 
+// Defined in ResourceManager_Resources.cpp (DX9) / dx10ResourceManager_Resources.cpp (DX10/11)
+extern xr_task_group textures_load_tasks;
+
+void CResourceManager::WaitTextureLoads()
+{
+	// Background CTexture::Load() tasks queued by _CreateTexture. Unloading or
+	// freeing a texture while one of them still writes to it is the kind of
+	// race that ended in heap corruption (0xc0000374) at loading.
+	textures_load_tasks.wait();
+}
+
 void CResourceManager::UnloadAllTexturesOnLevelUnload()
 {
 	if (!RDEVICE.b_is_Ready)
 		return;
+
+	// Must be done before taking creationGuard: a loader task may need it.
+	WaitTextureLoads();
 
     xrCriticalSectionGuard guard(creationGuard);
 

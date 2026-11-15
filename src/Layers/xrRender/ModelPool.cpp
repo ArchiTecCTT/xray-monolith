@@ -88,8 +88,9 @@ dxRender_Visual* CModelPool::Instance_Duplicate(dxRender_Visual* V)
 	N->Copy(V);
 	N->Spawn();
 	{
-		// inc ref counter
-		xrSRWLockGuard g(ModelsLock, true);
+		// inc ref counter (exclusive lock: refs is written here, and a lost
+		// increment would let PurgeUnused/Discard free a base still in use)
+		xrSRWLockGuard g(ModelsLock);
 		auto it = std::lower_bound(Models.begin(), Models.end(), V, std::less<>{});
 		if (it != Models.end() && it->model == V)
 		{
@@ -177,8 +178,9 @@ dxRender_Visual* CModelPool::Instance_Register(LPCSTR N, dxRender_Visual* V)
 	{
 		if (M.name == S)
 		{
-			// Increment the reference count
-			M.refs++;
+			// Do not touch refs here: the caller (Create) takes its reference
+			// through Instance_Duplicate. Counting it here as well left the
+			// base with one ref that no instance would ever drop.
 
 			// Destroy the redundant one we just loaded
 			V->Release();
@@ -545,6 +547,116 @@ void CModelPool::ClearPool(BOOL b_complete)
 		Discard(_I->second, b_complete);
 	}
 	Pool.clear();
+}
+
+// PurgeUnused: free base models that nothing uses any more.
+//
+// How a base model is referenced:
+//   * Create() loads the base once (Models, refs starts at 0) and hands out a
+//     clone made by Instance_Duplicate(), which does refs++. Each clone is put
+//     in Registry (clone -> name), whether it is in use or parked in Pool.
+//   * Clones share geometry, bones and shaders with their base, so the base
+//     must outlive every clone.
+//   * Discard() (via ClearPool) drops refs for every discarded clone, but with
+//     b_complete == FALSE it never frees the base, even at refs == 0. That is
+//     what a save load does (models_Clear(FALSE)), so every model ever loaded
+//     stayed in memory with its textures.
+//
+// A base is freed here only when ALL of these hold:
+//   1. refs == 0                       - no counted clone
+//   2. no Registry entry with its name - no clone in use, in Pool, or queued
+//                                        for (deferred) deletion
+//   3. no other base points at it as a child or LOD, and it points at no other
+//      base (a hierarchy loaded while another base existed can share it)
+// Anything requested again later is simply loaded from disk again by Create().
+u32 CModelPool::PurgeUnused()
+{
+	if (g_bRendering)
+		return 0;
+
+	// Names that still have live clones (in use, pooled, or queued)
+	xr_set<shared_str, str_pred> live_names;
+	for (REGISTRY_IT it = Registry.begin(); it != Registry.end(); ++it)
+		live_names.insert(it->second);
+
+	xr_vector<dxRender_Visual*> victims;
+	{
+		xrSRWLockGuard g(ModelsLock);
+
+		auto is_base = [this](IRenderVisual* p) -> bool
+		{
+			if (!p) return false;
+			auto it = std::lower_bound(Models.begin(), Models.end(), (dxRender_Visual*)p, std::less<>{});
+			return it != Models.end() && it->model == (dxRender_Visual*)p;
+		};
+
+		// Bases linked to other bases (child/LOD sharing): never purge them
+		xr_set<dxRender_Visual*> linked;
+		for (auto& M : Models)
+		{
+			if (!M.model) continue;
+			auto check_list = [&](xr_vector<IRenderVisual*>* list)
+			{
+				if (!list) return;
+				for (IRenderVisual* c : *list)
+				{
+					if (is_base(c))
+					{
+						linked.insert((dxRender_Visual*)c);
+						linked.insert(M.model);
+					}
+				}
+			};
+			check_list(M.model->get_children());
+			check_list(M.model->get_children_invisible());
+			if (CKinematics* K = PCKinematics(M.model))
+			{
+				if (is_base(K->m_lod))
+				{
+					linked.insert(K->m_lod);
+					linked.insert(M.model);
+				}
+			}
+		}
+
+		// Models is sorted by pointer; erasing keeps the order.
+		for (auto it = Models.begin(); it != Models.end();)
+		{
+			const bool unused = it->model
+				&& it->refs == 0
+				&& live_names.find(it->name) == live_names.end()
+				&& linked.find(it->model) == linked.end();
+			if (unused)
+			{
+				victims.push_back(it->model);
+				it = Models.erase(it);
+			}
+			else
+				++it;
+		}
+	}
+
+	// Destroy outside ModelsLock: destructors delete children through
+	// ::Render->model_Delete, and the SRW lock is not recursive.
+	bForceDiscard = TRUE;
+	for (dxRender_Visual* V : victims)
+	{
+		V->Release();
+		xr_delete(V);
+	}
+	bForceDiscard = FALSE;
+
+	// Animations that no skeleton references any more
+	if (!victims.empty())
+		g_pMotionsContainer->clean(false);
+
+	return (u32)victims.size();
+}
+
+u32 CModelPool::BaseModelsCount()
+{
+	xrSRWLockGuard g(ModelsLock, true);
+	return (u32)Models.size();
 }
 
 void CModelPool::dump()

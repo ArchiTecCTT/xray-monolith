@@ -232,6 +232,7 @@ public:
 	void DeferredUpload();
 	void DeferredUnload();
 	void UnloadAllTexturesOnLevelUnload();
+	void WaitTextureLoads();
 	void Evict();
     void EvictStalledTextures();
 	void StoreNecessaryTextures();
