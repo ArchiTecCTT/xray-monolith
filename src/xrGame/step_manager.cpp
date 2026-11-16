@@ -206,6 +206,10 @@ void CStepManager::update(bool b_hud_view)
 
 				CGameObject* object = smart_cast<CGameObject*>(m_object);
 				const bool step_is_actor = object && object->ID() == 0;
+				// headphones: with a range factor below 1 an NPC's step can be out of sound range but still inside
+				// step_sound_distance; its eOnFootStep callback fires exactly as before the headphones range
+				if (!step_is_actor && object && b_play_sound && !b_play_others_sound && is_on_ground())
+					object->FootStepCallback(m_step_info.params.step[i].power, b_play_sound, is_on_ground(), b_hud_view);
              if ((step_is_actor ? b_play_sound : b_play_others_sound) && is_on_ground() && object)
 				{
 					if (step_is_actor)

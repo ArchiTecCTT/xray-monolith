@@ -171,6 +171,9 @@ int main(int argc, char** argv)
 	CHECK(upd.find("m_step_sound.play_next(mtl_pair, m_object, m_step_info.params.step[i].power, b_hud_view, true);") !=
 	      std::string::npos);
 	CHECK(upd.find("if (b_play_sound) // as before the headphones range") != std::string::npos);
+	// range factor < 1: the callback still fires out to step_sound_distance (the sound alone is cut)
+	CHECK(upd.find("if (!step_is_actor && object && b_play_sound && !b_play_others_sound && is_on_ground())") !=
+	      std::string::npos);
 	const std::string pn = body(step, "void CStepManager::material_sound::play_next(");
 	CHECK(pn.find("step_snd.set_mix_category(smc_steps_others);") != std::string::npos);
 	CHECK(pn.find("step_snd.set_mix_category(prev_mix);") != std::string::npos);
