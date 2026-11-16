@@ -135,8 +135,8 @@ The original engine is used in S.T.A.L.K.E.R. Call of Pripyat game released by G
   * For more information see DXML.md guide.
 
 * Shader bus
-  * Named, owned float4 shader constants that replace the shared `shader_param_N` slots. A script registers a lane by name and writes it through a token, any shader reads it by declaring `bus_<id>`, and the twelve legacy commands keep working while the log names whoever still writes them.
-  * For more information see SHADER_BUS.md guide, the Lua module and console commands are listed in `lua_help_ex.script`.
+  * Float4 shader constants with an id that replace the shared `shader_param_N` slots. A script registers a lane by name and writes it through a token, any shader reads it by declaring `bus_<id>`, and the twelve legacy commands keep working while the log shows which scripts still write them.
+  * For more information see docs/shader_bus.md guide, the Lua module and console commands are listed in `lua_help_ex.script`.
 
 * Possibility to unlocalize Lua variables in scripts before loading, making them global to the script namespace
   * For unlocalizing a variable in the script, please refer to documentation in test file in `gamedata/configs/unlocalizers` folder
@@ -239,6 +239,157 @@ How to compile exes:
 13. A short video demonstration of the entire process: https://youtu.be/MmZwyM2QO38
 
 ## Changelog
+**2026.11.15 (Prerelease)**
+* Main and MT:
+  * Fix lost `SetScale(x, y, z)` export after attachments PR
+  * Fix missing defaults for Modded Exes options 
+  * Stevo88494: Fix stale stash ids
+  * damoldavskiy: 
+    * Sync animation state with actual animation, motion marks changes under a flag (https://github.com/themrdemonized/xray-monolith/pull/864)
+    * Rocket launcher and anim end fix (https://github.com/themrdemonized/xray-monolith/pull/865)
+  * erepb:
+    * feat: expose alife objects\_per\_update getter to lua (https://github.com/themrdemonized/xray-monolith/pull/842)
+    * resolve new-game start locations by level name and position (https://github.com/themrdemonized/xray-monolith/pull/770)
+    * support vanila level replacement (https://github.com/themrdemonized/xray-monolith/pull/774)
+  * nltp-ashes: Feature/actor visible memory (https://github.com/themrdemonized/xray-monolith/pull/785)
+  * shitame0451: Fix line wrapping for multibyte loading screen tips (https://github.com/themrdemonized/xray-monolith/pull/843)
+  * vacwave: Add lock\_to\_camera option for script hand motions (https://github.com/themrdemonized/xray-monolith/pull/766)
+
+* MT:
+  * Possible fix to https://github.com/themrdemonized/xray-monolith/issues/854
+    * IK safety improvements
+    * Validates blend ownership/state, motion slot/index, timing, weights, and foot-contact intervals before evaluation.
+    * On failure, skips IK for that update, preserves the animated pose, and clears cached IK history.
+    * cvar `print_ik_warnings` to enable Logs for NPC identity, visual, animation, motion ID, and timing—at most once every five seconds per NPC.
+  * DissidentEast: Remove register keyword (C5033) (https://github.com/themrdemonized/xray-monolith/pull/803)
+  * dsesclei: MT: Faster animation/model loading (https://github.com/themrdemonized/xray-monolith/pull/777)
+  * noisethanks: ui: release keyboard capture when the capturing window is detached (https://github.com/themrdemonized/xray-monolith/pull/814)
+  * TheLostInPlace: render fix: texture eviction no longer unloads weather env cubes and color maps (mt) (https://github.com/themrdemonized/xray-monolith/pull/840)
+  * vacwave: (MT) Fix double free of $level$ path during parallel level load (https://github.com/themrdemonized/xray-monolith/pull/845)
+
+**2026.11.09 (Prerelease)**
+* Main and MT:
+  * Fix https://github.com/themrdemonized/xray-monolith/issues/825
+CustomZone spatial is transparent to NPC vision, previously it lead to NPCs not see through anomalies even disabled ones
+  * Lua cache `device()` on script engine start and return cached object preventing repeated userdata creation in engine 
+  * Remove bolts from Spawn Antifreeze ignore list
+
+  * damoldavskiy:
+    * Scripted Weapon Attachments, vol. 1 (https://github.com/themrdemonized/xray-monolith/pull/714)
+    * Scripted Weapon Attachments, vol. 2 (3D icons) (https://github.com/themrdemonized/xray-monolith/pull/719)
+    * Scripted Weapon Attachments, vol. 3 (Inverse Kinematics) (https://github.com/themrdemonized/xray-monolith/pull/724)
+    * Scripted Weapon Attachments, vol. 4 (hand poses, motion marks) (https://github.com/themrdemonized/xray-monolith/pull/740) 
+    * Scripted Weapon Attachments, vol. 5 (UI/Lua helpers) (https://github.com/themrdemonized/xray-monolith/pull/741)
+    * Scripted Weapon Attachments, vol. 6 (https://github.com/themrdemonized/xray-monolith/pull/817)
+
+  * damiansirbu:
+    * feat(monster): per-object movement destination override (set\_monster\_dest) (https://github.com/themrdemonized/xray-monolith/pull/748)
+    * feat(monster): extend the combat decision callback to every species state manager (https://github.com/themrdemonized/xray-monolith/pull/752)
+  * DissidentEast:
+    * Guard CALifeMonsterBrain::process\_task against nil smart terrain task (https://github.com/themrdemonized/xray-monolith/pull/815)
+    * Port squad teleport fixes from ixray-1.6-stcop (https://github.com/themrdemonized/xray-monolith/pull/813)
+  * erepb:
+    * fix(ui): fixed scrollbar captures the mouse itself, not its thumb button (https://github.com/themrdemonized/xray-monolith/pull/746)
+    * fix(pda): skip rankings rows whose NPC id now belongs to a non-stalker (https://github.com/themrdemonized/xray-monolith/pull/764)
+    * fix(ui): draw main menu modal dialogs outside the shniaga pp pass (https://github.com/themrdemonized/xray-monolith/pull/762)
+    * fix: allow warfare NPC to take Xenotech and Olivar jobs (https://github.com/themrdemonized/xray-monolith/pull/816)
+    * fix(alife): keep online squad members' level and game vertex in sync with their position (https://github.com/themrdemonized/xray-monolith/pull/820)
+    * fix: trader and stash ignore drop events for items spawn antifreeze has not spawned yet (https://github.com/themrdemonized/xray-monolith/pull/821)
+    * fix escort tasks crashes (https://github.com/themrdemonized/xray-monolith/pull/824)
+  * jgorset: Show destination artwork from the first zone-transition loading frame (https://github.com/themrdemonized/xray-monolith/pull/739)
+  * lulnope:
+    * add GetDeviceRemovedReason logging to dx10Texture.cpp (https://github.com/themrdemonized/xray-monolith/pull/742)
+    * Fix phantoms not dying when shot during the "birth" state animation (https://github.com/themrdemonized/xray-monolith/pull/771)
+    * Fix missing sounds if user alt-tabs away while the game is loading (https://github.com/themrdemonized/xray-monolith/pull/759)
+    * fix floating artefacts attempt#2 (https://github.com/themrdemonized/xray-monolith/pull/760)
+    * fix npcs see through dynamic objects (https://github.com/themrdemonized/xray-monolith/pull/818)
+  * MarkAlexey: Crashes between transition fix (https://github.com/themrdemonized/xray-monolith/pull/808)
+  * nltp-ashes: feature(grenade-throw-force): add callback for actor grenade throw force (https://github.com/themrdemonized/xray-monolith/pull/782)
+  * rburketaylor: Fix for inventory movement when disassembling (https://github.com/themrdemonized/xray-monolith/pull/745)
+  * TheLostInPlace:
+    * luabind: object\_cast\_nothrow checks the type in release builds (https://github.com/themrdemonized/xray-monolith/pull/784)
+    * spawn fix: npc bolts no longer drop at their feet with spawn\_antifreeze on (https://github.com/themrdemonized/xray-monolith/pull/823)
+    * physics fix: shells frozen by script no longer collide with each other (https://github.com/themrdemonized/xray-monolith/pull/811)
+  * Um-Yeah-No:
+    * Load env modifiers from .ltx, add reload command (https://github.com/themrdemonized/xray-monolith/pull/757)
+    * Fix rain wetness depending on frame rate, add level.set\_rain\_wetness (https://github.com/themrdemonized/xray-monolith/pull/765)
+  * vacwave:
+    * Allow scripts to set CamAttached projection FOV (https://github.com/themrdemonized/xray-monolith/pull/758)
+    * Fix net\_Export assert when a save runs while an NPC is spawning (https://github.com/themrdemonized/xray-monolith/pull/763)
+    * Fix smart\_cover npc double weapon reloads (https://github.com/themrdemonized/xray-monolith/pull/827)
+
+* MT:
+  * Improvements from https://github.com/themrdemonized/xray-monolith/pull/786
+  * `CHitMemoryManager::update` `m_hits` null guard crash fix
+  * DissidentEast:
+    * remove unused 24KB terrain registry from CALifeGraphRegistry (https://github.com/themrdemonized/xray-monolith/pull/772)
+    * Fix uninitialized HRESULT in CHW::CreateDevice (https://github.com/themrdemonized/xray-monolith/pull/789)
+    * Fix format string mismatches in sscanf calls (https://github.com/themrdemonized/xray-monolith/pull/792)
+    * Fix control flow warnings in xrGame (https://github.com/themrdemonized/xray-monolith/pull/795)
+  * lulnope: fix npcs seeing through dynamic objects (MT) (https://github.com/themrdemonized/xray-monolith/pull/828)
+  * noisethanks:
+    * Dedupe repeated frames when loading .seq textures (https://github.com/themrdemonized/xray-monolith/pull/793)
+    * Make FS\_file\_list safe when its list pointer is NULL (https://github.com/themrdemonized/xray-monolith/pull/802)
+  * vacwave:
+    * MT Allow scripts to set CamAttached projection FOV (https://github.com/themrdemonized/xray-monolith/pull/773)
+    * Fix smart\_cover npc aiming (MT) (https://github.com/themrdemonized/xray-monolith/pull/830)
+
+**2026.10.11**
+* Main and MT:
+  * DLTX: `reload system ini` call will invalidate whole cache
+  * axr_main (see `docs/axr_main.md): 
+    * Possibility to change execution order, define what callback functions should execute before or after when registering new callback.
+    * Add Pre, Normal and Post callbacks via `priority` argument. Pre will run before all normal callbacks, post - after. Default is Normal
+  * Add `sid_forester_on_item_take` and `sid_forester_on_item_drop` callbacks for Sidorovich/Forester specifically
+  * Revert "Extended ps_ssfx_gloss_minmax for "Glossy Puddles" addon (https://github.com/themrdemonized/xray-monolith/pull/659)"
+  * `dump_cvar_enable` cvar to toggle cvar dumping on start or crash, default on
+  * Fix https://github.com/themrdemonized/xray-monolith/issues/681
+  * Fix https://github.com/themrdemonized/xray-monolith/issues/729
+  * damiansirbu:
+    * jit.profile / jit.allocprof: hardenings and jit.util.gcstat (https://github.com/themrdemonized/xray-monolith/pull/670)
+    * fix(imgui): size the InputText buffer to capacity before the ImGui call (https://github.com/themrdemonized/xray-monolith/pull/694)
+    * fix(monsters): guard the chimera attack geometry against bad configs (https://github.com/themrdemonized/xray-monolith/pull/710)
+    * feat(monsters): add the per-monster lua combat seam surface (https://github.com/themrdemonized/xray-monolith/pull/711)
+    * feat(monsters): monster combat decision callback (https://github.com/themrdemonized/xray-monolith/pull/712)
+    * feat(monsters): arm the dormant rear spin-strike per monster from a script (https://github.com/themrdemonized/xray-monolith/pull/715)
+    * feat(monsters): per-object combat-param setters (https://github.com/themrdemonized/xray-monolith/pull/721)
+    * feat(monsters): per-object FSM-memory readers (https://github.com/themrdemonized/xray-monolith/pull/725)
+    * feat(anim): cvar to vary the NPC relaxed torso idle off the player pose (https://github.com/themrdemonized/xray-monolith/pull/727)
+  * damoldavskiy: .thm -&gt; .ltx loading for textures (https://github.com/themrdemonized/xray-monolith/pull/730)
+  * erepb: modular all.spawn overrides (https://github.com/themrdemonized/xray-monolith/pull/684)
+  * GhenTuong: CRayPick: implement get\_multiply\_add, fix get\_normal (https://github.com/themrdemonized/xray-monolith/pull/704)
+  * hardcoon: Support large v13 AI maps for Pripyat Full (https://github.com/themrdemonized/xray-monolith/pull/689)
+  * lulnope: Allow controlling footstep sounds &amp; particles play distance (https://github.com/themrdemonized/xray-monolith/pull/720)
+  * nltp-ashes:
+    * feature(hud-snd-freq): add hud sound frequency &amp; delay to callback (https://github.com/themrdemonized/xray-monolith/pull/680)
+    * fix(color-anm): fix remove color anim (https://github.com/themrdemonized/xray-monolith/pull/682)
+    * fix(actor-legs-shadow): fix actor legs shadows (https://github.com/themrdemonized/xray-monolith/pull/690)
+    * feature(script-anm-shaders): expose script anim item shaders (https://github.com/themrdemonized/xray-monolith/pull/726)
+  * NotifyDeadCushion: Add Lua-accessible zoom inertia factor (https://github.com/themrdemonized/xray-monolith/pull/671)
+  * TheLostInPlace:
+    * Small script api additions (linked PR #1) (https://github.com/themrdemonized/xray-monolith/pull/674)
+    * map and ui: map spot callbacks, a bulk spot read, a few window additions and a minimap widget for scripts (linked PR # 3) (https://github.com/themrdemonized/xray-monolith/pull/676)
+    * magazine grenade launcher: fix faults in CWeaponSSRS (https://github.com/themrdemonized/xray-monolith/pull/713)
+    * shader bus: expansion, bug fixes, version bump (https://github.com/themrdemonized/xray-monolith/pull/736)
+  * Um-Yeah-No: Fix thunderbolt flash stacking while paused (https://github.com/themrdemonized/xray-monolith/pull/733)
+  * vacwave: Fix item and weapon position and direction when dropping (https://github.com/themrdemonized/xray-monolith/pull/734)
+  * Verdatim25:
+    * Invert scale\_hud\_motion\_marks Cvar; additive animations; and item motion marks (https://github.com/themrdemonized/xray-monolith/pull/673)
+    * New Cvar (npc\_dont\_drop\_weapons\_on\_death) that disables the NPCs drop… (https://github.com/themrdemonized/xray-monolith/pull/716)
+    * Fix for NPCs being unable to unjam tri-state reload weapons (https://github.com/themrdemonized/xray-monolith/pull/717)
+
+* MT:
+  * hardcoon: Port R4 full-detail distance control to Anomaly MT (https://github.com/themrdemonized/xray-monolith/pull/683)
+  * kovil-666:
+    * Clear mapLOD on traverse, fixes LOD list leak in sun cascades (https://github.com/themrdemonized/xray-monolith/pull/687)
+    * Direct lookup in CScriptStorage::object (https://github.com/themrdemonized/xray-monolith/pull/688)
+  * noisethanks:
+    * Fix use-after-free in vid\_modes\_string (get\_resolutions) (https://github.com/themrdemonized/xray-monolith/pull/698)
+    * Fix: snapshot m\_textures under creationGuard before iterating - #700 (https://github.com/themrdemonized/xray-monolith/pull/706)
+    * Fix: share the open-file-tracking lock across calls (https://github.com/themrdemonized/xray-monolith/pull/707)
+    * Fix: real join + lock for CTextureDescrMngr's THM loader threads (https://github.com/themrdemonized/xray-monolith/pull/705)
+  * TheLostInPlace: Fix scripted attachment UI's render phase ordering (https://github.com/themrdemonized/xray-monolith/pull/672)
+
 **2026.09.12**
 * Main and MT:
   * Fix https://github.com/themrdemonized/xray-monolith/issues/650

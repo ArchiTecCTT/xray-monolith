@@ -762,25 +762,31 @@ static void part2(const std::string& root, const std::string& dir)
 	// InterpolateOffset is the slide the test copies
 	const std::string io = body(cpp, "void CWeapon::InterpolateOffset(Fvector& current, const Fvector& target, const float factor) const");
 	CHECK(in_order(io, "if (target.similar(current, EPS))", "current.set(target);"));
-	CHECK(in_order(io, "diff.sub(current);", "diff.mul(factor * 2.5f);"));
+	CHECK(in_order(io, "diff.sub(current);", "diff.mul(clampr(factor * 2.5f, 0.f, 1.f));"));
 
-	// UpdateHudAdditional: the springs with keys, today's two lines without, the pending test as it was, the kick in the
+	// UpdateHudAdditional (after the 2026-11 upstream sync: upstream slerps the HUD rotation as quaternions): the springs
+	// with keys drive the Euler m_hud_offset[1] and the matrix is built from it (HudEulerRotation); without keys
+	// upstream's slide + InterpolateHudRotation; the pending test uses the Euler rotation with the springs; the kick in the
 	// matrix only
 	const std::string hud = body(cpp, "void CWeapon::UpdateHudAdditional(Fmatrix& trans)");
-	CHECK(in_order(hud, "curr_offs = hi->m_measures.m_hands_offset[0][idx];", "if (m_aim_settle_cfg.any())"));
-	CHECK(in_order(hud, "if (m_aim_settle_cfg.any())",
+	CHECK(in_order(hud, "curr_offs = hi->m_measures.m_hands_offset[0][idx];", "const bool aim_springs = m_aim_settle_cfg.any();"));
+	CHECK(in_order(hud, "if (aim_springs)",
 	               "const bool aim = (idx == 1 || idx == 3) && last_idx != 4 && !g_player_hud->m_adjust_mode;"));
 	CHECK(in_order(hud, "const bool aim =", "const float rotate_time = m_zoom_params.m_fZoomRotateTime * cur_silencer_koef.zoom_rotate_time *\n\t\t\t\tcur_scope_koef.zoom_rotate_time * cur_launcher_koef.zoom_rotate_time;"));
 	CHECK(in_order(hud, "const float rotate_time =", "eft_aim_settle::frame(m_aim_settle_cfg, m_aim_settle, aim, idx == 0, IsZoomed(), Device.fTimeDelta,\n\t\t\t\trotate_time, m_aim_settle_k, m_hud_offset[0], curr_offs, m_hud_offset[1], curr_rot,"));
 	CHECK(in_order(hud, "eft_aim_settle::frame(", "{ InterpolateOffset(current, target, factor); });"));
-	CHECK(in_order(hud, "{ InterpolateOffset(current, target, factor); });", "else\n\t\t{\n\t\t\tInterpolateOffset(m_hud_offset[0], curr_offs, factor);\n\t\t\tInterpolateOffset(m_hud_offset[1], curr_rot, factor);\n\t\t}\n\t\tInterpolateOffset(m_hud_aim_rot, curr_aim_rot, factor);"));
-	CHECK(in_order(hud, "InterpolateOffset(m_hud_aim_rot, curr_aim_rot, factor);", "if (curr_offs.similar(m_hud_offset[0], .02f) && curr_rot.similar(m_hud_offset[1], .02f))"));
+	CHECK(in_order(hud, "{ InterpolateOffset(current, target, factor); });", "InterpolateHudAimRotation(curr_aim_rot, factor);"));
+	CHECK(in_order(hud, "InterpolateHudAimRotation(curr_aim_rot, factor);", "m_hud_rotation.set(HudEulerRotation(m_hud_offset[1])).normalize();"));
+	CHECK(in_order(hud, "m_hud_rotation.set(HudEulerRotation(m_hud_offset[1])).normalize();", "rotation_reached = curr_rot.similar(m_hud_offset[1], .02f);"));
+	CHECK(in_order(hud, "rotation_reached = curr_rot.similar(m_hud_offset[1], .02f);", "else\n\t\t{\n\t\t\tInterpolateOffset(m_hud_offset[0], curr_offs, factor);\n\t\t\trotation_reached = InterpolateHudRotation(curr_rot, curr_aim_rot, factor);\n\t\t}"));
+	CHECK(in_order(hud, "rotation_reached = InterpolateHudRotation(curr_rot, curr_aim_rot, factor);", "if (curr_offs.similar(m_hud_offset[0], .02f) && rotation_reached)"));
 	CHECK(in_order(hud, "if (curr_offs.similar(m_hud_offset[0], .02f)", "Fvector hud_offs = m_hud_offset[0], hud_rot = m_hud_offset[1];"));
 	CHECK(in_order(hud, "Fvector hud_offs = m_hud_offset[0], hud_rot = m_hud_offset[1];", "if (m_aim_settle.kick)\n\t\t\tm_aim_settle.add_kick(hud_offs, hud_rot);"));
-	CHECK(in_order(hud, "m_aim_settle.add_kick(hud_offs, hud_rot);", "hud_rotation.rotateX(hud_rot.x);"));
-	CHECK(in_order(hud, "hud_rotation.rotateX(hud_rot.x);", "hud_rotation_y.rotateY(hud_rot.y);"));
-	CHECK(in_order(hud, "hud_rotation_y.rotateY(hud_rot.y);", "hud_rotation_y.rotateZ(hud_rot.z);"));
-	CHECK(in_order(hud, "hud_rotation_y.rotateZ(hud_rot.z);", "hud_rotation.translate_over(hud_offs);"));
+	CHECK(in_order(hud, "m_aim_settle.add_kick(hud_offs, hud_rot);", "if (aim_springs)\n\t\t\thud_rotation = HudEulerRotation(hud_rot);\n\t\telse\n\t\t\thud_rotation.rotation(m_hud_rotation);"));
+	CHECK(in_order(hud, "hud_rotation.rotation(m_hud_rotation);", "hud_rotation.translate_over(hud_offs);"));
+	const std::string eul = body(cpp, "Fmatrix CWeapon::HudEulerRotation(const Fvector& rot)");
+	CHECK(in_order(eul, "r.rotateX(rot.x);", "axis.rotateY(rot.y);"));
+	CHECK(in_order(eul, "axis.rotateY(rot.y);", "axis.rotateZ(rot.z);"));
 	CHECK(count(hud, "rotateX(m_hud_offset[1].x)") == 0 && count(hud, "translate_over(m_hud_offset[0])") == 0);
 	// the kick is never written into m_hud_offset by the weapon (only ResetAimSettle's fold) and read nowhere else
 	CHECK(count(cpp, "add_kick") == 1 && count(cpp, "m_aim_settle.ky") == 0 && count(cpp, "m_aim_settle.fold") == 0);

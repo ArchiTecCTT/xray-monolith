@@ -312,6 +312,8 @@ float ps_r2_tnmp_exposure = 7.0f; // r2-only
 float ps_r2_tnmp_gamma = .25f; // r2-only
 float ps_r2_tnmp_onoff = .0f; // r2-only
 
+float ps_r4_full_detail_distance_scale = 0.5f; // r4-only
+
 // HDR10 parameters
 float ps_r4_hdr10_whitepoint_nits = 400.0f; // r4-only, default = 400 nits
 float ps_r4_hdr10_ui_nits         = 400.0f; // r4-only, default = 400 nits
@@ -364,6 +366,19 @@ float ps_r2_img_gamma = 1.0f; // r2-only
 float ps_r2_img_saturation = 1.0f; // r2-only
 Fvector ps_r2_img_cg = {.0f, .0f, .0f}; // r2-only
 
+float ps_r4_atlas_resolution = 0.6666667f; // r4-only
+// Atlas allocation settings take effect on vid_restart.
+int ps_r4_atlas = 0;
+int ps_r4_atlas_width = 2048;
+int ps_r4_atlas_height = 2048;
+u32 ps_r4_atlas_msaa = 2; // Token index; sample count is 1 << index.
+xr_token ui_3d_icons_msaa_token[] = {
+	{"st_opt_off", 0},
+	{"2x", 1},
+	{"4x", 2},
+	{0, 0}
+};
+
 Fvector4 ps_pp_bloom_thresh = { .7, .8f, .9f, .0f };
 Fvector4 ps_pp_bloom_weight = { .33f, .33f, .33f, .0f };
 
@@ -394,7 +409,12 @@ Fvector4 ps_s3ds_param_2 = { 0, 0, 0, 0 };
 Fvector4 ps_s3ds_param_3 = { 0, 0, 0, 0 };
 Fvector4 ps_s3ds_param_4 = { 0, 0, 0, 0 };
 
+// Reflex Sights
+Fvector4 ps_reflex_param = { 0, 0, 0, 0 };
+
 float hud_fov_aim_factor = 0;
+
+int interpolation_based_scope_zoom = 0;
 
 // Screen Space Shaders Stuff
 Fvector4 ps_ssfx_floravariation = { 0.025, 0.1, 0.025, 0.05 }; // Grass Int, Grass Freq, Foliage Int, Foliage Freq ( 0.025, 0.1, 0.03, 0.05 )
@@ -459,7 +479,7 @@ Fvector4 ps_ssfx_wetsurfaces_2 = { 1.0f, 1.0f, 1.0f, 1.0f }; // Wet surfaces 2
 int ps_ssfx_is_underground = 0;
 int ps_ssfx_gloss_method = 0;
 float ps_ssfx_gloss_factor = 0.5f;
-Fvector4 ps_ssfx_gloss_minmax = { 0.0f,0.92f,0.0f,0.0f }; // Gloss
+Fvector3 ps_ssfx_gloss_minmax = { 0.0f,0.92f,0.0f }; // Gloss
 
 Fvector4 ps_ssfx_lightsetup_1 = { 0.35f, 0.5f, 0.0f, 0.0f }; // Spec intensity
 
@@ -1103,11 +1123,7 @@ static const struct
 	{"shader_param_5", &ps_dev_param_5},
 	{"shader_param_6", &ps_dev_param_6},
 	{"shader_param_7", &ps_dev_param_7},
-	{"shader_param_8", &ps_dev_param_8},
-	{"s3ds_param_1", &ps_s3ds_param_1},
-	{"s3ds_param_2", &ps_s3ds_param_2},
-	{"s3ds_param_3", &ps_s3ds_param_3},
-	{"s3ds_param_4", &ps_s3ds_param_4}
+	{"shader_param_8", &ps_dev_param_8}
 };
 
 class CCC_BusList : public IConsole_Command
@@ -1126,14 +1142,33 @@ public:
 			if (!l)
 				continue;
 
+			string512 tags;
+			tags[0] = 0;
+			if (!l->rows_bound.empty() || l->rows_declared > 1)
+				xr_sprintf(tags, " rows %u/%u", u32(l->rows_bound.size()), l->rows_declared);
+			if (l->kind == ShaderBus::kind_uint)
+				xr_strcat(tags, " uint");
+			if (0 == strncmp(l->id.c_str(), "obj_", 4))
+			{
+				string32 objects;
+				xr_sprintf(objects, " objects %u", l->objects);
+				xr_strcat(tags, objects);
+			}
+			if (l->texture_bound.size())
+			{
+				string512 texture;
+				xr_sprintf(texture, " texture '%s'", l->texture_bound.c_str());
+				xr_strcat(tags, texture);
+			}
+
+			string256 value;
 			if (l->registered)
-				Msg("[SHADER-BUS] bus_%s owner '%s' = (%f, %f, %f, %f) %s [%s changes %d writes %d bound frame %d]",
-				    l->id.c_str(), l->owner.c_str(),
-				    l->bound.x, l->bound.y, l->bound.z, l->bound.w, l->description.c_str(),
-				    l->is_forced ? "forced" : "registered", l->changes, l->writes, l->bound_frame);
+				Msg("[SHADER-BUS] bus_%s owner '%s' = %s %s [%s changes %d writes %d bound frame %d]%s",
+				    l->id.c_str(), l->owner.c_str(), ShaderBus::value_text(l, l->bound, value), l->description.c_str(),
+				    l->is_forced ? "forced" : "registered", l->changes, l->writes, l->bound_frame, tags);
 			else
-				Msg("[SHADER-BUS] bus_%s declared by shaders, not registered [%s changes %d writes %d bound frame %d]",
-				    l->id.c_str(), l->is_forced ? "forced" : "declared", l->changes, l->writes, l->bound_frame);
+				Msg("[SHADER-BUS] bus_%s declared by shaders, not registered [%s changes %d writes %d bound frame %d]%s",
+				    l->id.c_str(), l->is_forced ? "forced" : "declared", l->changes, l->writes, l->bound_frame, tags);
 		}
 
 		for (u32 i = 0; i < sizeof(legacy_lanes) / sizeof(legacy_lanes[0]); ++i)
@@ -1159,10 +1194,21 @@ public:
 		Fvector4 v;
 		if (!ShaderBus::get(args, v))
 		{
-			Msg("~ [SHADER-BUS] no lane named %s", args);
+			Msg("~ [SHADER-BUS] no lane with id %s", args);
 			return;
 		}
-		Msg("[SHADER-BUS] bus_%s = (%f, %f, %f, %f)", args, v.x, v.y, v.z, v.w);
+		const ShaderBus::lane* l = ShaderBus::find(args);
+		string256 value;
+		Msg("[SHADER-BUS] bus_%s = %s", args, ShaderBus::value_text(l, v, value));
+		if (l && 0 == strncmp(l->id.c_str(), "obj_", 4))
+			Msg("[SHADER-BUS] bus_%s is the default, %u objects have their own value", args, l->objects);
+		if (l && l->texture_bound.size())
+			Msg("[SHADER-BUS] $user$bus_%s shows '%s'", args, l->texture_bound.c_str());
+
+		// rows past row 0 that have a value, up to sixteen in all
+		const u32 rows = l ? _min(u32(l->rows_bound.size()), 16u) : 0;
+		for (u32 r = 1; r < rows; ++r)
+			Msg("[SHADER-BUS] bus_%s[%u] = %s", args, r, ShaderBus::value_text(l, l->rows_bound[r], value));
 	}
 
 	virtual void Info(TInfo& I) { xr_strcpy(I, "lane id"); }
@@ -1179,24 +1225,46 @@ public:
 		id[0] = 0;
 
 		Fvector4 v;
-		if (!args || 5 != sscanf(args, "%63s %f %f %f %f", id, &v.x, &v.y, &v.z, &v.w))
+		if (!args || 1 != sscanf(args, "%63s", id))
 		{
 			Msg("~ [SHADER-BUS] usage bus_force <id> x y z w");
 			return;
 		}
 
-		if (!_finite(v.x) || !_finite(v.y) || !_finite(v.z) || !_finite(v.w))
+		// a uint lane takes four unsigned values bit for bit
+		const ShaderBus::lane* l = ShaderBus::find(id);
+		if (l && l->kind == ShaderBus::kind_uint)
 		{
-			Msg("~ [SHADER-BUS] bus_force needs finite values");
-			return;
+			u32 raw[4];
+			if (5 != sscanf(args, "%63s %u %u %u %u", id, &raw[0], &raw[1], &raw[2], &raw[3]))
+			{
+				Msg("~ [SHADER-BUS] usage bus_force <id> a b c d, four unsigned values on a uint lane");
+				return;
+			}
+			CopyMemory(&v, raw, sizeof(raw));
+		}
+		else
+		{
+			if (5 != sscanf(args, "%63s %f %f %f %f", id, &v.x, &v.y, &v.z, &v.w))
+			{
+				Msg("~ [SHADER-BUS] usage bus_force <id> x y z w");
+				return;
+			}
+
+			if (!_finite(v.x) || !_finite(v.y) || !_finite(v.z) || !_finite(v.w))
+			{
+				Msg("~ [SHADER-BUS] bus_force needs finite values");
+				return;
+			}
 		}
 
 		if (!ShaderBus::force(id, v))
 		{
-			Msg("~ [SHADER-BUS] no lane named %s", id);
+			Msg("~ [SHADER-BUS] no lane with id %s", id);
 			return;
 		}
-		Msg("[SHADER-BUS] bus_%s held at (%f, %f, %f, %f)", id, v.x, v.y, v.z, v.w);
+		string256 value;
+		Msg("[SHADER-BUS] bus_%s forced to %s", id, ShaderBus::value_text(l, v, value));
 	}
 
 	virtual void Info(TInfo& I) { xr_strcpy(I, "lane id and four floats"); }
@@ -1220,7 +1288,7 @@ public:
 
 		if (!ShaderBus::release(id))
 		{
-			Msg("~ [SHADER-BUS] no lane named %s", id);
+			Msg("~ [SHADER-BUS] no lane with id %s", id);
 			return;
 		}
 		Msg("[SHADER-BUS] bus_%s released", id);
@@ -1480,6 +1548,8 @@ void xrRender_initconsole()
 	CMD4(CCC_Float, "r2_tnmp_gamma", &ps_r2_tnmp_gamma, 0.0f, 20.0f);
 	CMD4(CCC_Float, "r2_tnmp_onoff", &ps_r2_tnmp_onoff, 0.0f, 1.0f);
 
+	CMD4(CCC_Float, "r4_full_detail_distance_scale", &ps_r4_full_detail_distance_scale, 0.1f, 1.0f);
+
     CMD4(CCC_Float,   "r4_hdr10_whitepoint_nits", &ps_r4_hdr10_whitepoint_nits,  10.0f, 10000.0f);
     CMD4(CCC_Float,   "r4_hdr10_ui_nits", 		  &ps_r4_hdr10_ui_nits, 	     10.0f, 10000.0f);
     CMD4(CCC_Float,   "r4_hdr10_pda_intensity",   &ps_r4_hdr10_pda_intensity,      0.1, 2);
@@ -1557,6 +1627,12 @@ void xrRender_initconsole()
 	CMD4(CCC_Integer,	"r2_gi_photons",		&ps_r2_GI_photons,			8,		256		);
 	CMD4(CCC_Float,		"r2_gi_refl",			&ps_r2_GI_refl,				EPS_L,	0.99f	);
 
+	CMD4(CCC_Integer, "r4_atlas", &ps_r4_atlas, 0, 1);
+	CMD4(CCC_Float, "r4_atlas_resolution", &ps_r4_atlas_resolution, 0.1f, 1.0f);
+	CMD4(CCC_Integer, "r4_atlas_width", &ps_r4_atlas_width, 256, 8192);
+	CMD4(CCC_Integer, "r4_atlas_height", &ps_r4_atlas_height, 256, 8192);
+	CMD3(CCC_Token, "r4_atlas_msaa", &ps_r4_atlas_msaa, ui_3d_icons_msaa_token);
+
 	//Shader param stuff
 	Fvector4 tw2_min = { -100.f, -100.f, -100.f, -100.f };
 	Fvector4 tw2_max = { 100.f, 100.f, 100.f, 100.f };
@@ -1569,23 +1645,28 @@ void xrRender_initconsole()
 	CMD4(CCC_Vector4Legacy, "shader_param_7", &ps_dev_param_7, tw2_min, tw2_max);
 	CMD4(CCC_Vector4Legacy, "shader_param_8", &ps_dev_param_8, tw2_min, tw2_max);
 
-	CMD1(CCC_BusList, "bus_list");
-	CMD1(CCC_BusGet, "bus_get");
-	CMD1(CCC_BusForce, "bus_force");
-	CMD1(CCC_BusRelease, "bus_release");
-
 	// Mark Switch
 	CMD4(CCC_Integer, "markswitch_current", &ps_markswitch_current, 0, 32);
 	CMD4(CCC_Integer, "markswitch_count", &ps_markswitch_count, 0, 32);
 	CMD4(CCC_Vector4, "markswitch_color", &ps_markswitch_color, Fvector4().set(0.0, 0.0, 0.0, 0.0), Fvector4().set(1.0, 1.0, 1.0, 1.0));
 
 	// Shader 3D Scopes
-	CMD4(CCC_Vector4Legacy, "s3ds_param_1", &ps_s3ds_param_1, tw2_min, tw2_max);
-	CMD4(CCC_Vector4Legacy, "s3ds_param_2", &ps_s3ds_param_2, tw2_min, tw2_max);
-	CMD4(CCC_Vector4Legacy, "s3ds_param_3", &ps_s3ds_param_3, tw2_min, tw2_max);
-	CMD4(CCC_Vector4Legacy, "s3ds_param_4", &ps_s3ds_param_4, tw2_min, tw2_max);
+    CMD4(CCC_Vector4, "s3ds_param_1", &ps_s3ds_param_1, tw2_min, tw2_max);
+    CMD4(CCC_Vector4, "s3ds_param_2", &ps_s3ds_param_2, tw2_min, tw2_max);
+    CMD4(CCC_Vector4, "s3ds_param_3", &ps_s3ds_param_3, tw2_min, tw2_max);
+    CMD4(CCC_Vector4, "s3ds_param_4", &ps_s3ds_param_4, tw2_min, tw2_max);
+
+	CMD1(CCC_BusList, "bus_list");
+	CMD1(CCC_BusGet, "bus_get");
+	CMD1(CCC_BusForce, "bus_force");
+	CMD1(CCC_BusRelease, "bus_release");
+
+	// Reflex Sights
+	CMD4(CCC_Vector4, "reflex_param", &ps_reflex_param, Fvector4().set(0.0, 0.0, 0.0, 0.0), Fvector4().set(1000.0, 1000.0, 1000.0, 1000.0));
 
 	CMD4(CCC_Float, "hud_fov_aim_factor", &hud_fov_aim_factor, 0.0f, 1.0f);
+
+	CMD4(CCC_Integer, "interpolation_based_scope_zoom", &interpolation_based_scope_zoom, 0, 1);
 
 	// Screen Space Shaders
 	CMD4(CCC_Vector4, "ssfx_floravariation", &ps_ssfx_floravariation, Fvector4().set(0, 0, 0, 0), Fvector4().set(10, 1, 10, 1));
@@ -1648,7 +1729,7 @@ void xrRender_initconsole()
 
 	CMD4(CCC_Integer, "ssfx_is_underground", &ps_ssfx_is_underground, 0, 1);
 	CMD4(CCC_Integer, "ssfx_gloss_method", &ps_ssfx_gloss_method, 0, 1);
-	CMD4(CCC_Vector4, "ssfx_gloss_minmax", &ps_ssfx_gloss_minmax, Fvector4().set(0, 0, 0, 0), Fvector4().set(1.0, 1.0, 1.0, 1.0));
+	CMD4(CCC_Vector3, "ssfx_gloss_minmax", &ps_ssfx_gloss_minmax, Fvector3().set(0, 0, 0), Fvector3().set(1.0, 1.0, 1.0));
 	CMD4(CCC_Float, "ssfx_gloss_factor", &ps_ssfx_gloss_factor, 0.0f, 1.0f);
 
 	CMD4(CCC_Vector4, "ssfx_lightsetup_1", &ps_ssfx_lightsetup_1, Fvector4().set(0, 0, 0, 0), Fvector4().set(1.0, 1.0, 1.0, 1.0));

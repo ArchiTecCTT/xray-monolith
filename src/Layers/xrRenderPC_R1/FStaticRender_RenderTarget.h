@@ -9,6 +9,8 @@ public:
 	ref_rt rt_secondVP; //--#SM+#-- +SecondVP+
 	ref_rt rt_ui_pda;
 	ref_rt rt_svp_work; // SVP-lite: scratch RT the small SVP frame is rendered into (copied to rt_secondVP)
+	ref_shader s_ui_icons[6]; // SKIN_NONE, SKIN_0 ... SKIN_4
+	IDirect3DSurface9* ui_icons_depth = nullptr; // Reused; never clear scene depth for icons.
 	
 private:
 	// SVP-lite: small second viewport (r1_svp_size)

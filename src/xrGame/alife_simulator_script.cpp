@@ -16,9 +16,13 @@
 #include "restriction_space.h"
 #include "alife_graph_registry.h"
 #include "alife_spawn_registry.h"
+#include "alife_schedule_registry.h"
 #include "alife_registry_container.h"
 #include "xrServer.h"
 #include "level.h"
+#include "game_graph.h"
+#include "level_graph.h"
+#include "game_level_cross_table.h"
 
 #include <luabind/iterator_policy.hpp>
 #include <luabind/iterator_pair_policy.hpp>
@@ -228,6 +232,50 @@ CSE_Abstract* CALifeSimulator__spawn_item3(CALifeSimulator* self, LPCSTR section
 	CSE_Abstract* item = self->spawn_item(section, position, level_vertex_id, game_vertex_id, id_parent, false);
 
 	return (item);
+}
+
+// create(section, position, level_vertex_id, game_vertex_id) with the ids derived from level_name and position. On
+// the current level both come from its AI map and cross table. Elsewhere the game vertex is the level's nearest
+// by level point and the level vertex is level_vertex_id, or with u32(-1) that game vertex's own, which
+// synchronize_location re-snaps to position when the level loads. nullptr (logged) when the game graph lacks the
+// level.
+CSE_Abstract* CALifeSimulator__spawn_on_level2(CALifeSimulator* self, LPCSTR section, LPCSTR level_name, const Fvector& position, u32 level_vertex_id)
+{
+	THROW(self);
+	const CGameGraph& graph = ai().game_graph();
+	const GameGraph::SLevel* level = graph.header().level(level_name, true);
+	if (!level)
+	{
+		Msg("! alife():create_on_level: level '%s' is not in the game graph, %s not created", level_name, section);
+		return (nullptr);
+	}
+
+	GameGraph::_GRAPH_ID game_vertex_id;
+	const CLevelGraph* level_graph = ai().get_level_graph();
+	if (level_graph && level_graph->level_id() == level->id())
+	{
+		level_vertex_id = level_graph->vertex(u32(-1), position);
+		game_vertex_id = ai().cross_table().vertex(level_vertex_id).game_vertex_id();
+	}
+	else
+	{
+		u32 vertex_id;
+		float distance;
+		if (!graph.nearest_vertex(level->id(), position, vertex_id, distance))
+		{
+			Msg("! alife():create_on_level: level '%s' has no game vertices, %s not created", level_name, section);
+			return (nullptr);
+		}
+		game_vertex_id = GameGraph::_GRAPH_ID(vertex_id);
+		if (level_vertex_id == u32(-1))
+			level_vertex_id = graph.vertex(vertex_id)->level_vertex_id();
+	}
+	return (self->spawn_item(section, position, level_vertex_id, game_vertex_id, ALife::_OBJECT_ID(-1)));
+}
+
+CSE_Abstract* CALifeSimulator__spawn_on_level(CALifeSimulator* self, LPCSTR section, LPCSTR level_name, const Fvector& position)
+{
+	return (CALifeSimulator__spawn_on_level2(self, section, level_name, position, u32(-1)));
 }
 
 CSE_Abstract* CALifeSimulator__spawn_ammo(CALifeSimulator* self, LPCSTR section, const Fvector& position, u32 level_vertex_id, GameGraph::_GRAPH_ID game_vertex_id, ALife::_OBJECT_ID id_parent, int ammo_to_spawn)
@@ -458,6 +506,11 @@ void set_objects_per_update(CALifeSimulator* self, u32 count)
 	self->objects_per_update(count);
 }
 
+u32 get_objects_per_update(CALifeSimulator* self)
+{
+	return self->scheduled().objects_per_update();
+}
+
 void set_process_time(CALifeSimulator* self, int micro)
 {
 	self->set_process_time(micro);
@@ -641,6 +694,8 @@ void CALifeSimulator::script_register(lua_State* L)
 		.def("create", &CALifeSimulator__spawn_item)
 		.def("create", &CALifeSimulator__spawn_item3)
 		.def("create_ammo", &CALifeSimulator__spawn_ammo)
+		.def("create_on_level", &CALifeSimulator__spawn_on_level)
+		.def("create_on_level", &CALifeSimulator__spawn_on_level2)
 		.def("release", &CALifeSimulator__release)
 		.def("spawn_id", &CALifeSimulator__spawn_id)
 		.def("actor", &get_actor)
@@ -657,6 +712,7 @@ void CALifeSimulator::script_register(lua_State* L)
 		.def("clone_weapon", &try_to_clone_object)
 		.def("register", &reprocess_spawn)
 		.def("set_objects_per_update", &set_objects_per_update)
+		.def("objects_per_update", &get_objects_per_update)
 		.def("set_process_time", &set_process_time)
 		.def("force_update", &force_update)
 		.def("get_children", &get_children, return_stl_iterator)

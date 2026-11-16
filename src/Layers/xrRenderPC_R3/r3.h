@@ -154,6 +154,7 @@ public:
 
 	shared_str c_sbase;
 	shared_str c_lmaterial;
+	bool o_hotness_own = false;
 	float o_hemi;
 	float o_hemi_cube[CROS_impl::NUM_FACES];
 	float o_sun;
@@ -167,6 +168,9 @@ public:
 	Fmatrix rainwet_cull_xform;
 	
 	CDSGraphManager GMRainWet = CDSGraphManager(u32(0), u32(STYPE_RENDERABLE), { true,false,false,false,true,false,false });
+	CDSGraphManager GMUI3D = CDSGraphManager(0, 0, { true,true,false,true,false,false,false });
+	virtual IDSGraphManager* GetUI3DGraph() override { return &GMUI3D; }
+
 	CDSGraphManager GMBase = CDSGraphManager(u32(CDSGraphManager::VQ_HOM + CDSGraphManager::VQ_SSA + CDSGraphManager::VQ_FADE),
 		u32(STYPE_RENDERABLE + STYPE_PARTICLE + STYPE_LIGHTSOURCE),
 		{ true, true, true, true, false, false, false });
@@ -222,6 +226,7 @@ public:
 
 	ICF void apply_object(IRenderable* O)
 	{
+		RCache.bus_object.apply(O);
 		if (0 == O) return;
 		if (0 == O->renderable_ROS()) return;
 		CROS_impl& LT = *((CROS_impl*)O->renderable_ROS());
@@ -230,7 +235,9 @@ public:
 		//o_hemi						= 0.5f*LT.get_hemi			()	;
 		o_sun = 0.75f * LT.get_sun();
 
-		RCache.hemi.set_hotness(O->GetHotness(), O->GetTransparency(), 0.f, 0.f);		//--DSR-- HeatVision
+		float hotness = O->GetHotness();
+		o_hotness_own = ShaderBus::object_hotness(O->renderable.bus_values, hotness);
+		RCache.hemi.set_hotness(hotness, O->GetTransparency(), 0.f, 0.f);		//--DSR-- HeatVision
 		RCache.hemi.set_glowing(														//--DSR-- SilencerOverheat
 			sil_glow_color.x,
 			sil_glow_color.y,
@@ -241,6 +248,10 @@ public:
 
 	IC void apply_lmaterial()
 	{
+		RCache.bus_object.apply_static();
+		// an object's own obj_hotness skips the hot texture check, only for the draw right after apply_object
+		const bool hotness_own = o_hotness_own;
+		o_hotness_own = false;
 		R_constant* C = RCache.get_c(c_sbase); // get sampler
 		if (0 == C) return;
 		VERIFY(RC_dest_sampler == C->destination);
@@ -251,7 +262,7 @@ public:
 #ifdef	DEBUG
         if (ps_r2_ls_flags.test(R2FLAG_GLOBALMATERIAL))	mtl=ps_r2_gmaterial;
 #endif
-		if (!(T && T->m_is_hot))							//--DSR-- HeatVision
+		if (!hotness_own && !(T && T->m_is_hot))			//--DSR-- HeatVision
 			RCache.hemi.set_hotness(0.f, 0.f, 0.f, 0.f);
 		if (!(T && T->m_is_glowing))						//--DSR-- SilencerOverheat
 			RCache.hemi.set_glowing(0.f, 0.f, 0.f, 0.f);
@@ -347,7 +358,7 @@ public:
 	virtual void models_Prefetch();
 	virtual void models_PrefetchOne(LPCSTR name, bool assert = true);
 	virtual void models_Clear(BOOL b_complete);
-	virtual bool models_Exists(LPCSTR name);
+	virtual bool models_Exists(LPCSTR name, bool no_prefetch = false);
 	
 	// anglobes: Sun Values
 	virtual Fvector GetSunPosition()
@@ -391,6 +402,7 @@ public:
 	// Main
 	virtual void Calculate();
 	virtual void Render();
+	virtual void RenderUI3DDirect();
 	virtual void Screenshot(ScreenshotMode mode = SM_NORMAL, LPCSTR name = 0);
 	virtual void Screenshot(ScreenshotMode mode, CMemoryWriter& memory_writer);
 	virtual void ScreenshotAsyncBegin();

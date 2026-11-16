@@ -8,6 +8,7 @@
 //#include "fbasicvisual.h"
 #include "cameramanager.h"
 #include "environment.h"
+#include "IGame_Persistent.h"
 #include "xr_input.h"
 #include "CustomHUD.h"
 
@@ -1124,8 +1125,29 @@ public:
 	}
 };
 
+// Re-read env modifiers for the current level
+class CCC_EnvModsReload : public IConsole_Command
+{
+public:
+	CCC_EnvModsReload(pcstr name) : IConsole_Command(name) { bEmptyArgsHandled = true; }
+	void Execute(pcstr args) override
+	{
+		if (!g_pGameLevel || !g_pGamePersistent)
+		{
+			Log("! env_mods_reload: no level loaded");
+			return;
+		}
+		CEnvironment& env = g_pGamePersistent->Environment();
+		env.mods_reload();
+		Msg("* env_mods_reload: %u modifier(s) active", u32(env.Modifiers.size()));
+	}
+};
+
 ENGINE_API float psHUD_FOV_def = 0.45f;
 ENGINE_API float psHUD_FOV = psHUD_FOV_def;
+ENGINE_API float psCamAttachedFOV = 83.f;
+
+float psCAM_ATTACHED_FOV = 1.0;
 
 //extern int psSkeletonUpdate;
 extern int rsDVB_Size;
@@ -1184,6 +1206,8 @@ float scope_fog_sharp = 4.0f;
 int scope_2dtexactive = 0.0;
 Fvector3 ssfx_wetness_multiplier = Fvector3().set(1.0f, 0.3f, 0.0f);
 
+BOOL dump_cvar_enable = TRUE;
+
 void CCC_Register()
 {
 	// General
@@ -1194,6 +1218,7 @@ void CCC_Register()
 	CMD1(CCC_SaveCFG, "cfg_save");
 	CMD1(CCC_LoadCFG, "cfg_load");
 	CMD1(CCC_DumpCVars, "dump_cvar");
+        CMD4(CCC_Integer, "dump_cvar_enable", &dump_cvar_enable, 0, 1);
 	CMD1(CCC_RenderDocCapture, "rdoc_capture");
 	CMD1(CCC_RenderDocOpen, "rdoc_open");
 	CMD1(CCC_RenderDocOverlay, "rdoc_overlay");
@@ -1291,6 +1316,7 @@ void CCC_Register()
 	CMD1(CCC_PART_Import, "part_import");
 
 	CMD1(CCC_VID_Reset, "vid_restart");
+	CMD4(CCC_Integer, "g_loading_screen_early", &psLoadingScreenEarly, 0, 1);
 
 	// Sound
 	CMD2(CCC_Float, "snd_volume_eff", &psSoundVEffects);
@@ -1401,6 +1427,10 @@ void CCC_Register()
 	CMD4(CCC_SVPInfoInt, "r1_svp_reproject", &ps_r1_svp_reproject, 0, 1); // scope SVP (R1): follow the aim between SVP frames
 	CMD4(CCC_SVPInfoInt, "r1_svp_stats", &ps_r1_svp_stats, 0, 1); // scope SVP (R1): timing log every ~2 s
 	CMD3(CCC_Mask, "rs_refresh_60hz", &psDeviceFlags, rsRefresh60hz);
+	CMD3(CCC_Mask, "dbg_ph_shapes", &psDeviceFlags2, rsDBGDrawPHShapes);
+	CMD3(CCC_Mask, "dbg_ph_bones", &psDeviceFlags2, rsDBGDrawPHBones);
+	CMD3(CCC_Mask, "dbg_vis_boxes", &psDeviceFlags2, rsDBGDrawVisBoxes);
+	CMD3(CCC_Mask, "dbg_attachment_cforms", &psDeviceFlags2, rsDBGDrawAttCForms);
 	CMD2(CCC_Color, "g_crosshair_color", &g_crosshair_color);
 	CMD4(CCC_Float, "mouse_sens_aim", &g_AimLookFactor, 0.01f, 5.0f);
 
@@ -1428,6 +1458,7 @@ void CCC_Register()
 	CMD4(CCC_Float, "scope_fog_sharp", &scope_fog_sharp, 0, 1000);
 	CMD2(CCC_Integer, "scope_2dtexactive", &scope_2dtexactive);
 	CMD1(CCC_Editor, "rs_editor");
+	CMD1(CCC_EnvModsReload, "env_mods_reload");
 #ifdef DEBUG
     extern BOOL debug_destroy;
     CMD4(CCC_Integer, "debug_destroy", &debug_destroy, FALSE, TRUE);

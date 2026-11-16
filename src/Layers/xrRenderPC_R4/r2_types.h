@@ -71,6 +71,10 @@
 
 #define		r2_RT_dof			"$user$dof"
 #define		r2_RT_ui			"$user$ui"
+#define		r2_RT_ui_3d_icons		"$user$ui_3d_icons"
+#define		r2_RT_ui_3d_icons_raw	"$user$ui_3d_icons_raw"
+#define		r2_RT_ui_3d_icons_raw_msaa "$user$ui_3d_icons_raw_msaa"
+#define		r2_RT_ui_3d_icons_depth	"$user$ui_3d_icons_depth"
 
 #define		r2_RT_scopert		"$user$scopeRT" //crookr
 #define		r2_RT_heat			"$user$heat" //--DSR-- HeatVision
@@ -172,7 +176,7 @@ extern float ps_r2_gloss_min;
 
 extern int ps_ssfx_gloss_method;
 extern float ps_ssfx_gloss_factor;
-extern Fvector4 ps_ssfx_gloss_minmax;
+extern Fvector3 ps_ssfx_gloss_minmax;
 
 IC float u_diffuse2s(float x, float y, float z)
 {

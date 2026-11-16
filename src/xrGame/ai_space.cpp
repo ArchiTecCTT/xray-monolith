@@ -116,6 +116,9 @@ void CAI_Space::load(LPCSTR level_name)
 	          "cross_table doesn't correspond to the AI-map");
 	R_ASSERT2(cross_table().header().game_guid() == game_graph().header().guid(),
 	          "graph doesn't correspond to the cross table");
+	if (cross_table().header().level_vertex_count() != level_graph().header().vertex_count())
+		Msg("! [spawn_overlays] level '%s': levels\\%s\\level.ai has %d AI nodes but the game graph was built for %d, with the same GUID; the level files and the spawn are different builds",
+		    level_name, level_name, level_graph().header().vertex_count(), cross_table().header().level_vertex_count());
 	m_graph_engine = xr_new<CGraphEngine>(
 		_max(
 			game_graph().header().vertex_count(),
@@ -131,6 +134,8 @@ void CAI_Space::load(LPCSTR level_name)
 #endif
 
 	level_graph().level_id(current_level.id());
+	if (m_patrol_path_storage)
+		m_patrol_path_storage->resolve_level(&level_graph(), &cross_table(), &game_graph());
 	m_cover_manager->compute_static_cover();
 	m_moving_objects->on_level_load();
 
@@ -197,7 +202,7 @@ void CAI_Space::patrol_path_storage_raw(IReader& stream)
 	xr_delete(m_patrol_path_storage);
 	m_patrol_path_storage = xr_new<CPatrolPathStorage>();
 	m_patrol_path_storage->load_raw(get_level_graph(), get_cross_table(), get_game_graph(), stream);
-	m_patrol_path_storage->load_from_config();
+	m_patrol_path_storage->load_from_config(get_game_graph());
 }
 
 void CAI_Space::patrol_path_storage(IReader& stream)
@@ -208,7 +213,7 @@ void CAI_Space::patrol_path_storage(IReader& stream)
 	xr_delete(m_patrol_path_storage);
 	m_patrol_path_storage = xr_new<CPatrolPathStorage>();
 	m_patrol_path_storage->load(stream);
-	m_patrol_path_storage->load_from_config();
+	m_patrol_path_storage->load_from_config(get_game_graph());
 }
 
 void CAI_Space::set_alife(CALifeSimulator* alife_simulator)

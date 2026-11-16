@@ -84,7 +84,7 @@ public:
 
 	void Prefetch();
 	void Prefetch_One(LPCSTR N, bool assert = true);
-	bool Exists(LPCSTR N);
+	bool Exists(LPCSTR N, bool no_prefetch = false);
 	void ClearPool(BOOL b_complete);
 	// Frees base (reference) models that no live instance uses any more.
 	// Returns the number of base models freed. See ModelPool.cpp for the rules.

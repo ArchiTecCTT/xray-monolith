@@ -1228,7 +1228,11 @@
     <ClInclude Include="game_cl_teamdeathmatch_snd_messages.h" />
     <ClInclude Include="game_events_handler.h" />
     <ClInclude Include="game_graph.h" />
+    <ClInclude Include="game_graph_builder.h" />
     <ClInclude Include="game_graph_inline.h" />
+    <ClInclude Include="spawn_overlays.h" />
+    <ClInclude Include="spawn_packs.h" />
+    <ClInclude Include="spawn_templates.h" />
     <ClInclude Include="game_level_cross_table.h" />
     <ClInclude Include="game_level_cross_table_inline.h" />
     <ClInclude Include="game_location_selector.h" />
@@ -1339,6 +1343,7 @@
     <ClInclude Include="inventory_upgrade_root.h" />
     <ClInclude Include="inventory_upgrade_root_inline.h" />
     <ClInclude Include="invincible_fury.h" />
+    <ClInclude Include="iscript_attachment.h" />
     <ClInclude Include="item_manager.h" />
     <ClInclude Include="key_binding_registrator.h" />
     <ClInclude Include="killer_victim_velocity_angle.h" />
@@ -1633,6 +1638,8 @@
     <ClInclude Include="script_monster_action.h" />
     <ClInclude Include="script_monster_action_inline.h" />
     <ClInclude Include="script_monster_hit_info.h" />
+    <ClInclude Include="script_monster_enemy_info.h" />
+    <ClInclude Include="script_monster_home_info.h" />
     <ClInclude Include="script_movement_action.h" />
     <ClInclude Include="script_movement_action_inline.h" />
     <ClInclude Include="script_object.h" />
@@ -1845,6 +1852,7 @@
     <ClInclude Include="trade_parameters_inline.h" />
     <ClInclude Include="traffic_optimization.h" />
     <ClInclude Include="trajectories.h" />
+    <ClInclude Include="UI3dStatic.h" />
     <ClInclude Include="UIAchivementsIndicator.h" />
     <ClInclude Include="UICursor.h" />
     <ClInclude Include="UIDialogHolder.h" />
@@ -2964,6 +2972,10 @@
       <PrecompiledHeaderOutputFile>$(IntDir)$(ProjectName)_script.pch</PrecompiledHeaderOutputFile>
     </ClCompile>
     <ClCompile Include="game_cl_teamdeathmatch.cpp" />
+    <ClCompile Include="game_graph_builder.cpp" />
+    <ClCompile Include="spawn_overlays.cpp" />
+    <ClCompile Include="spawn_packs.cpp" />
+    <ClCompile Include="spawn_templates.cpp" />
     <ClCompile Include="game_graph_script.cpp">
       <PrecompiledHeaderFile>pch_script.h</PrecompiledHeaderFile>
       <PrecompiledHeaderOutputFile>$(IntDir)$(ProjectName)_script.pch</PrecompiledHeaderOutputFile>
@@ -3589,6 +3601,14 @@
       <PrecompiledHeaderFile>pch_script.h</PrecompiledHeaderFile>
       <PrecompiledHeaderOutputFile>$(IntDir)$(ProjectName)_script.pch</PrecompiledHeaderOutputFile>
     </ClCompile>
+    <ClCompile Include="script_monster_enemy_info_script.cpp">
+      <PrecompiledHeaderFile>pch_script.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderOutputFile>$(IntDir)$(ProjectName)_script.pch</PrecompiledHeaderOutputFile>
+    </ClCompile>
+    <ClCompile Include="script_monster_home_info_script.cpp">
+      <PrecompiledHeaderFile>pch_script.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderOutputFile>$(IntDir)$(ProjectName)_script.pch</PrecompiledHeaderOutputFile>
+    </ClCompile>
     <ClCompile Include="script_movement_action.cpp" />
     <ClCompile Include="script_movement_action_script.cpp">
       <PrecompiledHeaderFile>pch_script.h</PrecompiledHeaderFile>
@@ -3932,6 +3952,7 @@
     <ClCompile Include="trade_parameters.cpp" />
     <ClCompile Include="traffic_optimization.cpp" />
     <ClCompile Include="trajectories.cpp" />
+    <ClCompile Include="UI3dStatic.cpp" />
     <ClCompile Include="UIAchivementsIndicator.cpp" />
     <ClCompile Include="UICursor.cpp" />
     <ClCompile Include="UIDialogHolder.cpp" />

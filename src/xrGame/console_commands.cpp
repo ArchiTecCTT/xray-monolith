@@ -10,6 +10,7 @@
 #include "script_debugger.h"
 #include "ai_debug.h"
 #include "alife_simulator.h"
+#include "alife_spawn_registry.h"
 #include "game_cl_base.h"
 #include "game_cl_single.h"
 #include "game_sv_single.h"
@@ -34,12 +35,14 @@
 #include "ui/UIOptConCom.h"
 #include "UIGameSP.h"
 #include "ui/UIActorMenu.h"
+#include "../xrSound/Sound.h"
 #include "ui/UIStatic.h"
 #include "zone_effector.h"
 #include "GameTask.h"
 #include "MainMenu.h"
 #include "saved_game_wrapper.h"
 #include "level_graph.h"
+#include "game_graph.h"
 //#include "../xrEngine/resourcemanager.h"
 //#include "../xrEngine/doug_lea_memory_allocator.h"
 #include "cameralook.h"
@@ -78,7 +81,10 @@ extern u64 g_qwEStartGameTime;
 
 ENGINE_API
 extern float psHUD_FOV_def;
+extern float psCAM_ATTACHED_FOV;
 extern float psSqueezeVelocity;
+extern float g_step_sound_distance;
+extern float g_step_particle_distance;
 
 // Lua
 extern int psLUA_GCSTEP;
@@ -100,6 +106,7 @@ extern int g_dwInputUpdateDelta;
 extern	BOOL	g_ShowAnimationInfo;
 #endif // DEBUG
 extern BOOL g_bShowHitSectors;
+extern int g_npc_relaxed_idle_mode;
 //extern	BOOL	g_bDebugDumpPhysicsStep	;
 extern ESingleGameDifficulty g_SingleGameDifficulty;
 extern BOOL g_show_wnd_rect2;
@@ -138,7 +145,7 @@ extern BOOL disableActorBodyRotationDelay; //leer
 
 extern BOOL pseudogiantDodgeWhileFalling; // Verdatim
 extern BOOL AllowAccelDuringLookOut; // Verdatim
-extern BOOL scale_hud_motion_marks_by_speed; // Verdatim
+extern BOOL npc_dont_drop_weapons_on_death; // Verdatim
 
 //demonized: new console vars
 extern BOOL firstPersonDeath;
@@ -160,6 +167,7 @@ extern float f_Freelook_cam_limit;
 extern int MOUSEBUFFERSIZE;
 extern int KEYBOARDBUFFERSIZE;
 extern BOOL print_bone_warnings;
+extern BOOL print_ik_warnings;
 extern BOOL print_dltx_warnings;
 extern BOOL dltx_use_cache;
 extern BOOL poltergeist_spawn_corpse_on_death;
@@ -167,6 +175,7 @@ extern BOOL useNewZoomDeltaAlgorithm;
 extern BOOL g_aimmode_remember;
 extern BOOL g_freelook_while_reloading;
 extern BOOL useSeparateUBGLKeybind;
+extern int ps_hud_ik_compensation;
 extern int g_nearwall;
 extern int g_nearwall_trace;
 extern BOOL drawPickupItemNames;
@@ -299,7 +308,12 @@ extern float movement_manager_move_along_path_query_pos_threshold_sqr;
 ENGINE_API extern float g_console_sensitive;
 
 extern BOOL g_auto_reload;
+extern BOOL g_fire_reloads_ubgl;
+extern BOOL g_launcher_dynamic_range;
 BOOL g_launcher_dynamic_range_zoom = TRUE;
+extern BOOL g_launcher_dynamic_range_mode;
+extern float g_launcher_dynamic_range_max;
+
 u32 g_dead_body_collision = 1;
 
 extern int RESTRICTION_REBUILD_SMOOTH_FRAMES;
@@ -380,7 +394,8 @@ static void full_memory_stats(bool assert = true)
 	u32 _eco_strings_count = 0;
 	u32 _eco_strings_unique_count = 0;
 	int _eco_strings = (int)g_pStringContainer->stat_economy(_eco_strings_count, _eco_strings_unique_count);
-	int _eco_smem = (int)g_pSharedMemoryContainer->stat_economy();
+	size_t _smem_usage = 0;
+	s64 _eco_smem = g_pSharedMemoryContainer->stat_economy(&_smem_usage);
 	u32 m_base = 0, c_base = 0, m_lmaps = 0, c_lmaps = 0;
 
 	//if (Device.Resources)	Device.Resources->_GetMemoryUsage	(m_base,c_base,m_lmaps,c_lmaps);
@@ -401,7 +416,7 @@ static void full_memory_stats(bool assert = true)
 	if (_eco_strings_count != _eco_strings_unique_count)
 		Msg("! [x-ray]: shared strings, count != unique");
 
-	Msg("* [x-ray]: shared memory: memory[%ld K]", _eco_smem);
+	Msg("* [x-ray]: shared memory: memory[%zu K], economy[%lld K]", _smem_usage / 1024, _eco_smem / 1024);
 
 	u64 DLTX_total_bytes = 0;
 	u64 DLTX_section_count = 0;
@@ -1081,6 +1096,41 @@ void get_files_list(xr_vector<shared_str>& files, LPCSTR dir, LPCSTR file_ext, b
 }
 
 #include "UIGameCustom.h"
+
+// Writes the loaded spawn registry (overlays and level packs applied) as an all.spawn file into $app_data_root$.
+class CCC_SpawnOverlaysDump : public IConsole_Command
+{
+public:
+	CCC_SpawnOverlaysDump(LPCSTR N) : IConsole_Command(N)
+	{
+	}
+
+	virtual void Execute(LPCSTR args)
+	{
+		if (!ai().get_alife())
+		{
+			Msg("! alife is not loaded");
+			return;
+		}
+		if (!*args)
+		{
+			Msg("! usage: spawn_overlays_dump <file name>");
+			return;
+		}
+
+		string_path file_name;
+		FS.update_path(file_name, "$app_data_root$", args);
+		IWriter* writer = FS.w_open(file_name);
+		if (!writer)
+		{
+			Msg("! cannot open %s for writing", file_name);
+			return;
+		}
+		const_cast<CALifeSpawnRegistry&>(ai().alife().spawns()).save_spawn(*writer);
+		FS.w_close(writer);
+		Msg("* spawn written to %s", file_name);
+	}
+};
 
 class CCC_ALifeSave : public IConsole_Command
 {
@@ -2633,6 +2683,7 @@ void CCC_RegisterCommands()
 #endif // DEBUG
 
 	CMD1(CCC_ALifeSave, "save"); // save game
+	CMD1(CCC_SpawnOverlaysDump, "spawn_overlays_dump");
 	CMD1(CCC_ALifeLoadFrom, "load"); // load game from ...
 	CMD1(CCC_LoadLastSave, "load_last_save"); // load last saved game from ...
 
@@ -2651,6 +2702,7 @@ void CCC_RegisterCommands()
 	CMD3(CCC_Mask, "hud_weapon", &psHUD_Flags, HUD_WEAPON);
 	CMD3(CCC_Mask, "hud_info", &psHUD_Flags, HUD_INFO);
 	CMD3(CCC_Mask, "hud_draw", &psHUD_Flags, HUD_DRAW);
+	CMD4(CCC_Integer, "hud_ik_compensation", &ps_hud_ik_compensation, 0, 1);
 
 	// hud
 	psHUD_Flags.set(HUD_CROSSHAIR, true);
@@ -2663,8 +2715,13 @@ void CCC_RegisterCommands()
 
 	//#ifdef DEBUG
 	CMD4(CCC_Float, "hud_fov", &psHUD_FOV_def, 0.1f, 1.0f);
+	CMD4(CCC_Float, "cam_attached_fov", &psCAM_ATTACHED_FOV, 0.1f, 1.0f);
 	CMD4(CCC_Float, "fov", &g_fov, 5.0f, 180.0f);
 	CMD4(CCC_Float, "viewport_near", &Device.ViewportNear, 0.0f, 1.0f);
+    CMD4(CCC_Float, "step_sound_distance", &g_step_sound_distance, 10.0f, 100.0f);
+	CMD4(CCC_Float, "step_particle_distance", &g_step_particle_distance, 10.0f, 100.0f);
+    CMD4(CCC_Float, "snd_max_distance_multiplier", &psSoundMaxDistanceMultiplier, 0.2f, 2.0f);
+	CMD4(CCC_Float, "snd_max_ai_distance_multiplier", &psSoundMaxAIDistanceMultiplier, 0.2f, 2.0f);
 	//#endif // DEBUG
 
 	// Demo
@@ -3208,9 +3265,12 @@ void CCC_RegisterCommands()
 
     CMD4(CCC_Integer, "allow_accel_during_lookout", &AllowAccelDuringLookOut, 0, 1); // Verdatim
 
-    CMD4(CCC_Integer, "scale_hud_motion_marks_by_speed", &scale_hud_motion_marks_by_speed, 0, 1); // Verdatim
+
+
+    CMD4(CCC_Integer, "npc_dont_drop_weapons_on_death", &npc_dont_drop_weapons_on_death, 0, 1); // Verdatim
 
 	CMD4(CCC_Integer, "telekinetic_objects_include_corpses", &g_telekinetic_objects_include_corpses, 0, 1); // Tosox
+	CMD4(CCC_Integer, "npc_relaxed_idle_mode", &g_npc_relaxed_idle_mode, 0, 2);
 
 	CMD4(CCC_Integer, "allow_weapon_control_inertion_factor", &g_allow_weapon_control_inertion_factor, 0, 1); // momopate
 	CMD4(CCC_Integer, "allow_outfit_control_inertion_factor", &g_allow_outfit_control_inertion_factor, 0, 1);
@@ -3358,6 +3418,7 @@ void CCC_RegisterCommands()
 
 	// Print warnings when using bone_position and bone_direction functions and encounter invalid bones
 	CMD4(CCC_Integer, "print_bone_warnings", &print_bone_warnings, 0, 1);
+	CMD4(CCC_Integer, "print_ik_warnings", &print_ik_warnings, 0, 1);
 
 	// Print DLTX warnings when "override section which doesn't exist", also prints cache hit for each file
 	CMD4(CCC_Integer, "print_dltx_warnings", &print_dltx_warnings, 0, 1);

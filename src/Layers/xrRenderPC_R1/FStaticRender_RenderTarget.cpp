@@ -76,6 +76,13 @@ CRenderTarget::CRenderTarget()
 		lum_rb[i] = nullptr;
 		lum_rb_frame[i] = 0;
 	}
+	const s32 saved_skinning = Engine.External.GetSkinningMode();
+	for (s32 skinning = -1; skinning <= 4; ++skinning)
+	{
+		Engine.External.SetSkinningMode(skinning);
+		s_ui_icons[skinning + 1].create("ui_icons");
+	}
+	Engine.External.SetSkinningMode(saved_skinning);
 
 	bAvailable = Create();
 	Msg("* SSample: %s", bAvailable ? "enabled" : "disabled");
@@ -221,6 +228,7 @@ BOOL CRenderTarget::Create()
 CRenderTarget::~CRenderTarget()
 {
 	Device.m_SecondViewport.lensWork = 0;
+	_RELEASE(ui_icons_depth);
 	_RELEASE(pFB);
 	_RELEASE(pTempZB);
 	_RELEASE(ZB);

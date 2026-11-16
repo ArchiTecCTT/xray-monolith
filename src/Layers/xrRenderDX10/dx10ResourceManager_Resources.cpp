@@ -147,7 +147,8 @@ SVS* CResourceManager::_CreateVS(LPCSTR _name)
 	xr_string res_name = _name;
 
 	const int m_skinning = Engine.External.GetSkinningMode();
-	if (m_skinning > 0)
+	// SKIN_0 has a different vertex layout from SKIN_NONE (-1).
+	if (m_skinning >= 0)
 	{
 		res_name += "_" + xr_string::ToString(m_skinning);
 	}
@@ -670,6 +671,20 @@ void CResourceManager::_DeleteTexture(const CTexture* T)
 		return;
 	}
 	Msg("! ERROR: Failed to find texture surface '%s'", *T->cName);
+}
+
+CTexture* CResourceManager::_FindTexture(LPCSTR _Name)
+{
+	if (!_Name || !_Name[0]) return 0;
+	if (0 == xr_strcmp(_Name, "null")) return 0;
+
+	string_path Name;
+	xr_strcpy(Name, _Name);
+	fix_texture_name(Name);
+
+	xrCriticalSectionGuard guard(creationGuard);
+	map_TextureIt I = m_textures.find(LPSTR(Name));
+	return I != m_textures.end() ? I->second : 0;
 }
 
 #ifdef DEBUG

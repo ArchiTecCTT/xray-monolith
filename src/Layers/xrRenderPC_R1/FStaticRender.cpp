@@ -6,6 +6,7 @@
 #include "../../xrEngine/igame_persistent.h"
 #include "../../xrEngine/environment.h"
 #include "../xrRender/fbasicvisual.h"
+#include "../../Include/xrRender/RenderVisual.h"
 #include "../../xrEngine/CustomHUD.h"
 #include "../../xrEngine/xr_object.h"
 #include "../../xrEngine/fmesh.h"
@@ -240,7 +241,7 @@ IRenderVisual* CRender::model_CreateParticles(LPCSTR name)
 void CRender::models_Prefetch() { Models->Prefetch(); }
 void CRender::models_PrefetchOne(LPCSTR name, bool assert) { Models->Prefetch_One(name, assert); }
 void CRender::models_Clear(BOOL b_complete) { Models->ClearPool(b_complete); }
-bool CRender::models_Exists(LPCSTR name) { return Models->Exists(name); }
+bool CRender::models_Exists(LPCSTR name, bool no_prefetch) { return Models->Exists(name, no_prefetch); }
 
 ref_shader CRender::getShader(int id)
 {
@@ -380,6 +381,7 @@ void CRender::add_Occluder(Fbox2& bb_screenspace)
 
 void CRender::apply_object(IRenderable* O)
 {
+	RCache.bus_object.apply(O);
 	if (0 == O) return;
 	if (O->renderable_ROS())
 	{
@@ -667,11 +669,14 @@ void CRender::Render()
 	{
 		if (svp_lite)
 		{
-			// skipped passes: still drop the queued attachment UIs (Render_R1_Attachment_UI would clear them)
+			// skipped passes: still drop the queued attachment UIs (Render_R1_Attachment_UI would clear them) and the
+			// queued renderable UIs (r_dsgraph_render_ui would draw and clear them), so no pointer outlives the frame
+			GMBase.renderable_ui.clear();
 			g_pGamePersistent->AttachmentUIsToRender.clear_not_free();
 		}
 		else
 		{
+			GMBase.r_dsgraph_render_ui();
 			g_hud->Render_R1_Attachment_UI();
 
 			if (g_hud->RenderActiveItemUIQuery())
@@ -719,6 +724,56 @@ void CRender::Render()
 	Device.Statistic->RenderDUMP.End();
 
 	svp_stats_end();
+}
+
+void CRender::RenderUI3DDirect()
+{
+	// Icons need independent depth: later world passes may still use the scene buffer.
+	// Query bound surfaces directly because an invalidated RCache may contain null pointers.
+	IDirect3DSurface9* saved_depth = nullptr;
+	const HRESULT depth_result = HW.pDevice->GetDepthStencilSurface(&saved_depth);
+	if (depth_result != D3DERR_NOTFOUND)
+		R_CHK(depth_result);
+	DWORD saved_z_enable;
+	R_CHK(HW.pDevice->GetRenderState(D3DRS_ZENABLE, &saved_z_enable));
+
+	D3DSURFACE_DESC color_desc;
+	IDirect3DSurface9* color_target = nullptr;
+	R_CHK(HW.pDevice->GetRenderTarget(0, &color_target));
+	R_CHK(color_target->GetDesc(&color_desc));
+	_RELEASE(color_target);
+	D3DFORMAT depth_format = HW.Caps.fDepth;
+	if (saved_depth)
+	{
+		D3DSURFACE_DESC depth_desc;
+		R_CHK(saved_depth->GetDesc(&depth_desc));
+		depth_format = depth_desc.Format;
+	}
+
+	// Recreate only when the UI target changes size, format or multisampling.
+	if (Target->ui_icons_depth)
+	{
+		D3DSURFACE_DESC desc;
+		R_CHK(Target->ui_icons_depth->GetDesc(&desc));
+		if (desc.Width != color_desc.Width || desc.Height != color_desc.Height ||
+			desc.Format != depth_format || desc.MultiSampleType != color_desc.MultiSampleType ||
+			desc.MultiSampleQuality != color_desc.MultiSampleQuality)
+			_RELEASE(Target->ui_icons_depth);
+	}
+	if (!Target->ui_icons_depth)
+		R_CHK(HW.pDevice->CreateDepthStencilSurface(color_desc.Width, color_desc.Height,
+			depth_format, color_desc.MultiSampleType, color_desc.MultiSampleQuality,
+			TRUE, &Target->ui_icons_depth, nullptr));
+
+	RCache.set_ZB(Target->ui_icons_depth);
+	R_CHK(HW.pDevice->Clear(0, nullptr, D3DCLEAR_ZBUFFER, 0, 1.f, 0));
+	// PassSET_ZB configures the comparison/writes, but does not enable depth testing.
+	RCache.set_Z(TRUE);
+	GMUI3D.r_dsgraph_render_ui_3d();
+	RCache.set_ZB(saved_depth);
+	_RELEASE(saved_depth);
+	RCache.set_Z(saved_z_enable);
+
 }
 
 void CRender::ApplyBlur4(FVF::TL4uv* pv, u32 w, u32 h, float k)
@@ -910,6 +965,7 @@ HRESULT CRender::shader_compile(
 	
 	D3DXMACRO defines [128];
 	int def_it = 0;
+	char c_shader_bus [32];
 
 	char sh_name[MAX_PATH] = "";
 	u32 len = 0;
@@ -993,6 +1049,13 @@ HRESULT CRender::shader_compile(
 		defines[def_it].Definition = "1";
 		def_it ++;
 	}
+	// the bus version, in the cache name too so each version keeps its own build
+	xr_sprintf(c_shader_bus, "%d", ShaderBus::version());
+	defines[def_it].Name = "SHADER_BUS";
+	defines[def_it].Definition = c_shader_bus;
+	def_it ++;
+	xr_strcat(sh_name, c_shader_bus);
+	len += xr_strlen(c_shader_bus);
 
 	// finish
 	defines[def_it].Name = 0;

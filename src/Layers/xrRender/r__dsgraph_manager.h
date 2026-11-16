@@ -15,6 +15,14 @@ public:
 	};
 
 	R_dsgraph::DynamicSceneRgraph RGraph;
+	xr_list<Fmatrix> owned_transforms;
+	xr_vector<IRenderable*> renderable_ui;
+	virtual void add_RenderableUI(IRenderable* object) override
+	{
+		if (i_mask[fl_normal]) renderable_ui.push_back(object);
+	}
+	void r_dsgraph_render_ui();
+	void r_dsgraph_render_ui_3d();
 	u32										i_options;		// input:	culling options
 	u32										reset_epoch = 0;	// R1 lights: last vid_restart epoch this graph was cleared for
 	u32										i_doptions;
@@ -121,6 +129,8 @@ public:
 	{
 		xrSRWLockGuard guard(&S_LC, false);
 		RGraph.clear();
+		renderable_ui.clear();
+		owned_transforms.clear();
 		if (m_sector_frustums.size())
 		{
 			for (auto& pair : m_sector_frustums)

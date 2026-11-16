@@ -9,6 +9,13 @@
 #include "../xrRender/QueryHelper.h"
 
 #include	"../xrRender/dxRenderDeviceRender.h"
+namespace
+{
+bool ui_3d_icon_atlas_active = false;
+Fmatrix ui_3d_icon_project_saved;
+Fmatrix ui_3d_icon_full_transform_saved;
+}
+
 
 void CRender::render_menu()
 {
@@ -343,17 +350,85 @@ void CRender::Render()
 	if (Details)
 		Details->details_clear();
 
-	if (g_hud)
-	{
-        PROF_EVENT("render_hud");
-		if (g_hud->RenderActiveItemUIQuery())
-			GMBase.r_dsgraph_render_hud_ui();
-		if (g_hud->RenderCamAttachedUIQuery())
-			GMBase.r_dsgraph_render_cam_ui();
-	}
-
 }
 #include "../xrRender/CHudInitializer.h"
+
+void CRender::RenderUI3DDirect()
+{
+	HW.pContext->ClearDepthStencilView(HW.pBaseZB, D3D_CLEAR_DEPTH | D3D_CLEAR_STENCIL, 1.0f, 0);
+
+	RCache.set_Z(FALSE);
+	RCache.set_RT(HW.pBaseRT, 0);
+	GMUI3D.r_dsgraph_render_ui_3d();
+}
+
+bool CRender::GetUI3DIconAtlasInfo(u32& width, u32& height, float& resolution)
+{
+	if (!ps_r4_atlas || !Target || !Target->rt_ui_3d_icons)
+		return false;
+	width = Target->rt_ui_3d_icons->dwWidth;
+	height = Target->rt_ui_3d_icons->dwHeight;
+	resolution = clampr(ps_r4_atlas_resolution, 0.1f, 1.f);
+	return true;
+}
+
+bool CRender::BeginUI3DIconAtlas()
+{
+	if (ui_3d_icon_atlas_active || !ps_r4_atlas || !Target || !Target->rt_ui_3d_icons)
+		return false;
+
+	ui_3d_icon_atlas_active = true;
+	ui_3d_icon_project_saved = Device.mProject3DIcons;
+	ui_3d_icon_full_transform_saved = Device.mFullTransform3DIcons;
+
+	const u32 width = Target->rt_ui_3d_icons->dwWidth;
+	const u32 height = Target->rt_ui_3d_icons->dwHeight;
+	// Match the allocated atlas aspect ratio to keep model proportions intact.
+	Device.mProject3DIcons.build_projection_ortho(UI_3D_ICON_ORTHO_HEIGHT * float(width) / float(height),
+		UI_3D_ICON_ORTHO_HEIGHT, UI_3D_ICON_NEAR_PLANE, UI_3D_ICON_FAR_PLANE);
+	Device.mFullTransform3DIcons.mul(Device.mProject3DIcons, Device.mView);
+
+	const ref_rt& raw = Target->rt_ui_3d_icons_raw_msaa ?
+		Target->rt_ui_3d_icons_raw_msaa : Target->rt_ui_3d_icons_raw;
+	Target->u_setrt(raw, nullptr, nullptr, Target->rt_ui_3d_icons_depth->pZRT);
+	Target->set_viewport_size(HW.pContext, width, height);
+
+	const float clear_color[4] = {0.f, 0.f, 0.f, 0.f};
+	HW.pContext->ClearRenderTargetView(raw->pRT, clear_color);
+	HW.pContext->ClearDepthStencilView(Target->rt_ui_3d_icons_depth->pZRT,
+		D3D_CLEAR_DEPTH | D3D_CLEAR_STENCIL, 1.f, 0);
+	return true;
+}
+
+void CRender::BeginUI3DIconAtlasItem()
+{
+	// The MT graph retains every submission, including repeated visuals in different cells.
+}
+
+void CRender::EndUI3DIconAtlas()
+{
+	if (!ui_3d_icon_atlas_active)
+		return;
+
+	RCache.set_Z(FALSE);
+	GMUI3D.r_dsgraph_render_ui_3d();
+
+	// The postprocess expects an ordinary Texture2D. Resolve the multisampled
+	// model atlas after all cells have been rendered, before sampling it.
+	Target->u_setrt(Target->rt_ui_3d_icons->dwWidth, Target->rt_ui_3d_icons->dwHeight,
+		nullptr, nullptr, nullptr, nullptr);
+	if (Target->rt_ui_3d_icons_raw_msaa)
+		HW.pContext->ResolveSubresource(Target->rt_ui_3d_icons_raw->pSurface, 0,
+			Target->rt_ui_3d_icons_raw_msaa->pSurface, 0, DXGI_FORMAT_R8G8B8A8_UNORM);
+	Target->phase_ui_3d_icons_postprocess();
+
+	Device.mProject3DIcons = ui_3d_icon_project_saved;
+	Device.mFullTransform3DIcons = ui_3d_icon_full_transform_saved;
+	Target->u_setrt(Device.dwWidth, Device.dwHeight, HW.pBaseRT, nullptr, nullptr, HW.pBaseZB);
+	Target->set_viewport_size(HW.pContext, float(Device.dwWidth), float(Device.dwHeight));
+	RCache.set_Z(FALSE);
+	ui_3d_icon_atlas_active = false;
+}
 
 void CRender::render_forward()
 {
@@ -371,6 +446,17 @@ void CRender::render_forward()
 		GMBase.fade_render(); // faded-portals
 		GMBase.r_dsgraph_render_sorted(false); // strict-sorted geoms
 		g_pGamePersistent->Environment().RenderLast(); // rain/thunder-bolts
+
+		// Item and camera attachment UI draws before the sorted HUD so nearer glass and the post chain cover it
+		if (g_hud)
+		{
+			PROF_EVENT("render_hud");
+			if (g_hud->RenderActiveItemUIQuery())
+				GMBase.r_dsgraph_render_hud_ui();
+			if (g_hud->RenderCamAttachedUIQuery())
+				GMBase.r_dsgraph_render_cam_ui();
+		}
+
 		GMBase.r_dsgraph_render_sorted_hud();
 	}
 

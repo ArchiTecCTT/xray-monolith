@@ -6,6 +6,7 @@
 #include "pch_script.h"
 #include "inventory.h"
 #include "actor.h"
+#include "../xrEngine/CameraBase.h"
 #include "CustomOutfit.h"
 #include "trade.h"
 #include "weapon.h"
@@ -325,16 +326,18 @@ bool CInventory::DropItem(CGameObject* pObj, bool just_before_destroy, bool dont
 		if (Level().CurrentViewEntity() == pActor_owner)
 			CurrentGameUI()->OnInventoryAction(pIItem, GE_OWNERSHIP_REJECT);
 	};
-	if (smart_cast<CWeapon*>(pObj))
+	CActor* actor_owner = smart_cast<CActor*>(m_pOwner);
+	if (actor_owner && !dont_create_shell && smart_cast<CWeapon*>(pObj))
 	{
-		Fvector dir = Actor()->Direction();
+		Fvector dir = actor_owner->cam_Active()->vDirection;
+		dir.y = 0.f;
+		float speed = 7.f * dir.magnitude();
+		dir.normalize_safe();
 		dir.y = sin(-45.f * PI / 180.f);
 		dir.normalize();
-		smart_cast<CWeapon*>(pObj)->SetActivationSpeedOverride(dir.mul(7));
-		pObj->H_SetParent(nullptr, dont_create_shell);
+		smart_cast<CWeapon*>(pObj)->SetActivationSpeedOverride(dir.mul(speed));
 	}
-	else
-		pObj->H_SetParent(nullptr, dont_create_shell);
+	pObj->H_SetParent(nullptr, dont_create_shell);
 	return true;
 }
 
@@ -376,6 +379,8 @@ bool CInventory::Slot(u16 slot_id, PIItem pIItem, bool bNotActivate, bool strict
 
 		return false;
 	}
+
+	CScriptGameObject* prev_obj = m_slots[slot_id].m_pIItem ? m_slots[slot_id].m_pIItem->object().lua_game_object() : nullptr;
 
 	m_slots[slot_id].m_pIItem = pIItem;
 
@@ -429,7 +434,20 @@ bool CInventory::Slot(u16 slot_id, PIItem pIItem, bool bNotActivate, bool strict
 #ifdef DEBUG
 		Msg("---To Slot: activating slot [%d], Frame[%d]", slot_id, Device.dwFrame);
 #endif // #ifdef DEBUG
+
+		bool sameslot = m_iActiveSlot == slot_id;
 		Activate(slot_id);
+
+		if (sameslot)
+		{
+			// Lucy: also call CActor_OnChangedSlot here (special case where you place an item into active slot)
+			::luabind::functor<void> funct;
+			CScriptGameObject* obj = ActiveItem() ? ActiveItem()->object().lua_game_object() : nullptr;
+			if (ai().script_engine().functor("_G.CActor_OnChangedSlot", funct))
+			{
+				funct(slot_id, obj, slot_id, prev_obj);
+			}
+		}
 	}
 	SInvItemPlace p = pIItem->m_ItemCurrPlace;
 	m_pOwner->OnItemSlot(pIItem, pIItem->m_ItemCurrPlace);

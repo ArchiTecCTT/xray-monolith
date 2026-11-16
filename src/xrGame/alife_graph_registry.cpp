@@ -28,16 +28,6 @@ CALifeGraphRegistry::~CALifeGraphRegistry()
 
 void CALifeGraphRegistry::on_load()
 {
-	for (int i = 0; i < GameGraph::LOCATION_TYPE_COUNT; ++i)
-	{
-		{
-			for (int j = 0; j < GameGraph::LOCATION_COUNT; ++j)
-				m_terrain[i][j].clear();
-		}
-		for (GameGraph::_GRAPH_ID j = 0; j < (GameGraph::_GRAPH_ID)ai().game_graph().header().vertex_count(); ++j)
-			m_terrain[i][ai().game_graph().vertex(j)->vertex_type()[i]].push_back(j);
-	}
-
 	m_objects.resize(ai().game_graph().header().vertex_count());
 
 	{
@@ -103,8 +93,7 @@ void CALifeGraphRegistry::setup_current_level()
 	}
 	R_ASSERT2(ai().game_graph().header().levels().end() != I, "Graph point level ID not found!");
 
-	int id = pApp->Level_ID(*(*I).second.name(), "1.0", true);
-	VERIFY3(id >= 0, "Level is corrupted or doesn't exist", *(*I).second.name());
+	VERIFY3(levelid >= 0, "Level is corrupted or doesn't exist", *(*I).second.name());
 	ai().load(*(*I).second.name());
 }
 
