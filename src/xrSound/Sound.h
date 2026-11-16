@@ -118,6 +118,20 @@ enum esound_type
 	st_forcedword = u32(-1),
 };
 
+// Listener-side mix categories (headphones). They change only the gain the player hears (the OpenAL source gain);
+// AI hearing (p_source.volume, max_ai_distance, the sound events) never reads them. Not saved, not networked.
+enum esound_mix_category
+{
+	smc_world = 0, // everything not listed below: weapons, voices, explosions, physics, the actor's own sounds
+	smc_ambient, // level ambient beds and effect sounds, static level sounds, random level sounds
+	smc_weather, // rain, thunder, environment ambients whose file is wind/rain/thunder/storm
+	smc_steps_others, // footsteps of NPCs and monsters (not the actor's own)
+	smc_ui, // 2D sounds without a game object (menus, UI clicks, PDA)
+	smc_music, // st_Music sounds (level music)
+	smc_count,
+	smc_auto = 0xFF, // no tag: the category follows from the sound (music, ui or world)
+};
+
 class CSound_UserDataVisitor;
 
 class CSound_UserData : public xr_resource
@@ -144,6 +158,7 @@ public:
 	CObject* g_object; //!< Game object that emitts ref_sound
 	CSound_UserDataPtr g_userdata;
 	shared_str fn_attached [2];
+	u8 mix_cat; //!< esound_mix_category (listener-side mix only), smc_auto = derived from the sound
 
 	u32 dwBytesTotal;
 	float fTimeTotal;
@@ -194,6 +209,11 @@ public:
 		VERIFY(_p);
 		return _p->s_type;
 	}
+
+	//! Listener-side mix category (esound_mix_category) of the sounds this ref plays from now on; only what the
+	//! player hears. play_no_feedback copies it. No-op on an empty ref.
+	IC void set_mix_category(u8 cat) { if (_p) _p->mix_cat = cat; }
+	IC u8 get_mix_category() const { return _p ? _p->mix_cat : u8(smc_auto); }
 
 	IC CSound_UserDataPtr _g_userdata()
 	{
@@ -434,6 +454,22 @@ public:
 
 	virtual void object_relcase(CObject* obj) = 0;
 	virtual const Fvector& listener_position() = 0;
+
+	// Listener-side mix (headphones). Only the gain the player hears; AI hearing is untouched. Not saved.
+	// cat: esound_mix_category. gain 0 .. 4 (above 1 = boost), fade_ms 0 .. 60000 (linear ramp from the current gain).
+	virtual void mix_set_category_gain(u32 cat, float gain, float fade_ms) = 0;
+	virtual float mix_get_category_gain(u32 cat, bool target) = 0; // target: the value it is fading to
+	// k 0.1 .. 4: max audible distance of others' footsteps (and xrGame's 50 m step gate) x k
+	virtual void mix_set_steps_range(float k) = 0;
+	virtual float mix_get_steps_range() = 0;
+	// loud-sound limiter: threshold dB (-60 .. 0) on the detector level, attack / release ms, ratio 1 .. 100 (>= 20 is
+	// a limiter); gain reduction applies to every category but ui and music
+	virtual void mix_set_limiter(bool enabled, float threshold_db, float attack_ms, float release_ms, float ratio) = 0;
+	virtual void mix_set_limiter_detect(u32 game_type_mask, float own_k) = 0; // which g_type bits count as loud
+	virtual bool mix_get_limiter_enabled() = 0;
+	virtual float mix_get_limiter_reduction_db() = 0; // current gain reduction, dB (<= 0)
+	virtual float mix_get_loud_level_db() = 0; // current detector level, dB (-120 = nothing loud)
+	virtual void mix_reset(float fade_ms) = 0; // all gains to 1, limiter off, steps range 1
 #ifdef __BORLANDC__
 	virtual SoundEnvironment_LIB*	get_env_library			()																						= 0;
 	virtual void					refresh_env_library		()																						= 0;
@@ -454,6 +490,7 @@ IC ref_sound_data::ref_sound_data()
 	g_type = 0;
 	g_object = 0;
 	s_type = st_Effect;
+	mix_cat = smc_auto;
 }
 
 IC ref_sound_data::ref_sound_data(LPCSTR fName, esound_type sound_type, int game_type)

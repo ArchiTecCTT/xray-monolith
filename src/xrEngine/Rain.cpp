@@ -45,6 +45,7 @@ CEffect_Rain::CEffect_Rain()
 	state = stIdle;
 
 	snd_Ambient.create("ambient\\rain", st_Effect, sg_Undefined);
+	snd_Ambient.set_mix_category(smc_weather); // headphones: listener-side mix category only
 	rain_volume = 0.0f;
 
 	RainPerlin = xr_new<CPerlinNoise1D>(Random.randI(0, 0xFFFF));

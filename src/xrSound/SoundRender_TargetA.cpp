@@ -36,7 +36,7 @@ BOOL CSoundRender_TargetA::_initialize()
 	{
 		A_CHK(alSourcei (pSource, AL_LOOPING, AL_FALSE));
 		A_CHK(alSourcef (pSource, AL_MIN_GAIN, 0.f));
-		A_CHK(alSourcef (pSource, AL_MAX_GAIN, 1.f));
+		A_CHK(alSourcef (pSource, AL_MAX_GAIN, SOUND_MIX_MAX_GAIN)); // headphones boost; the engine gain stays <= 1
 		A_CHK(alSourcef (pSource, AL_GAIN, cache_gain));
 		A_CHK(alSourcef (pSource, AL_PITCH, cache_pitch));
 		return TRUE;
@@ -183,6 +183,10 @@ void CSoundRender_TargetA::fill_parameters()
 	VERIFY2(m_pEmitter, SE->source()->file_name());
 	float _gain = m_pEmitter->smooth_volume;
 	clamp(_gain, EPS_S, 1.f);
+	// headphones: listener-side mix (category gain x limiter), exactly 1 unless a script set something; only the
+	// OpenAL gain, AI hearing never reads it. Up to SOUND_MIX_MAX_GAIN (AL_MAX_GAIN above).
+	_gain *= SoundRender->mix_gain(m_pEmitter);
+	clamp(_gain, 0.f, SOUND_MIX_MAX_GAIN);
 	if (!fsimilar(_gain, cache_gain, 0.01f))
 	{
 		cache_gain = _gain;

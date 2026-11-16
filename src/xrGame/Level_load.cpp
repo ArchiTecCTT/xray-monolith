@@ -134,6 +134,7 @@ bool CLevel::Load_GameSpecific_After()
 			{
 				Sounds_Random.push_back(ref_sound());
 				Sound->create(Sounds_Random.back(), *I->first, st_Effect, sg_SourceType);
+				Sounds_Random.back().set_mix_category(smc_ambient); // headphones: listener-side mix only
 			}
 			Sounds_Random_dwNextTime = Device.TimerAsync() + 50000;
 			Sounds_Random_Enabled = FALSE;

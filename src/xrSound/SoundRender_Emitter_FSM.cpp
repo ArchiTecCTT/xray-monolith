@@ -364,6 +364,7 @@ BOOL CSoundRender_Emitter::update_culling(float dt)
 		if (dist > p_source.max_distance)
 		{
 			smooth_volume = 0;
+			mix_level = 0.f;
 			return FALSE;
 		}
 
@@ -393,6 +394,9 @@ BOOL CSoundRender_Emitter::update_culling(float dt)
 	//LostAlphaRus in
 	smooth_volume = (p_source.base_volume * volume_att * (owner_data->s_type == st_Effect ? psSoundVEffects * psSoundVFactor : psSoundVMusic * psSoundVMusicFactor) * occluder_volume * fade_volume);
 	//LostAlphaRus out
+
+	// headphones limiter detector (listener-side only): the level at the listener without the user's volume sliders
+	mix_level = p_source.base_volume * volume_att * occluder_volume * fade_volume;
 
 	if (smooth_volume < psSoundCull)
 		return FALSE;	// allow volume to go up

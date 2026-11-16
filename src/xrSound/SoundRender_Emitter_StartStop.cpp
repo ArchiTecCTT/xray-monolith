@@ -22,6 +22,12 @@ void CSoundRender_Emitter::start(ref_sound* _owner, BOOL _loop, float delay)
 	set_frequency(1.f);
     p_source.max_ai_distance = source()->m_fMaxAIDist * psSoundMaxAIDistanceMultiplier; // 300.f;
 
+	// headphones: others' footsteps carry further for the player only (max_ai_distance above is untouched; the AI
+	// event range and power never read max_distance)
+	if (owner_data->mix_cat == smc_steps_others)
+		p_source.max_distance *= SoundRender->mix.steps_range_k;
+	mix_level = 0.f;
+
 	if (fis_zero(delay, EPS_L))
 	{
 		m_current_state = _loop ? stStartingLooped : stStarting;

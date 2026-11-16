@@ -84,6 +84,19 @@ float CEnvModifier::sum(CEnvModifier& M, Fvector3& view)
 
 	return _power;
 }
+// headphones (docs/audio_api.md): listener-side mix category of an environment ambient sound. Wind, rain, thunder and
+// storm beds are "weather", everything else "ambient". Only what the player hears.
+static u8 env_sound_mix_category(LPCSTR name)
+{
+	string_path n;
+	xr_strcpy(n, name ? name : "");
+	xr_strlwr(n);
+	for (LPCSTR w : {"wind", "rain", "thunder", "storm"})
+		if (strstr(n, w))
+			return smc_weather;
+	return smc_ambient;
+}
+
 
 //-----------------------------------------------------------------------------
 // Environment ambient
@@ -116,6 +129,7 @@ void CEnvAmbient::SSndChannel::load(CInifile& config, LPCSTR sect)
 	{
 		_GetItem(snds, k, tmp);
 		m_sounds[k].create(tmp, st_Effect, sg_SourceType);
+		m_sounds[k].set_mix_category(env_sound_mix_category(tmp));
 	}
 }
 
@@ -129,7 +143,10 @@ CEnvAmbient::SEffect* CEnvAmbient::create_effect(CInifile& config, LPCSTR id)
 	result->wind_gust_factor = config.r_float(id, "wind_gust_factor");
 
 	if (config.line_exist(id, "sound"))
+	{
 		result->sound.create(config.r_string(id, "sound"), st_Effect, sg_SourceType);
+		result->sound.set_mix_category(env_sound_mix_category(config.r_string(id, "sound")));
+	}
 
 	if (config.line_exist(id, "wind_blast_strength"))
 	{

@@ -29,6 +29,7 @@ void SStaticSound::Load(IReader& F)
 	xr_string wav_name;
 	F.r_stringZ(wav_name);
 	m_Source.create(wav_name.c_str(), st_Effect, sg_SourceType);
+	m_Source.set_mix_category(smc_ambient); // headphones: listener-side mix category only
 	F.r_fvector3(m_Position);
 	m_Volume = F.r_float();
 	m_Freq = F.r_float();

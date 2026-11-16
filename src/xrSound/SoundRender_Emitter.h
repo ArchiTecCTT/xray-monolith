@@ -48,6 +48,7 @@ public:
 	float smooth_volume;
 	float occluder_volume; // USER
 	float fade_volume;
+	float mix_level; // headphones limiter detector: base_volume x distance x occlusion x fade, without the volume sliders
 	Fvector occluder [3];
 
 	State m_current_state;

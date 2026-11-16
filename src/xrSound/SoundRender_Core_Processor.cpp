@@ -85,6 +85,9 @@ void CSoundRender_Core::update(const Fvector& P, const Fvector& D, const Fvector
 		}
 	}
 
+	// headphones: category fades and the loud-sound limiter (listener-side gain only, read in fill_parameters below)
+	mix_update(dt_sec);
+
 	// Get currently rendering emitters
 	//Msg	("! update: targets");
 	s_targets_defer.clear();

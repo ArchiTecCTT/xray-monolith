@@ -26,7 +26,8 @@ class CStepManager
 		{
 		}
 
-		void play_next(SGameMtlPair* mtl_pair, CEntityAlive* object, float volume, bool b_hud_mode);
+		// others: an NPC's or monster's step (headphones: tagged smc_steps_others, the listener-side mix only)
+		void play_next(SGameMtlPair* mtl_pair, CEntityAlive* object, float volume, bool b_hud_mode, bool others = false);
 	} m_step_sound;
 
 	u32 m_time_anim_started;

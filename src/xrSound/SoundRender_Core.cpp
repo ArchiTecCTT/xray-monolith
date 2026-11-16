@@ -333,6 +333,7 @@ void CSoundRender_Core::clone(ref_sound& S, const ref_sound& from, esound_type s
 	S._p->fn_attached[1] = from._p->fn_attached[1];
 	S._p->g_type = (game_type == sg_SourceType) ? S._p->handle->game_type() : game_type;
 	S._p->s_type = sound_type;
+	S._p->mix_cat = from._p->mix_cat;
 }
 
 
@@ -360,6 +361,7 @@ void CSoundRender_Core::play_no_feedback(ref_sound& S, CObject* O, u32 flags, fl
 	S._p->handle = orig->handle;
 	S._p->g_type = orig->g_type;
 	S._p->g_object = O;
+	S._p->mix_cat = orig->mix_cat; // listener-side mix category (headphones), set by the caller on the original
 	S._p->dwBytesTotal = orig->dwBytesTotal;
 	S._p->fTimeTotal = orig->fTimeTotal;
 	S._p->fn_attached[0] = orig->fn_attached[0];
@@ -420,6 +422,7 @@ void CSoundRender_Core::_create_data(ref_sound_data& S, LPCSTR fName, esound_typ
 	S.feedback = 0;
 	S.g_object = 0;
 	S.g_userdata = 0;
+	S.mix_cat = smc_auto;
 	S.dwBytesTotal = S.handle->bytes_total();
 	S.fTimeTotal = S.handle->length_sec();
 }
@@ -555,3 +558,142 @@ void CSoundRender_Core::set_environment	(u32 id, CSound_environment** dst_env)
 	
 }
 #endif
+
+//////////////////////////////////////////////////////////////////////////
+// Listener-side mix (headphones), SoundRender_Mix.h / docs/audio_api.md
+// Only the OpenAL source gain changes; p_source.volume, max_ai_distance and the AI sound events are never touched.
+
+u32 CSoundRender_Core::mix_category(CSoundRender_Emitter* E) const
+{
+	const ref_sound_data* d = E->owner_data._get();
+	if (!d)
+		return smc_world;
+	if (d->mix_cat < smc_count)
+		return d->mix_cat; // tagged where it is played (rain, thunder, ambients, others' steps, scripts)
+	if (d->s_type == st_Music || E->bIntro)
+		return smc_music;
+	if (!d->g_object && E->b2D)
+		return smc_ui;
+	return smc_world;
+}
+
+float CSoundRender_Core::mix_gain(CSoundRender_Emitter* E) const
+{
+	const u32 c = mix_category(E);
+	float g = mix.cat[c].cur;
+	if (c != smc_ui && c != smc_music)
+		g *= mix.lim_gain;
+	return g;
+}
+
+void CSoundRender_Core::mix_update(float dt)
+{
+	PROF_EVENT("CSoundRender_Core::mix_update");
+	if (dt < 0.f || !_valid(dt))
+		dt = 0.f;
+
+	mix.lock.Enter();
+	for (u32 i = 0; i < smc_count; ++i)
+		mix.cat[i].step(dt);
+	const bool on = mix.lim_on;
+	const u32 mask = mix.lim_mask;
+	const float own_k = mix.lim_own_k;
+	const float thr = mix.lim_threshold_db;
+	const float ratio = mix.lim_ratio;
+	const float attack = mix.lim_attack_ms * 0.001f;
+	const float release = mix.lim_release_ms * 0.001f;
+	mix.lock.Leave();
+
+	// detector: the loudest "loud" sound at the listener (shots, explosions), without the user's volume sliders
+	float level = 0.f;
+	if (on && mask)
+	{
+		for (CSoundRender_Emitter* E : s_emitters)
+		{
+			const ref_sound_data* d = E->owner_data._get();
+			if (!d || !E->isPlaying() || !(u32(d->g_type) & mask))
+				continue;
+			float l = E->mix_level;
+			if (E->b2D)
+				l *= own_k;
+			if (l > level)
+				level = l;
+		}
+	}
+	// gain computer (hard knee) and an attack / release smoother on the gain reduction in dB
+	mix.lim_level_db = sound_mix_limiter_step(mix.lim_gr_db, level, on, thr, ratio, attack, release, dt);
+	mix.lim_gain = mix.lim_gr_db == 0.f ? 1.f : powf(10.f, mix.lim_gr_db / 20.f);
+}
+
+static float mix_clamp(float v, float lo, float hi, float bad)
+{
+	if (!_valid(v))
+		return bad;
+	clamp(v, lo, hi);
+	return v;
+}
+
+void CSoundRender_Core::mix_set_category_gain(u32 cat, float gain, float fade_ms)
+{
+	if (cat >= smc_count)
+		return;
+	gain = mix_clamp(gain, 0.f, SOUND_MIX_MAX_GAIN, 1.f);
+	fade_ms = mix_clamp(fade_ms, 0.f, 60000.f, 0.f);
+	mix.lock.Enter();
+	mix.cat[cat].set(gain, fade_ms * 0.001f);
+	mix.lock.Leave();
+}
+
+float CSoundRender_Core::mix_get_category_gain(u32 cat, bool target)
+{
+	if (cat >= smc_count)
+		return 1.f;
+	mix.lock.Enter();
+	const float g = target ? mix.cat[cat].target : mix.cat[cat].cur;
+	mix.lock.Leave();
+	return g;
+}
+
+void CSoundRender_Core::mix_set_steps_range(float k)
+{
+	mix.lock.Enter();
+	mix.steps_range_k = mix_clamp(k, 0.1f, 4.f, 1.f);
+	mix.lock.Leave();
+}
+
+float CSoundRender_Core::mix_get_steps_range() { return mix.steps_range_k; }
+
+void CSoundRender_Core::mix_set_limiter(bool enabled, float threshold_db, float attack_ms, float release_ms, float ratio)
+{
+	mix.lock.Enter();
+	mix.lim_on = enabled;
+	mix.lim_threshold_db = mix_clamp(threshold_db, -60.f, 0.f, -12.f);
+	mix.lim_attack_ms = mix_clamp(attack_ms, 0.f, 1000.f, 5.f);
+	mix.lim_release_ms = mix_clamp(release_ms, 0.f, 10000.f, 400.f);
+	mix.lim_ratio = mix_clamp(ratio, 1.f, 100.f, 20.f);
+	mix.lock.Leave();
+}
+
+void CSoundRender_Core::mix_set_limiter_detect(u32 game_type_mask, float own_k)
+{
+	mix.lock.Enter();
+	mix.lim_mask = game_type_mask;
+	mix.lim_own_k = mix_clamp(own_k, 0.f, 4.f, 1.f);
+	mix.lock.Leave();
+}
+
+bool CSoundRender_Core::mix_get_limiter_enabled() { return mix.lim_on; }
+float CSoundRender_Core::mix_get_limiter_reduction_db() { return mix.lim_gr_db; }
+float CSoundRender_Core::mix_get_loud_level_db() { return mix.lim_level_db; }
+
+void CSoundRender_Core::mix_reset(float fade_ms)
+{
+	for (u32 i = 0; i < smc_count; ++i)
+		mix_set_category_gain(i, 1.f, fade_ms);
+	mix.lock.Enter();
+	mix.steps_range_k = 1.f;
+	mix.lim_on = false; // the gain reduction releases with the release time
+	mix.lim_mask = SOUND_MIX_DEFAULT_LOUD_MASK;
+	mix.lim_own_k = 1.f;
+	mix.lock.Leave();
+}

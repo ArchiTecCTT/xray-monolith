@@ -3,6 +3,7 @@
 #include "SoundRender.h"
 #include "SoundRender_Environment.h"
 #include "SoundRender_Cache.h"
+#include "SoundRender_Mix.h"
 
 class CNotificationClient;
 
@@ -134,6 +135,23 @@ public:
 	void env_load();
 	void env_unload();
 	void env_apply();
+
+	// Listener-side mix (headphones), SoundRender_Mix.h / docs/audio_api.md
+	CSoundRender_Mix mix;
+	void mix_update(float dt); // fades and the limiter; once per sound update, after the emitters
+	u32 mix_category(CSoundRender_Emitter* E) const; // esound_mix_category of a playing emitter
+	float mix_gain(CSoundRender_Emitter* E) const; // listener-only gain factor (1 = unchanged)
+
+	void mix_set_category_gain(u32 cat, float gain, float fade_ms) override;
+	float mix_get_category_gain(u32 cat, bool target) override;
+	void mix_set_steps_range(float k) override;
+	float mix_get_steps_range() override;
+	void mix_set_limiter(bool enabled, float threshold_db, float attack_ms, float release_ms, float ratio) override;
+	void mix_set_limiter_detect(u32 game_type_mask, float own_k) override;
+	bool mix_get_limiter_enabled() override;
+	float mix_get_limiter_reduction_db() override;
+	float mix_get_loud_level_db() override;
+	void mix_reset(float fade_ms) override;
 };
 
 extern CSoundRender_Core* SoundRender;

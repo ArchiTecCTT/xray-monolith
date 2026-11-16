@@ -167,6 +167,9 @@ void CStepManager::update(bool b_hud_view)
 
 		float dist = m_object->Position().distance_to(Device.vCameraPosition);
         bool b_play_sound = dist < g_step_sound_distance;
+		// headphones (docs/audio_api.md): others' step SOUNDS may be heard further (x audio_steps_range); the actor's own
+		// steps and the eOnFootStep script callback keep the plain distance
+		bool b_play_others_sound = dist < g_step_sound_distance * ::Sound->mix_get_steps_range();
 		bool b_play_particles = dist < g_step_particle_distance;
 
 		// получить параметры шага
@@ -202,9 +205,10 @@ void CStepManager::update(bool b_hud_view)
 					break;
 
 				CGameObject* object = smart_cast<CGameObject*>(m_object);
-             if (b_play_sound && is_on_ground() && object)
+				const bool step_is_actor = object && object->ID() == 0;
+             if ((step_is_actor ? b_play_sound : b_play_others_sound) && is_on_ground() && object)
 				{
-					if (object->ID() == 0)
+					if (step_is_actor)
 					{
 						SGameMtl* mt = GMLib.GetMaterialByID(mtl_pair->GetMtl1());
 						if (mt)
@@ -219,7 +223,8 @@ void CStepManager::update(bool b_hud_view)
 					}
 					else
 					{
-						m_step_sound.play_next(mtl_pair, m_object, m_step_info.params.step[i].power, b_hud_view);
+						m_step_sound.play_next(mtl_pair, m_object, m_step_info.params.step[i].power, b_hud_view, true);
+						if (b_play_sound) // as before the headphones range: only within step_sound_distance
                      object->FootStepCallback(m_step_info.params.step[i].power, b_play_sound, is_on_ground(), b_hud_view);
 					}	
 				}
@@ -335,7 +340,7 @@ float CStepManager::get_blend_time()
 }
 
 void CStepManager::material_sound::play_next(SGameMtlPair* mtl_pair, CEntityAlive* object, float volume,
-                                             bool b_hud_mode)
+                                             bool b_hud_mode, bool others)
 {
 	if (mtl_pair->StepSounds.empty())
 		return;
@@ -361,9 +366,18 @@ void CStepManager::material_sound::play_next(SGameMtlPair* mtl_pair, CEntityAliv
 	if (b_hud_mode)
 		sound_pos.set(0, 0, 0);
 
-	mtl_pair->StepSounds[m_last_step_sound_played].play_no_feedback(object,
-	                                                                b_hud_mode ? sm_2D : 0,
-	                                                                0,
-	                                                                &sound_pos,
-	                                                                &vol);
+	// headphones: an NPC's / monster's step plays in the steps_others mix category (listener-side gain and range only;
+	// vol, the AI-visible volume, is unchanged). StepSounds are shared by every walker on this material pair, so the
+	// tag is put back right after play_no_feedback copied it.
+	ref_sound& step_snd = mtl_pair->StepSounds[m_last_step_sound_played];
+	const u8 prev_mix = step_snd.get_mix_category();
+	if (others)
+		step_snd.set_mix_category(smc_steps_others);
+	step_snd.play_no_feedback(object,
+	                          b_hud_mode ? sm_2D : 0,
+	                          0,
+	                          &sound_pos,
+	                          &vol);
+	if (others)
+		step_snd.set_mix_category(prev_mix);
 }

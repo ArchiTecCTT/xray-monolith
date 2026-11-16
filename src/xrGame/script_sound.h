@@ -48,6 +48,9 @@ public:
 	IC const float GetMaxDistance() const;
 	IC const float GetVolume() const;
 	IC bool IsPlaying() const;
+	// headphones (docs/audio_api.md): the listener-side mix category of what this object plays from now on
+	bool SetAudioCategory(LPCSTR name);
+	LPCSTR GetAudioCategory() const;
 
 DECLARE_SCRIPT_REGISTER_FUNCTION
 };

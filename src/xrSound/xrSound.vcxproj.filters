@@ -66,6 +66,9 @@
     <ClInclude Include="SoundRender_Environment.h">
       <Filter>Environment</Filter>
     </ClInclude>
+    <ClInclude Include="SoundRender_Mix.h">
+      <Filter>Core</Filter>
+    </ClInclude>
     <ClInclude Include="SoundRender_Cache.h">
       <Filter>Cache</Filter>
     </ClInclude>
