@@ -50,6 +50,8 @@ CWeaponMagazined::CWeaponMagazined(ESoundTypes eSoundType) : CWeapon()
 	m_eSoundEmptyClick = ESoundTypes(SOUND_TYPE_WEAPON_EMPTY_CLICKING | eSoundType);
 	m_eSoundReload = ESoundTypes(SOUND_TYPE_WEAPON_RECHARGING | eSoundType);
 	m_eSoundReloadEmpty = ESoundTypes(SOUND_TYPE_WEAPON_RECHARGING | eSoundType);
+	// the jammed reload is a reload for the AI too; this was never set, so it was 0 and NPCs got no sound event from it
+	m_eSoundReloadMisfire = ESoundTypes(SOUND_TYPE_WEAPON_RECHARGING | eSoundType);
 
 	m_sounds_enabled = true;
 	m_sSndShotCurrent = NULL;
@@ -125,8 +127,8 @@ void CWeaponMagazined::Load(LPCSTR section)
 	if (WeaponSoundExist(section, "snd_reload_empty"))
 		m_sounds.LoadSound(section, "snd_reload_empty", "sndReloadEmpty", true, m_eSoundReloadEmpty);
 	if (WeaponSoundExist(section, "snd_reload_misfire"))
-		// headphones: m_eSoundReloadMisfire was never given a value and the AI keeps hearing whatever it holds; for the
-		// listener-side mix the jammed reload is a reload (the last argument)
+		// the jammed reload is a reload for the AI (m_eSoundReloadMisfire) and for the listener-side mix (the last
+		// argument, docs/audio_api.md "Listener-side sound types")
 		m_sounds.LoadSound(section, "snd_reload_misfire", "sndReloadMisfire", true, m_eSoundReloadMisfire, m_eSoundReload);
 	if (WeaponSoundExist(section, "snd_switch_mode"))
 		m_sounds.LoadSound(section, "snd_switch_mode", "sndSwitchMode", true, m_eSoundEmptyClick);

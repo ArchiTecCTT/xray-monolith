@@ -13,8 +13,9 @@
 #define SOUND_MIX_DEFAULT_LOUD_MASK 0x00200100u
 
 // The sound type the detect masks test. A sound has one type for the AI (ref_sound_data::g_type, carried by its sound
-// events) and may have another for the listener (ref_sound_data::mix_type): some weapon handling sounds are typed as
-// shots for the AI (shotgun shell inserts, the BM16's second reload), and a headset must not treat them as bangs.
+// events) and may have another for the listener (ref_sound_data::mix_type), for a sound whose AI type is wrong for a
+// headset. The weapon reload sounds that were typed as shots carry one (shotgun shell inserts, the BM16's second
+// reload); since the npc-reload-types branch their AI type is the reload type as well.
 // SOUND_MIX_TYPE_AUTO (= sg_SourceType) means the sound has no listener type of its own: the AI type is used.
 #define SOUND_MIX_TYPE_AUTO 0xFFFFFFFFu
 inline u32 sound_mix_type(u32 ai_type, u32 listener_type)

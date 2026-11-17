@@ -9,8 +9,12 @@
 
 CWeaponShotgun::CWeaponShotgun()
 {
-	m_eSoundClose = ESoundTypes(SOUND_TYPE_WEAPON_SHOOTING);
-	m_eSoundAddCartridge = ESoundTypes(SOUND_TYPE_WEAPON_SHOOTING);
+	// The AI hears the open, each shell and the close as a reload, like the magazine reload of the same weapon. The
+	// shell and the close were typed as shots (NPCs took a reload for gunfire), the open was never set (0: no sound
+	// event at all).
+	m_eSoundOpen = m_eSoundReload;
+	m_eSoundClose = m_eSoundReload;
+	m_eSoundAddCartridge = m_eSoundReload;
 }
 
 CWeaponShotgun::~CWeaponShotgun()
@@ -36,8 +40,8 @@ void CWeaponShotgun::Load(LPCSTR section)
 	}
 	if (m_bTriStateReload)
 	{
-		// headphones: for the listener-side mix these are reload sounds (the last argument, m_eSoundReload). The type
-		// before it is what the AI hears and is left exactly as it was (docs/audio_api.md "Listener-side sound types").
+		// The type the AI hears (set in the constructor), then the type for the listener-side mix (m_eSoundReload,
+		// docs/audio_api.md "Listener-side sound types"). Both are the reload type.
 		m_sounds.LoadSound(section, "snd_open_weapon", "sndOpen", false, m_eSoundOpen, m_eSoundReload);
 
 		m_sounds.LoadSound(section, "snd_add_cartridge", "sndAddCartridge", false, m_eSoundAddCartridge, m_eSoundReload);

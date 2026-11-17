@@ -8,7 +8,7 @@
 // Part 2 reads the engine sources and checks the wiring: the mix only scales the OpenAL gain and rolloff, the AI hearing
 // path (Event_Propagade, SoundEvent_Register) does not read it, play_no_feedback carries the category, the footstep
 // gate and its AI-neutral flags, the compressor's detector chain, the auto-gain and bang guard wiring, the "own"
-// category, the listener-side sound types of the weapon reload sounds and the Lua exports.
+// category, the listener-side and AI sound types of the weapon reload sounds and the Lua exports.
 //
 //   g++ -std=c++17 -g -Wall -fsanitize=address,undefined tests/audio_mix_test.cpp -o /tmp/audio_mix_test
 //   /tmp/audio_mix_test .
@@ -699,33 +699,87 @@ int main(int argc, char** argv)
 	CHECK(hud.find("LoadSound(section, line, alias_to_play, old_sound->m_b_exclusive, old_sound->m_type,") != std::string::npos &&
 	      hud.find("old_sound->m_mix_type);") != std::string::npos);
 	CHECK(read_file(game + "HudSound.h").find("m_b_exclusive(false), m_mix_type(sg_SourceType)") != std::string::npos);
-	// the reload sounds: the AI type argument is exactly what it was, the listener type is the reload type
+	// the reload sounds (branch npc-reload-types): the AI type and the listener type are both the reload type. The AI
+	// type was a shot for the shell insert, the close, the SSRS open and the BM16's second reload, and never set (0,
+	// so no sound event) for the pump / automatic shotgun open and the jammed reload.
 	const std::string wm = read_file(game + "WeaponMagazined.cpp");
-	CHECK(wm.find("m_eSoundReload = ESoundTypes(SOUND_TYPE_WEAPON_RECHARGING | eSoundType);") != std::string::npos);
+	const std::string wms = strip_comments(wm);
+	const std::string ctor = body(wm, "CWeaponMagazined::CWeaponMagazined(ESoundTypes eSoundType)");
+	CHECK(ctor.find("m_eSoundReload = ESoundTypes(SOUND_TYPE_WEAPON_RECHARGING | eSoundType);") != std::string::npos);
+	CHECK(ctor.find("m_eSoundReloadMisfire = ESoundTypes(SOUND_TYPE_WEAPON_RECHARGING | eSoundType);") != std::string::npos);
 	CHECK(wm.find("\"snd_reload_misfire\", \"sndReloadMisfire\", true, m_eSoundReloadMisfire, m_eSoundReload);") != std::string::npos);
 	CHECK(wm.find("\"snd_reload_misfire_actor\", \"sndReloadMisfireActor\", true, m_eSoundReloadMisfire, m_eSoundReload);") != std::string::npos);
+	// nothing else about AI hearing changes: a shot is still a shot, an empty click a click, a normal reload a reload
+	CHECK(ctor.find("m_eSoundShot = ESoundTypes(SOUND_TYPE_WEAPON_SHOOTING | eSoundType);") != std::string::npos);
+	CHECK(ctor.find("m_eSoundEmptyClick = ESoundTypes(SOUND_TYPE_WEAPON_EMPTY_CLICKING | eSoundType);") != std::string::npos);
+	CHECK(ctor.find("m_eSoundReloadEmpty = ESoundTypes(SOUND_TYPE_WEAPON_RECHARGING | eSoundType);") != std::string::npos);
+	CHECK(wm.find("\"snd_shoot\", \"sndShot\", false, m_eSoundShot);") != std::string::npos);
+	CHECK(wm.find("\"snd_silncer_shot\", \"sndSilencerShot\", false, m_eSoundShot);") != std::string::npos);
+	CHECK(wm.find("\"snd_empty\", \"sndEmptyClick\", true, m_eSoundEmptyClick);") != std::string::npos);
+	CHECK(wm.find("\"snd_reload\", \"sndReload\", true, m_eSoundReload);") != std::string::npos);
+	{
+		// each sound type member is assigned once, in the constructor
+		size_t n = 0;
+		for (size_t at = wms.find("m_eSoundReloadMisfire ="); at != std::string::npos; at = wms.find("m_eSoundReloadMisfire =", at + 1))
+			++n;
+		CHECK(n == 1);
+		n = 0;
+		for (size_t at = wms.find("m_eSoundShot ="); at != std::string::npos; at = wms.find("m_eSoundShot =", at + 1))
+			++n;
+		CHECK(n == 1);
+	}
 	for (const char* f : {"WeaponShotgun.cpp", "WeaponAutomaticShotgun.cpp"})
 	{
-		const std::string w = read_file(game + f);
-		// what the AI hears of the close and the insert is still a shot
-		CHECK(w.find("m_eSoundClose = ESoundTypes(SOUND_TYPE_WEAPON_SHOOTING);") != std::string::npos);
-		CHECK(w.find("m_eSoundAddCartridge = ESoundTypes(SOUND_TYPE_WEAPON_SHOOTING);") != std::string::npos);
+		const std::string w = strip_comments(read_file(game + f));
+		// the AI hears the open, the insert and the close as a reload; none of them is a shot any more
+		CHECK(w.find("\tm_eSoundOpen = m_eSoundReload;") != std::string::npos);
+		CHECK(w.find("\tm_eSoundClose = m_eSoundReload;") != std::string::npos);
+		CHECK(w.find("\tm_eSoundAddCartridge = m_eSoundReload;") != std::string::npos);
+		CHECK(w.find("SOUND_TYPE_WEAPON_SHOOTING") == std::string::npos && w.find("SOUND_TYPE_SHOOTING") == std::string::npos);
 		CHECK(w.find("\"snd_open_weapon\", \"sndOpen\", false, m_eSoundOpen, m_eSoundReload);") != std::string::npos);
 		CHECK(w.find("\"snd_add_cartridge\", \"sndAddCartridge\", false, m_eSoundAddCartridge, m_eSoundReload);") != std::string::npos);
 		CHECK(w.find("\"snd_close_weapon\", \"sndClose\", false, m_eSoundClose, m_eSoundReload);") != std::string::npos);
 		CHECK(w.find("\"snd_close_weapon_empty\", \"sndCloseEmpty\", false, m_eSoundClose, m_eSoundReload);") != std::string::npos);
-		// the two types no code ever set are still not set: the AI side of them is as it was
-		CHECK(w.find("m_eSoundOpen =") == std::string::npos);
+		// each is assigned once and nothing in the file passes the shot type to a reload sound
+		for (const char* m : {"m_eSoundOpen =", "m_eSoundClose =", "m_eSoundAddCartridge ="})
+			CHECK(w.find(m) != std::string::npos && w.find(m, w.find(m) + 1) == std::string::npos);
 	}
-	CHECK(wm.find("m_eSoundReloadMisfire =") == std::string::npos);
+	// the automatic shotgun's last shot is the one shot sound these classes load themselves, and it is still a shot
 	{
-		const std::string w = read_file(game + "WeaponSSRS.cpp");
+		const std::string w = strip_comments(read_file(game + "WeaponAutomaticShotgun.cpp"));
+		const size_t at = w.find("m_eSoundShot");
+		CHECK(w.find("\"snd_shoot_last\", \"sndShootL\", false, m_eSoundShot);") != std::string::npos);
+		CHECK(at != std::string::npos && w.find("m_eSoundShot", at + 1) == std::string::npos);
+		CHECK(strip_comments(read_file(game + "WeaponShotgun.cpp")).find("m_eSoundShot") == std::string::npos);
+	}
+	{
+		const std::string w = strip_comments(read_file(game + "WeaponSSRS.cpp"));
 		for (const char* a : {"\"snd_open_weapon\", \"sndOpen\"", "\"snd_add_cartridge\", \"sndAddCartridge\"",
 		                      "\"snd_close_weapon\", \"sndClose\"", "\"snd_close_weapon_empty\", \"sndCloseEmpty\""})
-			CHECK(w.find(std::string(a) + ", false, ESoundTypes(SOUND_TYPE_WEAPON_SHOOTING), m_eSoundReload);") != std::string::npos);
+			CHECK(w.find(std::string(a) + ", false, m_eSoundReload, m_eSoundReload);") != std::string::npos);
+		CHECK(w.find("SOUND_TYPE_WEAPON_SHOOTING") == std::string::npos && w.find("m_eSoundShot") == std::string::npos);
 	}
-	CHECK(read_file(game + "weaponBM16.cpp").find("\"snd_reload_1\", \"sndReload1\", true, m_eSoundShot, m_eSoundReload);") !=
-	      std::string::npos);
+	{
+		const std::string w = strip_comments(read_file(game + "weaponBM16.cpp"));
+		CHECK(w.find("\"snd_reload_1\", \"sndReload1\", true, m_eSoundReload, m_eSoundReload);") != std::string::npos);
+		CHECK(w.find("m_eSoundShot") == std::string::npos);
+	}
+	// what the AI does with a type is untouched: the shot test of the stalkers' fake hit, of the danger manager's attack
+	// sound and of the mutants' full power are each still there, and each still tests the shot type only
+	{
+		const std::string smm = read_file(game + "sound_memory_manager.cpp");
+		const size_t fake = smm.find("\t\tif (is_sound_type(sound_type, SOUND_TYPE_WEAPON_SHOOTING))\n\t\t{\n\t\t\t// this is fake!");
+		CHECK(fake != std::string::npos);
+		CHECK(smm.find("bool heavy_sound = ((sound_type&SOUND_TYPE_WEAPON_SHOOTING) == SOUND_TYPE_WEAPON_SHOOTING ||") != std::string::npos);
+		CHECK(smm.find("RECHARGING") == std::string::npos);
+		const std::string dm = read_file(game + "danger_manager.cpp");
+		const size_t att = dm.find("if ((object.m_sound_type & SOUND_TYPE_WEAPON_SHOOTING) == SOUND_TYPE_WEAPON_SHOOTING)");
+		CHECK(att != std::string::npos && dm.find("CDangerObject::eDangerTypeAttackSound, CDangerObject::eDangerPerceiveTypeSound", att) != std::string::npos);
+		CHECK(dm.find("RECHARGING") == std::string::npos);
+		const std::string bm = read_file(game + "ai/monsters/basemonster/base_monster_feel.cpp");
+		CHECK(bm.find("if ((eType & SOUND_TYPE_WEAPON_SHOOTING) == SOUND_TYPE_WEAPON_SHOOTING) power = 1.f;") != std::string::npos);
+		CHECK(bm.find("RECHARGING") == std::string::npos);
+	}
 
 	std::printf("part 2 (sources in %s): %s\n", root.c_str(), g_fail != before ? "FAIL" : "ok");
 	std::printf(g_fail ? "FAILED\n" : "ALL PASS\n");

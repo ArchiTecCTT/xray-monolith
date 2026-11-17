@@ -121,14 +121,14 @@ line or a re-tagged `.ogg` therefore cannot change these types.
 **The sounds that have a listener-side type.** All get `WEAPON | RECHARGING` (`0x80040000`, the type of a normal
 reload) for the mix:
 
-| sound (config line) | weapon classes | AI type, unchanged | was for the mix |
+| sound (config line) | weapon classes | AI type before `npc-reload-types` | was for the mix |
 |---|---|---|---|
-| shell insert (`snd_add_cartridge`) | `CWeaponShotgun`, `CWeaponAutomaticShotgun`, `CWeaponSSRS` | `WEAPON \| SHOOTING` | a shot |
-| close (`snd_close_weapon`, `snd_close_weapon_empty`) | the same three | `WEAPON \| SHOOTING` | a shot |
+| shell insert (`snd_add_cartridge`) | `CWeaponShotgun` (with `CWeaponBM16` and `CWeaponRG6`, which derive from it), `CWeaponAutomaticShotgun`, `CWeaponSSRS` | `WEAPON \| SHOOTING` | a shot |
+| close (`snd_close_weapon`, `snd_close_weapon_empty`) | the same | `WEAPON \| SHOOTING` | a shot |
 | open (`snd_open_weapon`) | `CWeaponSSRS` | `WEAPON \| SHOOTING` | a shot |
-| open (`snd_open_weapon`) | `CWeaponShotgun`, `CWeaponAutomaticShotgun` | never set by any code (`m_eSoundOpen`): whatever the memory holds | unknown |
+| open (`snd_open_weapon`) | `CWeaponShotgun` (and the two derived), `CWeaponAutomaticShotgun` | 0: never set by any code (`m_eSoundOpen`), and `xr_new` zeroes the object | nothing (no bit of any mask) |
 | second reload (`snd_reload_1`) | `CWeaponBM16` | `WEAPON \| SHOOTING` | a shot |
-| jammed reload (`snd_reload_misfire`, `snd_reload_misfire_actor`) | every `CWeaponMagazined` | never set by any code (`m_eSoundReloadMisfire`): whatever the memory holds | unknown |
+| jammed reload (`snd_reload_misfire`, `snd_reload_misfire_actor`) | every `CWeaponMagazined` | 0: never set by any code (`m_eSoundReloadMisfire`) | nothing |
 
 **What changes for the player** (only while a script has a limiter, compressor or bang guard on):
 - An NPC's or your own shell insert, shotgun close or BM16 second reload is no longer a bang: it does not trigger the
@@ -137,19 +137,31 @@ reload) for the mix:
   reload.
 - With every detector off (the default, and after `audio_reset`) nothing reads a type, so nothing changes.
 
-**What does not change: AI hearing.** The AI type of these sounds is exactly what it was, including the two that
-were never set. The engine was *not* changed to give them the reload type for the AI, because that would change what
-NPCs do:
-- `CSoundMemoryManager::feel_sound_new` treats a `WEAPON | SHOOTING` sound from someone of another team as a hit
-  ("this is fake!": `memory().hit().add`), which makes the hearer take the shooter as an attacker.
-- `CDangerManager` (`danger_manager.cpp:301`) files it as an attack sound, mutants set its power to 1
-  (`base_monster_feel.cpp:63`), and scripts get it in the sound callback (`callback.sound`,
-  `CScriptEntity::sound_callback`) with the shot type.
+**AI hearing of these sounds (branch `npc-reload-types`).** On the `headphones-soundtypes` exe the AI type of these
+sounds was left as in the table. On `npc-reload-types` the AI type of all of them is the reload type too,
+`WEAPON | RECHARGING`, the same as the weapon's magazine reload (the owner: "a shotgun reload ain't a gunshot, sooo,
+it should still make sound, just not that of a gunshot"). Nothing else about AI hearing is changed: no other sound's
+type, no loudness or range (those come from the sound file and its volume), and no AI code.
 
-So today NPCs hear each shell insert, each shotgun close and the BM16's second reload as a gunshot. That is an old
-engine quirk and it stays. The sound events (`CSoundRender_Emitter::Event_Propagade`,
-`IGame_Level::SoundEvent_Dispatch`) carry `g_type` and never read `mix_type`; `tests/audio_mix_test.cpp` checks that,
-and that the AI type argument of every one of these `LoadSound` calls is unchanged.
+What the AI code does with the type, and so what changes for these sounds:
+
+| who hears it | as a shot (before) | as a reload (now) |
+|---|---|---|
+| stalkers, `CSoundMemoryManager::feel_sound_new` | from someone of another team it is filed as a hit by them ("this is fake!": `memory().hit().add`), so the hearer takes them for an attacker | no hit is filed |
+| stalkers, `CSoundMemoryManager::add` | a "heavy" sound: at power 4 or more from a living source the hearer cannot see, it goes to the danger mental state and starts to see the source | not a heavy sound: remembered as a sound only |
+| stalkers, `CDangerManager::add` (`danger_manager.cpp`) | an attack sound (`eDangerTypeAttackSound`, weight 2500) from anyone | from an enemy an enemy sound (`eDangerTypeEnemySound`, weight 1000); from anyone else no danger |
+| mutants, `CBaseMonster::feel_sound_new` | power forced to 1, so always over the hearing threshold; remembered as `WEAPON_SHOOTING` | the sound's own power, heard only over the mutant's threshold; remembered as `WEAPON_RECHARGING`, still a "dangerous" sound to them |
+| scripts, `callback.sound` / `xr_hear.script` | `WPN_shoot` | `WPN_reload` |
+
+The stalker's hearing scale for weapon sounds (`sound_perceive_section`, `weapon`) applies to a shot and a reload
+alike, so the loudness is the reload file's own.
+
+The two sounds whose type was 0 made no sound event at all (`CSoundRender_Emitter::Event_Propagade` returns on type
+0): NPCs did not hear the pump / automatic shotgun open or the jammed reload. Now they hear both, as reloads.
+
+The sound events (`CSoundRender_Emitter::Event_Propagade`, `IGame_Level::SoundEvent_Dispatch`) carry `g_type` and
+never read `mix_type`; `tests/audio_mix_test.cpp` checks that, the AI and listener type of every one of these
+`LoadSound` calls, and that the shot tests in the AI code are as they were.
 
 **For engine code.** `m_sounds.LoadSound(section, line, alias, exclusive, ai_type, listener_type)`: the last argument
 is optional. `ref_sound::set_mix_type(type)` does the same for a single `ref_sound`. `clone`, `play_no_feedback` and
@@ -871,4 +883,10 @@ Check the effect by ear, and with `audio_get_*` printed to the log.
     and the close (on the `headphones-autogain` exe each shell and the close show a dip). A shot still shows the dip.
     Stand near an NPC reloading a shotgun: the world does not dip with each shell.
 26. **AI hearing of reloads.** Reload a shotgun near neutral or unaware NPCs with `audio_reset(0)`, then with the
-    headset settings on: they must react the same both times, and the same as on the `headphones-autogain` exe.
+    headset settings on: they must react the same both times. On the `headphones-soundtypes` exe that is the same
+    as on `headphones-autogain`.
+27. **NPCs hear a shotgun reload as a reload (`npc-reload-types` exe).** Near enemies who have not noticed you and
+    cannot see you, top up a pump shotgun shell by shell. On the older exes each shell makes them act as if shot at.
+    On this exe they may still turn to the sound, as for any magazine reload at that distance, but do not act as if
+    fired on. A real shot still alerts them as before. Repeat with a BM16 holding one shell, and with a neutral
+    stalker next to you: your reload must not turn them hostile or send them to cover.

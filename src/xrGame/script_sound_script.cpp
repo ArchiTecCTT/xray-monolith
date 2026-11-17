@@ -37,7 +37,8 @@ using namespace luabind;
 // 2048 = the "body" category and path rules: audio_set_category_rule / audio_clear_category_rules /
 //        audio_get_category_rule_count
 // 4096 = listener-side sound types: the shotgun open / shell insert / close, the BM16's second reload and the jammed
-//        reload count as reloads (WEAPON | RECHARGING) in the detect masks; what the AI hears of them is unchanged
+//        reload count as reloads (WEAPON | RECHARGING) in the detect masks. On the npc-reload-types branch the AI
+//        hears them as reloads too (no bit for that: it is not part of the audio API)
 static int audio_api() { return 1 | 2 | 4 | 8 | 16 | 32 | 64 | 128 | 256 | 512 | 1024 | 2048 | 4096; }
 
 static const char* const audio_category_names[smc_count] = {"world", "ambient", "weather", "steps_others", "ui", "music",
