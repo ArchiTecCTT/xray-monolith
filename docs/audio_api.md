@@ -44,12 +44,13 @@ local bits = audio_api and audio_api() or 0
 | 256 | per-source auto-gain and the bang guard: `audio_set_autogain`, `audio_set_autogain_category`, `audio_get_autogain_category`, `audio_get_autogain_enabled`, `audio_get_autogain_min`, `audio_get_autogain_max`, `audio_set_bang_guard`, `audio_set_bang_guard_detect`, `audio_get_bang_guard_enabled`, `audio_get_bang_guard_reduction` |
 | 512 | the `own` category: `audio_set_own_split`, `audio_get_own_split`, and `"own"` as a category name everywhere |
 | 1024 | the steps range of `audio_set_steps_others` no longer changes what the AI hears |
+| 2048 | the `body` category and path rules: `audio_set_category_rule`, `audio_clear_category_rules`, `audio_get_category_rule_count` |
 
 | exe (fork branch) | `audio_api()` |
 |---|---|
 | `headphones-audio` | 63 |
 | `headphones-compressor` | 255 |
-| `headphones-autogain` | 2047 |
+| `headphones-autogain` | 4095 |
 
 Use `bit.band(audio_api(), 4) ~= 0` (or the bit library you use elsewhere) before calling a function. An exe without
 this feature has no `audio_api` at all.
@@ -71,7 +72,10 @@ Each playing sound is in exactly one category. The engine picks it in this order
 | `steps_others` | footsteps of every NPC and monster (`CStepManager`, entity ID ≠ 0) | `xrGame/step_manager.cpp` |
 | any | a script's `sound_object` after `snd:set_audio_category(name)` | your script |
 
-2. **No tag:**
+2. **A path rule** (`audio_set_category_rule`): an untagged sound whose file name contains a text a script gave. This
+   is how sounds that other scripts play get a category, for example the heartbeat and breathing as `body`.
+
+3. **No tag and no rule:**
    - `music`: `st_Music` sounds (level music tracks) and intro / video sounds.
    - `ui`: 2D sounds with no game object (menus, UI clicks, most PDA sounds).
    - `own`: your own sounds, **only after a script called `audio_set_own_split(true)`**. That is every untagged
@@ -87,14 +91,17 @@ Notes:
   `ambient`.
 - **Your own weapon.** Your first-person weapon sounds are in `world`, or in `own` once a script switched the own
   split on. This includes HUD sounds, which play in 2D with you as the object.
-- **The limiter** works on every category except `ui` and `music`.
-- **Auto-gain** works on `world`, `steps_others` and `own` unless a script changes that. It can never work on `ui`
-  or `music`, and it never lifts `own`.
+- **The limiter** works on every category except `ui`, `music` and `body`.
+- **`body`** is for the player's body sounds: heartbeat, breathing, anything "inside the head". Nothing but its own
+  category gain ever changes it: no limiter, compressor, auto-gain or bang guard, exactly like `ui` and `music`. The
+  engine never puts a sound there by itself; a script does, with a path rule or a tag.
+- **Auto-gain** works on `world`, `steps_others` and `own` unless a script changes that. It can never work on `ui`,
+  `music` or `body`, and it never lifts `own`.
 - **2D sounds with no game object are `ui`**, also when they are not menu sounds (some mods play PDA beeps and
   voice lines that way). Auto-gain, the compressor and the limiter never touch them. If such a sound is too loud,
   use `audio_set_category_gain("ui", ...)`, or tag the `sound_object` with `set_audio_category("own")`.
-- **The compressor** works on `world` and `steps_others` unless a script changes the set. It can never work on `ui`
-  or `music`.
+- **The compressor** works on `world` and `steps_others` unless a script changes the set. It can never work on `ui`,
+  `music` or `body`.
 
 ## Measurements: why footsteps were hard to hear
 
@@ -246,7 +253,7 @@ The loud-sound limiter.
 From that level, the limiter computes:
 - **Gain reduction (dB, ≤ 0):** `-(level_db - threshold_db) × (1 - 1/ratio)` when the level is over the threshold.
   Attack and release smooth it.
-- **Gain:** `10^(reduction/20)`. It multiplies every source except `ui` and `music`. That includes the loud sound
+- **Gain:** `10^(reduction/20)`. It multiplies every source except `ui`, `music` and `body`. That includes the loud sound
   itself, so a shot is squashed along with everything else.
 
 **Limits.**
@@ -451,7 +458,7 @@ down a little, and no shot makes it disappear.
 How much of the auto-gain a category gets.
 - `amount`: 0 ... 1. 0 = none, 1 = all of it, 0.5 = half the dB.
 - Defaults: `world` 1, `steps_others` 1, `own` 1, `ambient` 0, `weather` 0.
-- `"ui"`, `"music"` and unknown names return `false`: they never get auto-gain.
+- `"ui"`, `"music"`, `"body"` and unknown names return `false`: they never get auto-gain.
 - `own` is never lifted, whatever the amount: its boost ceiling is 0. With amount 1 your own loud sounds are turned
   down like any other loud sound; with 0 they are left alone.
 
@@ -465,8 +472,9 @@ Whether auto-gain is on.
 
 ### `audio_get_autogain_min() -> number` / `audio_get_autogain_max() -> number`
 
-The lowest and the highest auto-gain, in dB, among the sources played in the last sound update (0 and 0 when no
-source has one). For a debug HUD: with a shot nearby and steps far away you see about -9 and +12.
+The deepest cut (0 or below) and the highest lift (0 or above), in dB, among the sources played in the last sound
+update; 0 and 0 when no source has an auto-gain. For a debug HUD: with a shot nearby and steps far away you see
+about -9 and +12.
 
 ### `audio_set_bang_guard(enabled, threshold_db, max_duck_db, hold_ms, release_ms)`
 
@@ -480,8 +488,8 @@ protection, and it is the only part of the auto-gain set where one sound changes
 - `release_ms`: 0 ... 1000. Default 25. How fast the duck goes away after the hold.
 
 **How it works.** A bang is a one-shot sound whose type has a bit of the detect mask (shots and explosions by
-default). Only its first `hold_ms` count, not the rest of its sample. While it counts, every category except `ui`
-and `music` is ducked at once. After the hold the duck fades with the release time. With the defaults a
+default). Only its first `hold_ms` count, not the rest of its sample. While it counts, every category except `ui`,
+`music` and `body` is ducked at once. After the hold the duck fades with the release time. With the defaults a
 full-volume shot ducks 6 dB for 30 ms, less than 1 dB is left 50 ms later, about 0.1 dB after 100 ms and nothing
 after 0.25 s. The limiter and the compressor, in contrast, hold for as long as the shot's sample plays, which is
 what made the world go quiet.
@@ -508,12 +516,40 @@ Switches the `own` category on (see [Categories](#categories)). Default false.
 - `audio_set_category_gain("own", gain, fade_ms)` sets their volume directly.
 - The compressor's set does not contain `own` by default, so with the split on your own shots neither get
   compressed nor drive the compressor. Add it with `audio_set_compressor_category("own", true)` if you still use the
-  compressor. The limiter covers `own` like every category but `ui` and `music`.
+  compressor. The limiter covers `own` like every category but `ui`, `music` and `body`.
 - Switching it while sounds play moves them between `world` and `own` at once. Set it before the gains, when the
   headset goes on.
 
 A script can also put any `sound_object` into the category by hand: `snd:set_audio_category("own")`. That works
 without the split.
+
+### `audio_set_category_rule(path_part, category) -> bool`
+
+Gives a category to sounds by their file name. Use it for sounds your script does not play itself.
+
+- `path_part`: a piece of the sound's path under `sounds\`, without the extension, for example `"actor\\heartbeat"`
+  or `"actor\\gas_breath_"` (in a Lua string a backslash is written twice). Case and the kind of slash do not
+  matter. At most 95 characters.
+- `category`: any of the eight names.
+- Returns `false` for an unknown category, an empty or too long text, or when all 64 rules are used.
+
+How it works:
+- A sound that starts **after** the call, has no tag, and whose file name contains `path_part` plays in that
+  category. Sounds that are already playing keep theirs.
+- A tag wins over a rule (`set_audio_category`, and the engine's own tags for rain, thunder, ambience and others'
+  steps). A rule wins over the automatic choice, also over `ui` and `own`.
+- With several matching rules the one added first wins. Setting the same text again changes its category.
+- The file name is looked at once, when the sound starts. With no rules it costs nothing.
+
+```lua
+audio_set_category_rule("actor\\heartbeat", "body")     -- never ducked, lifted or guarded
+audio_set_category_rule("actor\\gas_breath_", "body")
+audio_set_category_rule("interface\\pda", "own")        -- a PDA beep played with no object would otherwise be ui
+```
+
+### `audio_clear_category_rules()` / `audio_get_category_rule_count() -> number`
+
+Removes every rule, and the number of rules set.
 
 ### `audio_reset(fade_ms)`
 
@@ -526,7 +562,8 @@ Puts everything back to the defaults:
   `world` and `steps_others`, and its detect masks and `own_k` go back to the defaults;
 - auto-gain is switched off (each source's gain goes back to 0 dB) and its category amounts go back to the defaults;
 - the bang guard is switched off and its detect mask goes back to the default;
-- the own split is switched off.
+- the own split is switched off;
+- every path rule is removed.
 
 ### `sound_object:set_audio_category(name) -> bool` / `sound_object:get_audio_category() -> string`
 
@@ -612,10 +649,14 @@ guard's pass does a type test per emitter and a few operations for the rare bang
 
 ## Suggested headset settings
 
-A starting point for a good headset on the `headphones-autogain` exe (`audio_api()` 2047), from the measurements.
+A starting point for a good headset on the `headphones-autogain` exe (`audio_api()` 4095), from the measurements.
 Not played yet.
 
 ```lua
+audio_set_category_rule("actor\\heartbeat", "body")     -- body sounds: nothing ever ducks or lifts them
+audio_set_category_rule("actor\\breath_", "body")       -- (one rule per sound family the mods in use play)
+audio_set_category_rule("actor\\gas_breath_", "body")
+audio_set_category_rule("actor\\run_", "body")
 audio_set_own_split(true)                              -- your own sounds become the "own" category
 audio_set_limiter(false, -12, 5, 400, 20)              -- replaced by auto-gain and the bang guard
 audio_set_compressor(false, -24, 4, 10, 250, 0, 6)     -- replaced by auto-gain
@@ -671,7 +712,7 @@ The compressor of the `headphones-compressor` exe is still there and unchanged. 
 Run these from the debug console with a Lua line, e.g. `run_string` / a debug script, or from your headset script.
 Check the effect by ear, and with `audio_get_*` printed to the log.
 
-1. **Feature check.** `printf("audio_api %s", audio_api())` prints 2047.
+1. **Feature check.** `printf("audio_api %s", audio_api())` prints 4095.
 2. **Ambient / weather.**
    1. Stand outside in rain.
    2. `audio_set_category_gain("weather", 0, 2000)`: the rain fades out over 2 s. Thunder is silent.
@@ -767,3 +808,7 @@ Check the effect by ear, and with `audio_get_*` printed to the log.
     `audio_get_autogain_category("world")` is 1, `audio_get_bang_guard_enabled()` is false.
 23. **AI hearing with auto-gain.** Repeat test 7 with the suggested headset settings on. NPCs must react exactly as
     with `audio_reset(0)`.
+24. **Body sounds.** Set the heartbeat and breathing rules of "Suggested headset settings", then the rest of those
+    settings. Get hurt or sprint until the heartbeat and breathing play: they are exactly as loud as with
+    `audio_reset(0)`, and firing a shot does not change them. `audio_set_category_gain("body", 0.5, 0)` makes only
+    them quieter. `audio_get_category_rule_count()` is 4; after `audio_reset(0)` it is 0.

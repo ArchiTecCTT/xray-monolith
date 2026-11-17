@@ -31,6 +31,8 @@ void CSoundRender_Emitter::start(ref_sound* _owner, BOOL _loop, float delay)
 	mix_src_level = 0.f;
 	mix_ag_db = 0.f;
 	mix_ag_set = false;
+	// headphones: a script's path rule may put an untagged sound into a mix category by its file name
+	mix_rule_cat = owner_data->mix_cat == smc_auto ? SoundRender->mix_rule_category(source()->file_name()) : u8(smc_auto);
 
 	if (fis_zero(delay, EPS_L))
 	{
@@ -77,6 +79,7 @@ void CSoundRender_Emitter::rewind()
 
 	set_cursor(0);
 	bRewind = TRUE;
+	mix_ag_set = false; // headphones: a restarted sound takes its auto-gain at once again, like a new one
 }
 
 void CSoundRender_Emitter::pause(BOOL bVal, int id)

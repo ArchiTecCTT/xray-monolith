@@ -34,10 +34,12 @@ using namespace luabind;
 //       audio_get_bang_guard_reduction
 // 512 = the "own" category: audio_set_own_split / audio_get_own_split
 // 1024 = the steps range of audio_set_steps_others no longer changes what the AI hears
-static int audio_api() { return 1 | 2 | 4 | 8 | 16 | 32 | 64 | 128 | 256 | 512 | 1024; }
+// 2048 = the "body" category and path rules: audio_set_category_rule / audio_clear_category_rules /
+//        audio_get_category_rule_count
+static int audio_api() { return 1 | 2 | 4 | 8 | 16 | 32 | 64 | 128 | 256 | 512 | 1024 | 2048; }
 
 static const char* const audio_category_names[smc_count] = {"world", "ambient", "weather", "steps_others", "ui", "music",
-                                                            "own"};
+                                                            "own", "body"};
 
 static int audio_category_id(LPCSTR name)
 {
@@ -175,6 +177,15 @@ static void audio_set_bang_guard_detect(double game_type_mask)
 static bool audio_get_bang_guard_enabled() { return ::Sound->mix_get_bang_guard_enabled(); }
 static float audio_get_bang_guard_reduction() { return ::Sound->mix_get_bang_guard_reduction_db(); }
 static void audio_set_own_split(bool enabled) { ::Sound->mix_set_own_split(enabled); }
+
+static bool audio_set_category_rule(LPCSTR path_part, LPCSTR category)
+{
+	const int c = audio_category_id(category);
+	return c >= 0 && path_part && ::Sound->mix_set_category_rule(path_part, u32(c));
+}
+
+static void audio_clear_category_rules() { ::Sound->mix_clear_category_rules(); }
+static int audio_get_category_rule_count() { return int(::Sound->mix_get_category_rule_count()); }
 static bool audio_get_own_split() { return ::Sound->mix_get_own_split(); }
 
 bool CScriptSound::SetAudioCategory(LPCSTR name)
@@ -277,6 +288,9 @@ void CScriptSound::script_register(lua_State* L)
 		def("audio_get_bang_guard_enabled", &audio_get_bang_guard_enabled),
 		def("audio_get_bang_guard_reduction", &audio_get_bang_guard_reduction),
 		def("audio_set_own_split", &audio_set_own_split),
-		def("audio_get_own_split", &audio_get_own_split)
+		def("audio_get_own_split", &audio_get_own_split),
+		def("audio_set_category_rule", &audio_set_category_rule),
+		def("audio_clear_category_rules", &audio_clear_category_rules),
+		def("audio_get_category_rule_count", &audio_get_category_rule_count)
 	];
 }

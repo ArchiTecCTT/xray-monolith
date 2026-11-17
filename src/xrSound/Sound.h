@@ -129,6 +129,7 @@ enum esound_mix_category
 	smc_ui, // 2D sounds without a game object (menus, UI clicks, PDA)
 	smc_music, // st_Music sounds (level music)
 	smc_own, // the player's own sounds (weapon handling, steps, PDA, voice); only filled while the own split is on
+	smc_body, // the player's body sounds (heartbeat, breathing); only by a tag or a path rule; nothing but its own gain
 	smc_count,
 	smc_auto = 0xFF, // no tag: the category follows from the sound (music, ui, own or world)
 };
@@ -522,6 +523,13 @@ public:
 	virtual bool mix_get_own_split() = 0;
 	// the object the listener is (the actor); compared only, never dereferenced. Set by the engine every frame.
 	virtual void mix_set_listener_object(CObject* O) = 0;
+	// path rules: an untagged sound whose file name contains path_part (any case, either slash) plays in category cat
+	// (esound_mix_category). Applies to sounds that start after the call. false: unknown category, empty or too long
+	// text, or the table is full.
+	virtual bool mix_set_category_rule(LPCSTR path_part, u32 cat) = 0;
+	virtual void mix_clear_category_rules() = 0;
+	virtual u32 mix_get_category_rule_count() = 0;
+	virtual u8 mix_rule_category(LPCSTR file_name) = 0; // the category a rule gives this file, smc_auto = none
 #ifdef __BORLANDC__
 	virtual SoundEnvironment_LIB*	get_env_library			()																						= 0;
 	virtual void					refresh_env_library		()																						= 0;

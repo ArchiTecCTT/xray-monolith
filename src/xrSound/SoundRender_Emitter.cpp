@@ -36,6 +36,7 @@ CSoundRender_Emitter::CSoundRender_Emitter(void)
 	mix_src_level = 0.f;
 	mix_ag_db = 0.f;
 	mix_ag_set = false;
+	mix_rule_cat = u8(smc_auto);
 	occluder[0].set(0, 0, 0);
 	occluder[1].set(0, 0, 0);
 	occluder[2].set(0, 0, 0);

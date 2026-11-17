@@ -26,7 +26,7 @@
 typedef unsigned int u32;
 template <class T> T _abs(T v) { return v < 0 ? -v : v; }
 struct xrCriticalSection { void Enter() {} void Leave() {} };
-enum { smc_world = 0, smc_steps_others = 3, smc_ui = 4, smc_music = 5, smc_own = 6, smc_count = 7 }; // as in Sound.h (checked in part 2)
+enum { smc_world = 0, smc_steps_others = 3, smc_ui = 4, smc_music = 5, smc_own = 6, smc_body = 7, smc_count = 8 }; // as in Sound.h (checked in part 2)
 
 #include "../src/xrSound/SoundRender_Mix.h"
 
@@ -246,6 +246,40 @@ int main(int argc, char** argv)
 		// auto-gain acts on world, others' steps and the player's own sounds unless a script says otherwise
 		for (int i = 0; i < smc_count; ++i)
 			CHECK(m.ag_amount[i] == ((i == smc_world || i == smc_steps_others || i == smc_own) ? 1.f : 0.f));
+	}
+
+	// ---- part 1: categories nothing touches, and path rules
+	{
+		CHECK(sound_mix_untouched(smc_ui) && sound_mix_untouched(smc_music) && sound_mix_untouched(smc_body));
+		CHECK(!sound_mix_untouched(smc_world) && !sound_mix_untouched(smc_steps_others) && !sound_mix_untouched(smc_own));
+		// file names are compared without case and with either slash; an empty part matches nothing
+		CHECK(sound_mix_path_contains("actor\\heartbeat", "actor\\heart"));
+		CHECK(sound_mix_path_contains("actor\\heartbeat", "Actor/HeartBeat"));
+		CHECK(sound_mix_path_contains("characters_voice\\player\\hit_1", "voice\\player\\"));
+		CHECK(!sound_mix_path_contains("actor\\heartbeat", "actor\\breath"));
+		CHECK(!sound_mix_path_contains("actor\\heart", "actor\\heartbeat"));
+		CHECK(!sound_mix_path_contains("actor\\heartbeat", "") && !sound_mix_path_contains("", "a") &&
+		      !sound_mix_path_contains(nullptr, "a") && !sound_mix_path_contains("a", nullptr));
+		CSoundRender_Mix m;
+		CHECK(m.rule_count == 0 && m.rule_match("actor\\heartbeat") == 0xFF);
+		CHECK(m.rule_set("actor\\heartbeat", smc_body) && m.rule_set("actor/gas_breath_", smc_body) &&
+		      m.rule_set("interface\\pda", smc_own));
+		CHECK(m.rule_count == 3);
+		CHECK(m.rule_match("actor\\heartbeat") == smc_body && m.rule_match("actor\\gas_breath_3_1") == smc_body);
+		CHECK(m.rule_match("interface\\pda_tip") == smc_own && m.rule_match("weapons\\ak74\\ak74_shoot") == 0xFF);
+		// the same text again changes the category, it does not add a rule; the first rule added wins a double match
+		CHECK(m.rule_set("ACTOR/HEARTBEAT", smc_ui) && m.rule_count == 3 && m.rule_match("actor\\heartbeat") == smc_ui);
+		CHECK(m.rule_set("actor\\", smc_own) && m.rule_match("actor\\heartbeat") == smc_ui &&
+		      m.rule_match("actor\\run_1_1") == smc_own);
+		// refused: no text, an unknown category, a text that is too long, a full table
+		CHECK(!m.rule_set("", smc_body) && !m.rule_set(nullptr, smc_body) && !m.rule_set("x", smc_count));
+		CHECK(!m.rule_set(std::string(SOUND_MIX_RULE_LEN, 'a').c_str(), smc_body));
+		CHECK(m.rule_set(std::string(SOUND_MIX_RULE_LEN - 1, 'a').c_str(), smc_body));
+		bool all = true;
+		for (int i = int(m.rule_count); i < SOUND_MIX_MAX_RULES; ++i)
+			all = all && m.rule_set(("rule" + std::to_string(i)).c_str(), smc_body);
+		CHECK(all && m.rule_count == SOUND_MIX_MAX_RULES && !m.rule_set("one_too_many", smc_body));
+		CHECK(m.rule_set("rule40", smc_own) && m.rule_match("x\\rule40") == smc_own); // changing one still works when full
 	}
 
 	// ---- part 1: auto-gain curve (one source's gain in dB for its own level)
@@ -471,20 +505,23 @@ int main(int argc, char** argv)
 	const std::string cats = body(sound_h, "enum esound_mix_category");
 	const size_t e0 = cats.find("smc_world = 0,"), e1 = cats.find("smc_ambient,"), e2 = cats.find("smc_weather,");
 	const size_t e3 = cats.find("smc_steps_others,"), e4 = cats.find("smc_ui,"), e5 = cats.find("smc_music,");
-	const size_t e6 = cats.find("smc_own,"), e7 = cats.find("smc_count,");
-	CHECK(e0 != std::string::npos && e7 != std::string::npos);
-	CHECK(e0 < e1 && e1 < e2 && e2 < e3 && e3 < e4 && e4 < e5 && e5 < e6 && e6 < e7);
+	const size_t e6 = cats.find("smc_own,"), e7 = cats.find("smc_body,"), e8 = cats.find("smc_count,");
+	CHECK(e0 != std::string::npos && e8 != std::string::npos);
+	CHECK(e0 < e1 && e1 < e2 && e2 < e3 && e3 < e4 && e4 < e5 && e5 < e6 && e6 < e7 && e7 < e8);
 	// the compressor gain reaches a source only through mix_gain, for the categories of the compressed set
 	const std::string mg = body(core, "float CSoundRender_Core::mix_gain(CSoundRender_Emitter* E)");
 	CHECK(mg.find("if (mix.comp_cats_cur & (1u << c))") != std::string::npos);
 	CHECK(mg.find("g *= mix.comp_gain;") != std::string::npos);
-	// menus and music can never be put into the compressed set
+	// menus, music and body sounds can never be put into the compressed set
 	const std::string scc = body(core, "bool CSoundRender_Core::mix_set_compressor_category(u32 cat, bool enabled)");
-	CHECK(scc.find("cat == smc_ui || cat == smc_music") != std::string::npos);
+	CHECK(scc.find("if (cat >= smc_count || sound_mix_untouched(cat))") != std::string::npos);
 	// the detector: heard level x category gain x limiter (the chain category -> limiter -> compressor), 2D weight
 	const std::string mu = body(core, "void CSoundRender_Core::mix_update(float dt)");
 	CHECK(mu.find("float l = E->mix_heard * mix.cat[c].cur * mix.lim_gain;") != std::string::npos);
 	CHECK(mu.find("l *= c_own_k;") != std::string::npos);
+	// a muted footstep never drives the compressor
+	const size_t cm1 = mu.find("if (d->mix_flags & smf_mute)"), cm2 = mu.find("float l = E->mix_heard * mix.cat[c].cur * mix.lim_gain;");
+	CHECK(cm1 != std::string::npos && cm2 != std::string::npos && cm1 < cm2);
 	// 2D sounds (the actor's own) are picked by their own type mask, shots and explosions by default
 	CHECK(mu.find("!(u32(d->g_type) & (E->b2D ? c_own_mask : c_mask))") != std::string::npos);
 	const size_t lim_at = mu.find("mix.lim_gain = "), comp_at = mu.find("float l = E->mix_heard");
@@ -508,16 +545,18 @@ int main(int argc, char** argv)
 	CHECK(rst.find("mix.comp_on = false;") != std::string::npos && rst.find("mix.rolloff_k[i] = 1.f;") != std::string::npos);
 	CHECK(rst.find("mix.comp_cats = (1u << smc_world) | (1u << smc_steps_others);") != std::string::npos);
 	// Lua: the feature bits and every export
-	CHECK(lua.find("static int audio_api() { return 1 | 2 | 4 | 8 | 16 | 32 | 64 | 128 | 256 | 512 | 1024; }") !=
+	CHECK(lua.find("static int audio_api() { return 1 | 2 | 4 | 8 | 16 | 32 | 64 | 128 | 256 | 512 | 1024 | 2048; }") !=
 	      std::string::npos);
-	CHECK(lua.find("\"steps_others\", \"ui\", \"music\",") != std::string::npos && lua.find("\"own\"};") != std::string::npos);
+	CHECK(lua.find("\"steps_others\", \"ui\", \"music\",") != std::string::npos &&
+	      lua.find("\"own\", \"body\"};") != std::string::npos);
 	for (const char* fn : {"audio_set_compressor", "audio_set_compressor_detect", "audio_set_compressor_category",
 	                       "audio_get_compressor_category", "audio_get_compressor_enabled", "audio_get_compressor_gain",
 	                       "audio_get_compressor_level", "audio_set_category_rolloff", "audio_get_category_rolloff",
 	                       "audio_set_autogain", "audio_set_autogain_category", "audio_get_autogain_category",
 	                       "audio_get_autogain_enabled", "audio_get_autogain_min", "audio_get_autogain_max",
 	                       "audio_set_bang_guard", "audio_set_bang_guard_detect", "audio_get_bang_guard_enabled",
-	                       "audio_get_bang_guard_reduction", "audio_set_own_split", "audio_get_own_split"})
+	                       "audio_get_bang_guard_reduction", "audio_set_own_split", "audio_get_own_split",
+	                       "audio_set_category_rule", "audio_clear_category_rules", "audio_get_category_rule_count"})
 	{
 		const std::string d = std::string("def(\"") + fn + "\", &" + fn + ")";
 		if (lua.find(d) == std::string::npos)
@@ -536,13 +575,17 @@ int main(int argc, char** argv)
 	CHECK(mg.find("if (mix.ag_on_cur || E->mix_ag_db != 0.f || !E->mix_ag_set)") != std::string::npos);
 	const size_t ag1 = mg.find("if (E->mix_ag_db != 0.f)"), ag2 = mg.find("g *= sound_mix_db_to_gain(E->mix_ag_db);");
 	CHECK(ag1 != std::string::npos && ag2 != std::string::npos && ag1 < ag2);
-	// the bang guard ducks what the limiter ducks (everything but menus and music), and a muted step is silent
+	// the limiter and the bang guard leave menus, music and body sounds alone; a muted step is silent before anything
+	// else is looked at
+	const size_t unt_at = mg.find("if (!sound_mix_untouched(c))");
+	CHECK(unt_at != std::string::npos && mg.find("g *= mix.lim_gain * mix.bang_gain;") > unt_at);
 	CHECK(mg.find("g *= mix.lim_gain * mix.bang_gain;") != std::string::npos);
 	const size_t mute_at = mg.find("if (d && (d->mix_flags & smf_mute))");
-	CHECK(mute_at != std::string::npos && mg.find("g = 0.f;", mute_at) != std::string::npos);
-	// menus and music can never get auto-gain
+	CHECK(mute_at != std::string::npos && mg.find("return 0.f;", mute_at) < mg.find("const u32 c = mix_category(E);"));
+	// menus, music and body sounds can never get auto-gain, and the bang guard's detector skips them
 	const std::string sac = body(core, "bool CSoundRender_Core::mix_set_autogain_category(u32 cat, float amount)");
-	CHECK(sac.find("cat == smc_ui || cat == smc_music") != std::string::npos);
+	CHECK(sac.find("if (cat >= smc_count || sound_mix_untouched(cat))") != std::string::npos);
+	CHECK(mu.find("if (sound_mix_untouched(c))") != std::string::npos);
 	// the source's own level leaves out the fade in / out and gets the same OpenAL distance gain as the heard level
 	CHECK(cull.find("mix_src_level = _min(p_source.base_volume * volume_att * occluder_volume, 1.f);") != std::string::npos);
 	CHECK(cull.find("mix_src_level *= al_att;") != std::string::npos && cull.find("mix_heard *= al_att;") != std::string::npos);
@@ -551,24 +594,32 @@ int main(int argc, char** argv)
 	CHECK(mu.find("if (age < 0.f || age > b_hold)") != std::string::npos);
 	CHECK(mu.find("const float l = E->mix_heard * mix.cat[c].cur;") != std::string::npos);
 	const std::string emitter_h = read_file(snd + "SoundRender_Emitter.h");
-	CHECK(emitter_h.find("return (m_current_state == stPlaying || m_current_state == stSimulating) ? now - fTimeStarted : -1.f;") !=
+	CHECK(emitter_h.find("return (!iPaused && (m_current_state == stPlaying || m_current_state == stSimulating)) ? now - fTimeStarted : -1.f;") !=
 	      std::string::npos);
 	// every new source starts without an auto-gain and unseen
 	const std::string startstop = read_file(snd + "SoundRender_Emitter_StartStop.cpp");
 	CHECK(startstop.find("mix_ag_db = 0.f;") != std::string::npos && startstop.find("mix_ag_set = false;") != std::string::npos);
+	const std::string rew = body(startstop, "void CSoundRender_Emitter::rewind()");
+	CHECK(rew.find("mix_ag_set = false;") != std::string::npos); // a restarted sound too
+	// path rules: looked up once, when an untagged sound starts; a tag beats a rule, a rule beats the automatic category
+	CHECK(startstop.find("mix_rule_cat = owner_data->mix_cat == smc_auto ? SoundRender->mix_rule_category(source()->file_name()) : u8(smc_auto);") !=
+	      std::string::npos);
 	CHECK(emitter.find("mix_ag_db = 0.f;") != std::string::npos && emitter.find("mix_ag_set = false;") != std::string::npos);
 	// the own category: only once a script asked for it, only for untagged sounds with a game object
 	const std::string mc = body(core, "u32 CSoundRender_Core::mix_category(CSoundRender_Emitter* E) const");
 	const size_t tag_at = mc.find("if (d->mix_cat < smc_count)"), ui_at = mc.find("return smc_ui;");
 	const size_t own_at = mc.find("if (mix.own_split && d->g_object && (E->b2D || d->g_object == mix.listener_obj))");
-	CHECK(tag_at != std::string::npos && ui_at != std::string::npos && own_at != std::string::npos);
-	CHECK(tag_at < ui_at && ui_at < own_at && mc.find("return smc_own;") > own_at);
+	const size_t rule_at = mc.find("if (E->mix_rule_cat < smc_count)");
+	CHECK(tag_at != std::string::npos && ui_at != std::string::npos && own_at != std::string::npos && rule_at != std::string::npos);
+	CHECK(tag_at < rule_at && rule_at < ui_at && ui_at < own_at && mc.find("return smc_own;") > own_at);
+	// nothing in the automatic rules puts a sound into the body category: only a tag or a path rule does
+	CHECK(mc.find("smc_body") == std::string::npos);
 	const std::string xray = read_file(root + "/src/xrEngine/x_ray.cpp");
 	CHECK(xray.find("::Sound->mix_set_listener_object(g_pGameLevel ? g_pGameLevel->CurrentViewEntity() : NULL);") !=
 	      std::string::npos);
 	// audio_reset switches all of it off
 	CHECK(rst.find("mix.ag_on = false;") != std::string::npos && rst.find("mix.bang_on = false;") != std::string::npos &&
-	      rst.find("mix.own_split = false;") != std::string::npos);
+	      rst.find("mix.own_split = false;") != std::string::npos && rst.find("mix.rule_count = 0;") != std::string::npos);
 
 	// play_no_feedback carries the category and the flags to its private copy
 	const std::string pnf = body(core, "void CSoundRender_Core::play_no_feedback(");

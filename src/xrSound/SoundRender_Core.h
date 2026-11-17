@@ -181,6 +181,10 @@ public:
 	void mix_set_own_split(bool enabled) override;
 	bool mix_get_own_split() override;
 	void mix_set_listener_object(CObject* O) override;
+	bool mix_set_category_rule(LPCSTR path_part, u32 cat) override;
+	void mix_clear_category_rules() override;
+	u32 mix_get_category_rule_count() override;
+	u8 mix_rule_category(LPCSTR file_name) override;
 };
 
 extern CSoundRender_Core* SoundRender;

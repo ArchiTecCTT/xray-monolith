@@ -572,6 +572,8 @@ u32 CSoundRender_Core::mix_category(CSoundRender_Emitter* E) const
 		return smc_world;
 	if (d->mix_cat < smc_count)
 		return d->mix_cat; // tagged where it is played (rain, thunder, ambients, others' steps, scripts)
+	if (E->mix_rule_cat < smc_count)
+		return E->mix_rule_cat; // a script's path rule matched the file name when the sound started
 	if (d->s_type == st_Music || E->bIntro)
 		return smc_music;
 	if (!d->g_object && E->b2D)
@@ -585,9 +587,14 @@ u32 CSoundRender_Core::mix_category(CSoundRender_Emitter* E) const
 
 float CSoundRender_Core::mix_gain(CSoundRender_Emitter* E)
 {
+	// a footstep a headset cut short of the step gate still plays for the AI; the player gets silence
+	const ref_sound_data* d = E->owner_data._get();
+	if (d && (d->mix_flags & smf_mute))
+		return 0.f;
+
 	const u32 c = mix_category(E);
 	float g = mix.cat[c].cur;
-	if (c != smc_ui && c != smc_music)
+	if (!sound_mix_untouched(c))
 		g *= mix.lim_gain * mix.bang_gain;
 	if (mix.comp_cats_cur & (1u << c))
 		g *= mix.comp_gain;
@@ -609,11 +616,6 @@ float CSoundRender_Core::mix_gain(CSoundRender_Emitter* E)
 		if (E->mix_ag_db > mix.ag_max_acc)
 			mix.ag_max_acc = E->mix_ag_db;
 	}
-
-	// a footstep a headset cut short of the step gate still plays for the AI; the player gets silence
-	const ref_sound_data* d = E->owner_data._get();
-	if (d && (d->mix_flags & smf_mute))
-		g = 0.f;
 	return g;
 }
 
@@ -703,6 +705,8 @@ void CSoundRender_Core::mix_update(float dt)
 			// 2D sounds (the actor's own) have their own type mask: by default only shots and explosions count
 			if (!d || !E->isPlaying() || !(u32(d->g_type) & (E->b2D ? c_own_mask : c_mask)))
 				continue;
+			if (d->mix_flags & smf_mute)
+				continue; // a muted footstep is not heard, so it must not compress what is
 			const u32 c = mix_category(E);
 			if (!(c_cats & (1u << c)))
 				continue;
@@ -736,7 +740,7 @@ void CSoundRender_Core::mix_update(float dt)
 			if (age < 0.f || age > b_hold)
 				continue;
 			const u32 c = mix_category(E);
-			if (c == smc_ui || c == smc_music)
+			if (sound_mix_untouched(c))
 				continue;
 			const float l = E->mix_heard * mix.cat[c].cur;
 			if (l > b_level)
@@ -830,6 +834,7 @@ void CSoundRender_Core::mix_reset(float fade_ms)
 	mix.bang_on = false; // the duck releases
 	mix.bang_mask = SOUND_MIX_DEFAULT_LOUD_MASK;
 	mix.own_split = false;
+	mix.rule_count = 0;
 	mix.lock.Leave();
 }
 
@@ -849,8 +854,8 @@ void CSoundRender_Core::mix_set_autogain(bool enabled, float target_db, float ra
 
 bool CSoundRender_Core::mix_set_autogain_category(u32 cat, float amount)
 {
-	if (cat >= smc_count || cat == smc_ui || cat == smc_music)
-		return false; // menus and music never get auto-gain
+	if (cat >= smc_count || sound_mix_untouched(cat))
+		return false; // menus, music and body sounds never get auto-gain
 	mix.lock.Enter();
 	mix.ag_amount[cat] = mix_clamp(amount, 0.f, 1.f, 0.f);
 	mix.lock.Leave();
@@ -888,6 +893,33 @@ void CSoundRender_Core::mix_set_own_split(bool enabled) { mix.own_split = enable
 bool CSoundRender_Core::mix_get_own_split() { return mix.own_split; }
 void CSoundRender_Core::mix_set_listener_object(CObject* O) { mix.listener_obj = O; }
 
+bool CSoundRender_Core::mix_set_category_rule(LPCSTR path_part, u32 cat)
+{
+	mix.lock.Enter();
+	const bool ok = mix.rule_set(path_part, cat);
+	mix.lock.Leave();
+	return ok;
+}
+
+void CSoundRender_Core::mix_clear_category_rules()
+{
+	mix.lock.Enter();
+	mix.rule_count = 0;
+	mix.lock.Leave();
+}
+
+u32 CSoundRender_Core::mix_get_category_rule_count() { return mix.rule_count; }
+
+u8 CSoundRender_Core::mix_rule_category(LPCSTR file_name)
+{
+	if (!mix.rule_count)
+		return u8(smc_auto); // no rules (the default): nothing to do when a sound starts
+	mix.lock.Enter();
+	const u8 c = mix.rule_match(file_name);
+	mix.lock.Leave();
+	return c;
+}
+
 void CSoundRender_Core::mix_set_compressor(bool enabled, float threshold_db, float ratio, float attack_ms,
                                            float release_ms, float makeup_db, float knee_db)
 {
@@ -913,8 +945,8 @@ void CSoundRender_Core::mix_set_compressor_detect(u32 game_type_mask, u32 own_ty
 
 bool CSoundRender_Core::mix_set_compressor_category(u32 cat, bool enabled)
 {
-	if (cat >= smc_count || cat == smc_ui || cat == smc_music)
-		return false; // menus and music are never compressed
+	if (cat >= smc_count || sound_mix_untouched(cat))
+		return false; // menus, music and body sounds are never compressed
 	mix.lock.Enter();
 	if (enabled)
 		mix.comp_cats |= 1u << cat;

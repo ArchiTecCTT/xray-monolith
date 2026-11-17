@@ -172,6 +172,41 @@ inline float sound_mix_bang_step(float& gr_db, float level_lin, bool on, float t
 	return level_db;
 }
 
+// ---- categories nothing but their own gain touches, and path rules -------------------------------------------------
+// Menus, music and the player's body sounds (heartbeat, breathing) are never ducked, compressed, levelled or guarded.
+inline bool sound_mix_untouched(u32 cat) { return cat == smc_ui || cat == smc_music || cat == smc_body; }
+
+#define SOUND_MIX_MAX_RULES 64
+#define SOUND_MIX_RULE_LEN 96
+
+// One character of a path for comparing: lower case, and both slashes are the same.
+inline char sound_mix_path_char(char c)
+{
+	if (c >= 'A' && c <= 'Z')
+		return char(c - 'A' + 'a');
+	return c == '/' ? '\\' : c;
+}
+
+// true when 'name' contains 'part', ignoring case and the kind of slash; an empty part matches nothing
+inline bool sound_mix_path_contains(const char* name, const char* part)
+{
+	if (!name || !part || !part[0])
+		return false;
+	for (const char* n = name; *n; ++n)
+	{
+		const char* a = n;
+		const char* b = part;
+		while (*a && *b && sound_mix_path_char(*a) == sound_mix_path_char(*b))
+		{
+			++a;
+			++b;
+		}
+		if (!*b)
+			return true;
+	}
+	return false;
+}
+
 struct CSoundRender_Mix
 {
 	// a gain that fades linearly to its target over the time given when it was set (real time, not game time)
@@ -233,7 +268,7 @@ struct CSoundRender_Mix
 
 	// distance curve per category: a factor on OpenAL's rolloff (1 = unchanged, 0 = no inverse-distance falloff, only
 	// the engine's linear fade to max_distance). Read by fill_parameters and the detector; never by the AI path.
-	float rolloff_k[smc_count] = {1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f};
+	float rolloff_k[smc_count] = {1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f};
 
 	// per-source auto-gain; ag_amount: how much of the curve a category gets (0 = none, 1 = all), ui and music stay 0
 	bool ag_on = false;
@@ -243,7 +278,7 @@ struct CSoundRender_Mix
 	float ag_max_cut_db = 12.f;
 	float ag_attack_ms = 5.f;
 	float ag_release_ms = 80.f;
-	float ag_amount[smc_count] = {1.f, 0.f, 0.f, 1.f, 0.f, 0.f, 1.f}; // world, steps_others, own
+	float ag_amount[smc_count] = {1.f, 0.f, 0.f, 1.f, 0.f, 0.f, 1.f, 0.f}; // world, steps_others, own
 
 	// bang guard
 	bool bang_on = false;
@@ -257,6 +292,51 @@ struct CSoundRender_Mix
 	bool own_split = false;
 	const void* listener_obj = nullptr; // compared with ref_sound_data::g_object only, never dereferenced
 
+	// path rules: an untagged sound whose file name contains rule_text[i] plays in category rule_cat[i]. Read when a
+	// sound starts (under 'lock'), so a rule applies to sounds that start after it was set.
+	char rule_text[SOUND_MIX_MAX_RULES][SOUND_MIX_RULE_LEN] = {};
+	unsigned char rule_cat[SOUND_MIX_MAX_RULES] = {};
+	u32 rule_count = 0;
+
+	// adds a rule, or changes the category of the rule with the same text; false when it cannot
+	bool rule_set(const char* part, u32 cat)
+	{
+		if (!part || !part[0] || cat >= u32(smc_count))
+			return false;
+		u32 len = 0;
+		while (part[len])
+			++len;
+		if (len >= SOUND_MIX_RULE_LEN)
+			return false;
+		for (u32 i = 0; i < rule_count; ++i)
+		{
+			u32 k = 0;
+			while (k < len && sound_mix_path_char(rule_text[i][k]) == sound_mix_path_char(part[k]))
+				++k;
+			if (k == len && !rule_text[i][len])
+			{
+				rule_cat[i] = (unsigned char)cat;
+				return true;
+			}
+		}
+		if (rule_count >= SOUND_MIX_MAX_RULES)
+			return false;
+		for (u32 k = 0; k <= len; ++k)
+			rule_text[rule_count][k] = part[k];
+		rule_cat[rule_count] = (unsigned char)cat;
+		++rule_count;
+		return true;
+	}
+
+	// the category of the first rule (in the order they were added) that matches the file name; 0xFF = none
+	unsigned char rule_match(const char* file_name) const
+	{
+		for (u32 i = 0; i < rule_count; ++i)
+			if (sound_mix_path_contains(file_name, rule_text[i]))
+				return rule_cat[i];
+		return 0xFF;
+	}
+
 	// state, written by the sound update only
 	float lim_gr_db = 0.f; // current gain reduction (<= 0)
 	float lim_gain = 1.f; // 10^(lim_gr_db / 20)
@@ -269,7 +349,7 @@ struct CSoundRender_Mix
 	bool ag_on_cur = false;
 	float ag_target_cur = -14.f, ag_ratio_cur = 3.f, ag_boost_cur = 12.f, ag_cut_cur = 12.f;
 	float ag_k_attack = 1.f, ag_k_release = 1.f; // this update's smoother shares
-	float ag_amount_cur[smc_count] = {0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f};
+	float ag_amount_cur[smc_count] = {0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f};
 	float ag_min_db = 0.f, ag_max_db = 0.f; // range of the auto-gains applied in the last update
 	float ag_min_acc = 0.f, ag_max_acc = 0.f; // the same, being collected in this update
 	float bang_gr_db = 0.f; // current bang duck (<= 0)

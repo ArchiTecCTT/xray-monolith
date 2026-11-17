@@ -53,6 +53,7 @@ public:
 	float mix_src_level; // headphones auto-gain: the same without the fade in / out (the source's own level)
 	float mix_ag_db; // this source's auto-gain, dB, smoothed (CSoundRender_Core::mix_gain)
 	bool mix_ag_set; // false until the source's first rendered update, which takes its auto-gain without smoothing
+	u8 mix_rule_cat; // the category a script's path rule gave this play when it started, smc_auto = none
 	Fvector occluder [3];
 
 	State m_current_state;
@@ -81,10 +82,11 @@ public:
 	void Event_Propagade();
 	void Event_ReleaseOwner();
 	BOOL isPlaying(void) { return m_current_state != stStopped; }
-	// headphones bang guard: seconds since this one-shot sound began to play; -1 while it waits, loops or is stopped
+	// headphones bang guard: seconds since this one-shot sound began to play; -1 while it waits, loops, is paused (a
+	// paused sound's start time moves along with the clock, so its age would stand still) or is stopped
 	float mix_onset_age(float now) const
 	{
-		return (m_current_state == stPlaying || m_current_state == stSimulating) ? now - fTimeStarted : -1.f;
+		return (!iPaused && (m_current_state == stPlaying || m_current_state == stSimulating)) ? now - fTimeStarted : -1.f;
 	}
 
 	virtual BOOL is_2D() { return b2D; }
