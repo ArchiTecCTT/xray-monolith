@@ -8,7 +8,7 @@
 // Part 2 reads the engine sources and checks the wiring: the mix only scales the OpenAL gain and rolloff, the AI hearing
 // path (Event_Propagade, SoundEvent_Register) does not read it, play_no_feedback carries the category, the footstep
 // gate and its AI-neutral flags, the compressor's detector chain, the auto-gain and bang guard wiring, the "own"
-// category and the Lua exports.
+// category, the listener-side sound types of the weapon reload sounds and the Lua exports.
 //
 //   g++ -std=c++17 -g -Wall -fsanitize=address,undefined tests/audio_mix_test.cpp -o /tmp/audio_mix_test
 //   /tmp/audio_mix_test .
@@ -246,6 +246,24 @@ int main(int argc, char** argv)
 		// auto-gain acts on world, others' steps and the player's own sounds unless a script says otherwise
 		for (int i = 0; i < smc_count; ++i)
 			CHECK(m.ag_amount[i] == ((i == smc_world || i == smc_steps_others || i == smc_own) ? 1.f : 0.f));
+	}
+
+	// ---- part 1: the type the detect masks test (a sound's listener-side type, or its AI type when it has none)
+	{
+		const u32 SHOT = 0x80200000u, RELOAD = 0x80040000u, HANDLING = 0x01D40000u; // ai_sounds.h; headphones' handling mask
+		// no listener type: the AI type decides, as on every exe before this one
+		CHECK(sound_mix_type(SHOT, SOUND_MIX_TYPE_AUTO) == SHOT);
+		CHECK(sound_mix_type(0u, SOUND_MIX_TYPE_AUTO) == 0u);
+		CHECK(sound_mix_type(0xDEADBEEFu, SOUND_MIX_TYPE_AUTO) == 0xDEADBEEFu);
+		// a shell insert: a shot for the AI, a reload for the mix. Not a bang any more, and it has a handling bit
+		CHECK(sound_mix_type(SHOT, RELOAD) == RELOAD);
+		CHECK((sound_mix_type(SHOT, SOUND_MIX_TYPE_AUTO) & SOUND_MIX_DEFAULT_LOUD_MASK) != 0);
+		CHECK((sound_mix_type(SHOT, RELOAD) & SOUND_MIX_DEFAULT_LOUD_MASK) == 0);
+		CHECK((sound_mix_type(SHOT, RELOAD) & HANDLING) != 0);
+		// the shotgun open and the jammed reload: whatever the never-set AI type holds, the mix sees a reload
+		CHECK(sound_mix_type(0xDEADBEEFu, RELOAD) == RELOAD && sound_mix_type(0u, RELOAD) == RELOAD);
+		// a listener type of 0 is a type too (an untyped sound for the mix), only SOUND_MIX_TYPE_AUTO falls back
+		CHECK(sound_mix_type(SHOT, 0u) == 0u);
 	}
 
 	// ---- part 1: categories nothing touches, and path rules
@@ -523,7 +541,7 @@ int main(int argc, char** argv)
 	const size_t cm1 = mu.find("if (d->mix_flags & smf_mute)"), cm2 = mu.find("float l = E->mix_heard * mix.cat[c].cur * mix.lim_gain;");
 	CHECK(cm1 != std::string::npos && cm2 != std::string::npos && cm1 < cm2);
 	// 2D sounds (the actor's own) are picked by their own type mask, shots and explosions by default
-	CHECK(mu.find("!(u32(d->g_type) & (E->b2D ? c_own_mask : c_mask))") != std::string::npos);
+	CHECK(mu.find("!(sound_mix_type(u32(d->g_type), d->mix_type) & (E->b2D ? c_own_mask : c_mask))") != std::string::npos);
 	const size_t lim_at = mu.find("mix.lim_gain = "), comp_at = mu.find("float l = E->mix_heard");
 	CHECK(lim_at != std::string::npos && comp_at != std::string::npos && lim_at < comp_at);
 	CHECK(mu.find("if (c_on || mix.comp_gain_db == 0.f)") != std::string::npos); // categories held while releasing
@@ -545,7 +563,7 @@ int main(int argc, char** argv)
 	CHECK(rst.find("mix.comp_on = false;") != std::string::npos && rst.find("mix.rolloff_k[i] = 1.f;") != std::string::npos);
 	CHECK(rst.find("mix.comp_cats = (1u << smc_world) | (1u << smc_steps_others);") != std::string::npos);
 	// Lua: the feature bits and every export
-	CHECK(lua.find("static int audio_api() { return 1 | 2 | 4 | 8 | 16 | 32 | 64 | 128 | 256 | 512 | 1024 | 2048; }") !=
+	CHECK(lua.find("static int audio_api() { return 1 | 2 | 4 | 8 | 16 | 32 | 64 | 128 | 256 | 512 | 1024 | 2048 | 4096; }") !=
 	      std::string::npos);
 	CHECK(lua.find("\"steps_others\", \"ui\", \"music\",") != std::string::npos &&
 	      lua.find("\"own\", \"body\"};") != std::string::npos);
@@ -643,6 +661,71 @@ int main(int argc, char** argv)
 	CHECK(pn.find("step_snd.set_mix_flags(mix_flags);") != std::string::npos);
 	CHECK(pn.find("step_snd.set_mix_flags(prev_flags);") != std::string::npos);
 	CHECK(pn.find("&vol);") != std::string::npos); // the AI-visible volume is still the step power
+
+	// ---- listener-side sound types (audio_api() bit 4096)
+	// every detect mask tests the listener-side type; nothing in the mix tests the bare AI type any more
+	{
+		const std::string mus = strip_comments(mu);
+		size_t n = 0;
+		for (size_t at = mus.find("sound_mix_type(u32(d->g_type), d->mix_type) &"); at != std::string::npos;
+		     at = mus.find("sound_mix_type(u32(d->g_type), d->mix_type) &", at + 1))
+			++n;
+		CHECK(n == 3); // limiter, compressor, bang guard
+		CHECK(mus.find("u32(d->g_type) &") == std::string::npos);
+		CHECK(mixcode.find("g_type =") == std::string::npos); // and the mix never writes the AI type
+	}
+	CHECK(core.find("static_assert(u32(sg_SourceType) == SOUND_MIX_TYPE_AUTO") != std::string::npos);
+	// the AI still gets g_type and nothing of the mix: the event is made from g_type and dispatched with g_type
+	CHECK(prop.find("if (0 == owner_data->g_type) return;") != std::string::npos && prop.find("mix_type") == std::string::npos);
+	const std::string disp = strip_comments(body(level, "void IGame_Level::SoundEvent_Dispatch()"));
+	CHECK(disp.find("D.source->g_type,") != std::string::npos && disp.find("mix") == std::string::npos);
+	// a fresh sound has no listener type; clone and play_no_feedback carry it, each next to the untouched AI type
+	CHECK(sound_h.find("\tmix_type = u32(sg_SourceType);") != std::string::npos);
+	CHECK(sound_h.find("IC void set_mix_type(u32 type) { if (_p) _p->mix_type = type; }") != std::string::npos);
+	const std::string cd = body(core, "void CSoundRender_Core::_create_data(");
+	CHECK(cd.find("S.g_type = (game_type == sg_SourceType) ? S.handle->game_type() : game_type;") != std::string::npos &&
+	      cd.find("S.mix_type = SOUND_MIX_TYPE_AUTO;") != std::string::npos);
+	const std::string cl = body(core, "void CSoundRender_Core::clone(");
+	CHECK(cl.find("S._p->g_type = (game_type == sg_SourceType) ? S._p->handle->game_type() : game_type;") != std::string::npos &&
+	      cl.find("S._p->mix_type = from._p->mix_type;") != std::string::npos);
+	CHECK(pnf.find("S._p->g_type = orig->g_type;") != std::string::npos && pnf.find("S._p->mix_type = orig->mix_type;") != std::string::npos);
+	// the HUD sound loader creates the sound with the AI type as before, then tags the listener type if one is given
+	const std::string game = root + "/src/xrGame/";
+	const std::string hud = read_file(game + "HudSound.cpp");
+	const size_t hc = hud.find("\tsnd.create(buf_str, st_Effect, type);"), hm = hud.find("\tif (mix_type != sg_SourceType)");
+	CHECK(hc != std::string::npos && hm != std::string::npos && hc < hm &&
+	      hud.find("\t\tsnd.set_mix_type(u32(mix_type));") != std::string::npos);
+	// a script's sound override (COnBeforePlayHudSound) keeps both types of the sound it replaces
+	CHECK(hud.find("LoadSound(section, line, alias_to_play, old_sound->m_b_exclusive, old_sound->m_type,") != std::string::npos &&
+	      hud.find("old_sound->m_mix_type);") != std::string::npos);
+	CHECK(read_file(game + "HudSound.h").find("m_b_exclusive(false), m_mix_type(sg_SourceType)") != std::string::npos);
+	// the reload sounds: the AI type argument is exactly what it was, the listener type is the reload type
+	const std::string wm = read_file(game + "WeaponMagazined.cpp");
+	CHECK(wm.find("m_eSoundReload = ESoundTypes(SOUND_TYPE_WEAPON_RECHARGING | eSoundType);") != std::string::npos);
+	CHECK(wm.find("\"snd_reload_misfire\", \"sndReloadMisfire\", true, m_eSoundReloadMisfire, m_eSoundReload);") != std::string::npos);
+	CHECK(wm.find("\"snd_reload_misfire_actor\", \"sndReloadMisfireActor\", true, m_eSoundReloadMisfire, m_eSoundReload);") != std::string::npos);
+	for (const char* f : {"WeaponShotgun.cpp", "WeaponAutomaticShotgun.cpp"})
+	{
+		const std::string w = read_file(game + f);
+		// what the AI hears of the close and the insert is still a shot
+		CHECK(w.find("m_eSoundClose = ESoundTypes(SOUND_TYPE_WEAPON_SHOOTING);") != std::string::npos);
+		CHECK(w.find("m_eSoundAddCartridge = ESoundTypes(SOUND_TYPE_WEAPON_SHOOTING);") != std::string::npos);
+		CHECK(w.find("\"snd_open_weapon\", \"sndOpen\", false, m_eSoundOpen, m_eSoundReload);") != std::string::npos);
+		CHECK(w.find("\"snd_add_cartridge\", \"sndAddCartridge\", false, m_eSoundAddCartridge, m_eSoundReload);") != std::string::npos);
+		CHECK(w.find("\"snd_close_weapon\", \"sndClose\", false, m_eSoundClose, m_eSoundReload);") != std::string::npos);
+		CHECK(w.find("\"snd_close_weapon_empty\", \"sndCloseEmpty\", false, m_eSoundClose, m_eSoundReload);") != std::string::npos);
+		// the two types no code ever set are still not set: the AI side of them is as it was
+		CHECK(w.find("m_eSoundOpen =") == std::string::npos);
+	}
+	CHECK(wm.find("m_eSoundReloadMisfire =") == std::string::npos);
+	{
+		const std::string w = read_file(game + "WeaponSSRS.cpp");
+		for (const char* a : {"\"snd_open_weapon\", \"sndOpen\"", "\"snd_add_cartridge\", \"sndAddCartridge\"",
+		                      "\"snd_close_weapon\", \"sndClose\"", "\"snd_close_weapon_empty\", \"sndCloseEmpty\""})
+			CHECK(w.find(std::string(a) + ", false, ESoundTypes(SOUND_TYPE_WEAPON_SHOOTING), m_eSoundReload);") != std::string::npos);
+	}
+	CHECK(read_file(game + "weaponBM16.cpp").find("\"snd_reload_1\", \"sndReload1\", true, m_eSoundShot, m_eSoundReload);") !=
+	      std::string::npos);
 
 	std::printf("part 2 (sources in %s): %s\n", root.c_str(), g_fail != before ? "FAIL" : "ok");
 	std::printf(g_fail ? "FAILED\n" : "ALL PASS\n");

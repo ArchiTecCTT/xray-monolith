@@ -2,7 +2,7 @@
 
 struct HUD_SOUND_ITEM
 {
-	HUD_SOUND_ITEM() : m_activeSnd(NULL), m_b_exclusive(false)
+	HUD_SOUND_ITEM() : m_activeSnd(NULL), m_b_exclusive(false), m_mix_type(sg_SourceType)
 	{
 	}
 
@@ -10,12 +10,14 @@ struct HUD_SOUND_ITEM
 	                      ref_sound& hud_snd,
 	                      int type = sg_SourceType,
 	                      float* volume = NULL,
-	                      float* delay = NULL);
+	                      float* delay = NULL,
+	                      int mix_type = sg_SourceType);
 
 	static void LoadSound(LPCSTR section,
 	                      LPCSTR line,
 	                      HUD_SOUND_ITEM& hud_snd,
-	                      int type = sg_SourceType);
+	                      int type = sg_SourceType,
+	                      int mix_type = sg_SourceType);
 
 	static void DestroySound(HUD_SOUND_ITEM& hud_snd);
 
@@ -57,7 +59,10 @@ struct HUD_SOUND_ITEM
 	shared_str m_alias;
 	SSnd* m_activeSnd;
 	bool m_b_exclusive;
-	int m_type;
+	int m_type; // the sound type the AI hears (sg_SourceType = the file's own)
+	// headphones: the type for the listener-side mix only, when it must differ from m_type (ref_sound::set_mix_type);
+	// sg_SourceType = the same as m_type
+	int m_mix_type;
 	xr_vector<SSnd> sounds;
 
 	bool operator ==(LPCSTR alias) const
@@ -79,7 +84,9 @@ public:
 
 	void StopSound(LPCSTR alias);
 
-	void LoadSound(LPCSTR section, LPCSTR line, LPCSTR alias, bool exclusive = false, int type = sg_SourceType);
+	// type: what the AI hears. mix_type: what the headset mix takes it for, sg_SourceType = the same
+	void LoadSound(LPCSTR section, LPCSTR line, LPCSTR alias, bool exclusive = false, int type = sg_SourceType,
+	               int mix_type = sg_SourceType);
 
 	void SetPosition(LPCSTR alias, const Fvector& pos);
 	void StopAllSounds();
@@ -96,9 +103,11 @@ public:
 	               u8 index = u8(-1), float volume_mult = 1.f, float frequency = 1.f, float delay_mult = 1.f);
 	void StopSound(LPCSTR alias);
 	void StopAllSounds();
-	void LoadSound(LPCSTR section, LPCSTR line, LPCSTR alias, bool exclusive = false, int type = sg_SourceType);
+	// type: what the AI hears. mix_type: what the headset mix takes it for, sg_SourceType = the same
+	void LoadSound(LPCSTR section, LPCSTR line, LPCSTR alias, bool exclusive = false, int type = sg_SourceType,
+	               int mix_type = sg_SourceType);
 	void LoadSound(CInifile const* ini, LPCSTR section, LPCSTR line, LPCSTR alias, bool exclusive = false,
-	               int type = sg_SourceType);
+	               int type = sg_SourceType, int mix_type = sg_SourceType);
 	void SetPosition(LPCSTR alias, const Fvector& pos);
 	void UpdateAllSoundsPositions(const Fvector& P);
 };

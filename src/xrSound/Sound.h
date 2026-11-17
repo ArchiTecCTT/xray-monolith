@@ -172,6 +172,9 @@ public:
 	shared_str fn_attached [2];
 	u8 mix_cat; //!< esound_mix_category (listener-side mix only), smc_auto = derived from the sound
 	u8 mix_flags; //!< esound_mix_flag bits of this play (0 for everything but headset-ranged footsteps)
+	//! Sound type the listener-side mix reads in its detect masks (limiter, compressor, bang guard), ESoundTypes bits;
+	//! sg_SourceType = the same as g_type. The AI never reads this: its sound events carry g_type.
+	u32 mix_type;
 
 	u32 dwBytesTotal;
 	float fTimeTotal;
@@ -230,6 +233,10 @@ public:
 	//! esound_mix_flag bits of what this ref plays from now on; play_no_feedback copies them. No-op on an empty ref.
 	IC void set_mix_flags(u8 flags) { if (_p) _p->mix_flags = flags; }
 	IC u8 get_mix_flags() const { return _p ? _p->mix_flags : u8(0); }
+	//! Sound type for the listener-side mix only (ESoundTypes bits), when it must differ from the type the AI hears;
+	//! sg_SourceType = follow g_type. clone and play_no_feedback copy it. No-op on an empty ref.
+	IC void set_mix_type(u32 type) { if (_p) _p->mix_type = type; }
+	IC u32 get_mix_type() const { return _p ? _p->mix_type : u32(sg_SourceType); }
 
 	IC CSound_UserDataPtr _g_userdata()
 	{
@@ -552,6 +559,7 @@ IC ref_sound_data::ref_sound_data()
 	s_type = st_Effect;
 	mix_cat = smc_auto;
 	mix_flags = 0;
+	mix_type = u32(sg_SourceType);
 }
 
 IC ref_sound_data::ref_sound_data(LPCSTR fName, esound_type sound_type, int game_type)

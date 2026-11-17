@@ -334,6 +334,7 @@ void CSoundRender_Core::clone(ref_sound& S, const ref_sound& from, esound_type s
 	S._p->g_type = (game_type == sg_SourceType) ? S._p->handle->game_type() : game_type;
 	S._p->s_type = sound_type;
 	S._p->mix_cat = from._p->mix_cat;
+	S._p->mix_type = from._p->mix_type; // the listener-side type, if the original has its own
 }
 
 
@@ -363,6 +364,7 @@ void CSoundRender_Core::play_no_feedback(ref_sound& S, CObject* O, u32 flags, fl
 	S._p->g_object = O;
 	S._p->mix_cat = orig->mix_cat; // listener-side mix category (headphones), set by the caller on the original
 	S._p->mix_flags = orig->mix_flags; // and its listener-only / mute flags
+	S._p->mix_type = orig->mix_type; // and its listener-side type; g_type above is what the AI hears
 	S._p->dwBytesTotal = orig->dwBytesTotal;
 	S._p->fTimeTotal = orig->fTimeTotal;
 	S._p->fn_attached[0] = orig->fn_attached[0];
@@ -425,6 +427,7 @@ void CSoundRender_Core::_create_data(ref_sound_data& S, LPCSTR fName, esound_typ
 	S.g_userdata = 0;
 	S.mix_cat = smc_auto;
 	S.mix_flags = 0;
+	S.mix_type = SOUND_MIX_TYPE_AUTO;
 	S.dwBytesTotal = S.handle->bytes_total();
 	S.fTimeTotal = S.handle->length_sec();
 }
@@ -565,6 +568,9 @@ void CSoundRender_Core::set_environment	(u32 id, CSound_environment** dst_env)
 // Listener-side mix (headphones), SoundRender_Mix.h / docs/audio_api.md
 // Only the OpenAL source gain changes; p_source.volume, max_ai_distance and the AI sound events are never touched.
 
+// ref_sound_data::mix_type uses sg_SourceType for "no listener type", SoundRender_Mix.h its own name for it
+static_assert(u32(sg_SourceType) == SOUND_MIX_TYPE_AUTO, "sg_SourceType and SOUND_MIX_TYPE_AUTO must be the same value");
+
 u32 CSoundRender_Core::mix_category(CSoundRender_Emitter* E) const
 {
 	const ref_sound_data* d = E->owner_data._get();
@@ -680,7 +686,7 @@ void CSoundRender_Core::mix_update(float dt)
 		for (CSoundRender_Emitter* E : s_emitters)
 		{
 			const ref_sound_data* d = E->owner_data._get();
-			if (!d || !E->isPlaying() || !(u32(d->g_type) & mask))
+			if (!d || !E->isPlaying() || !(sound_mix_type(u32(d->g_type), d->mix_type) & mask))
 				continue;
 			float l = E->mix_level;
 			if (E->b2D)
@@ -703,7 +709,7 @@ void CSoundRender_Core::mix_update(float dt)
 		{
 			const ref_sound_data* d = E->owner_data._get();
 			// 2D sounds (the actor's own) have their own type mask: by default only shots and explosions count
-			if (!d || !E->isPlaying() || !(u32(d->g_type) & (E->b2D ? c_own_mask : c_mask)))
+			if (!d || !E->isPlaying() || !(sound_mix_type(u32(d->g_type), d->mix_type) & (E->b2D ? c_own_mask : c_mask)))
 				continue;
 			if (d->mix_flags & smf_mute)
 				continue; // a muted footstep is not heard, so it must not compress what is
@@ -734,7 +740,7 @@ void CSoundRender_Core::mix_update(float dt)
 		for (CSoundRender_Emitter* E : s_emitters)
 		{
 			const ref_sound_data* d = E->owner_data._get();
-			if (!d || !(u32(d->g_type) & b_mask))
+			if (!d || !(sound_mix_type(u32(d->g_type), d->mix_type) & b_mask))
 				continue;
 			const float age = E->mix_onset_age(fTimer_Value);
 			if (age < 0.f || age > b_hold)

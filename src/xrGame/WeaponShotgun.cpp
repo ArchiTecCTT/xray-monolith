@@ -36,13 +36,15 @@ void CWeaponShotgun::Load(LPCSTR section)
 	}
 	if (m_bTriStateReload)
 	{
-		m_sounds.LoadSound(section, "snd_open_weapon", "sndOpen", false, m_eSoundOpen);
+		// headphones: for the listener-side mix these are reload sounds (the last argument, m_eSoundReload). The type
+		// before it is what the AI hears and is left exactly as it was (docs/audio_api.md "Listener-side sound types").
+		m_sounds.LoadSound(section, "snd_open_weapon", "sndOpen", false, m_eSoundOpen, m_eSoundReload);
 
-		m_sounds.LoadSound(section, "snd_add_cartridge", "sndAddCartridge", false, m_eSoundAddCartridge);
+		m_sounds.LoadSound(section, "snd_add_cartridge", "sndAddCartridge", false, m_eSoundAddCartridge, m_eSoundReload);
 
-		m_sounds.LoadSound(section, "snd_close_weapon", "sndClose", false, m_eSoundClose);
+		m_sounds.LoadSound(section, "snd_close_weapon", "sndClose", false, m_eSoundClose, m_eSoundReload);
 
-		m_sounds.LoadSound(section, "snd_close_weapon_empty", "sndCloseEmpty", false, m_eSoundClose);
+		m_sounds.LoadSound(section, "snd_close_weapon_empty", "sndCloseEmpty", false, m_eSoundClose, m_eSoundReload);
 	};
 }
 

@@ -7,7 +7,8 @@ lists the engine functions those scripts call.
 **What this changes:** only what the player hears, through the gain and the distance rolloff of each OpenAL source.
 
 **What this never changes:**
-- AI hearing: sound power, `p_source.volume`, `max_ai_distance`, the sound events, or the `feel_sound` path.
+- AI hearing: sound power, the sound type, `p_source.volume`, `max_ai_distance`, the sound events, or the
+  `feel_sound` path.
   NPCs and mutants hear exactly the same sounds, at the same strength and range, whatever a script sets here.
 - Anything saved or sent over the network.
 
@@ -45,12 +46,14 @@ local bits = audio_api and audio_api() or 0
 | 512 | the `own` category: `audio_set_own_split`, `audio_get_own_split`, and `"own"` as a category name everywhere |
 | 1024 | the steps range of `audio_set_steps_others` no longer changes what the AI hears |
 | 2048 | the `body` category and path rules: `audio_set_category_rule`, `audio_clear_category_rules`, `audio_get_category_rule_count` |
+| 4096 | listener-side sound types: shotgun open / shell insert / close, the BM16's second reload and the jammed reload count as reloads in the detect masks (no new function; see [Listener-side sound types](#listener-side-sound-types)) |
 
 | exe (fork branch) | `audio_api()` |
 |---|---|
 | `headphones-audio` | 63 |
 | `headphones-compressor` | 255 |
 | `headphones-autogain` | 4095 |
+| `headphones-soundtypes` | 8191 |
 
 Use `bit.band(audio_api(), 4) ~= 0` (or the bit library you use elsewhere) before calling a function. An exe without
 this feature has no `audio_api` at all.
@@ -102,6 +105,56 @@ Notes:
   use `audio_set_category_gain("ui", ...)`, or tag the `sound_object` with `set_audio_category("own")`.
 - **The compressor** works on `world` and `steps_others` unless a script changes the set. It can never work on `ui`,
   `music` or `body`.
+
+## Listener-side sound types
+
+The detect masks of the limiter, the compressor and the bang guard test a sound's **type** (`ESoundTypes` bits). That
+type normally is the sound's AI type, `ref_sound_data::g_type`: the same number NPCs and mutants get with the sound
+event. For a few weapon sounds the AI type is wrong for a headset, so a sound can now carry a second type that only
+the mix reads, `ref_sound_data::mix_type`. `audio_api()` bit 4096 says the exe has it.
+
+**Where a weapon sound's type comes from.** The weapon class's code, not the config and not the file.
+`HUD_SOUND_ITEM::LoadSound` creates the sound with the type the class passes, and
+`CSoundRender_Core::_create_data` uses the file's own type (its OGG comment) only when no type is passed. An LTX
+line or a re-tagged `.ogg` therefore cannot change these types.
+
+**The sounds that have a listener-side type.** All get `WEAPON | RECHARGING` (`0x80040000`, the type of a normal
+reload) for the mix:
+
+| sound (config line) | weapon classes | AI type, unchanged | was for the mix |
+|---|---|---|---|
+| shell insert (`snd_add_cartridge`) | `CWeaponShotgun`, `CWeaponAutomaticShotgun`, `CWeaponSSRS` | `WEAPON \| SHOOTING` | a shot |
+| close (`snd_close_weapon`, `snd_close_weapon_empty`) | the same three | `WEAPON \| SHOOTING` | a shot |
+| open (`snd_open_weapon`) | `CWeaponSSRS` | `WEAPON \| SHOOTING` | a shot |
+| open (`snd_open_weapon`) | `CWeaponShotgun`, `CWeaponAutomaticShotgun` | never set by any code (`m_eSoundOpen`): whatever the memory holds | unknown |
+| second reload (`snd_reload_1`) | `CWeaponBM16` | `WEAPON \| SHOOTING` | a shot |
+| jammed reload (`snd_reload_misfire`, `snd_reload_misfire_actor`) | every `CWeaponMagazined` | never set by any code (`m_eSoundReloadMisfire`): whatever the memory holds | unknown |
+
+**What changes for the player** (only while a script has a limiter, compressor or bang guard on):
+- An NPC's or your own shell insert, shotgun close or BM16 second reload is no longer a bang: it does not trigger the
+  bang guard or the limiter, and does not count in a shots-only detect mask.
+- All six sounds have the `RECHARGING` bit, so a handling mask that contains `0x00040000` counts them like any other
+  reload.
+- With every detector off (the default, and after `audio_reset`) nothing reads a type, so nothing changes.
+
+**What does not change: AI hearing.** The AI type of these sounds is exactly what it was, including the two that
+were never set. The engine was *not* changed to give them the reload type for the AI, because that would change what
+NPCs do:
+- `CSoundMemoryManager::feel_sound_new` treats a `WEAPON | SHOOTING` sound from someone of another team as a hit
+  ("this is fake!": `memory().hit().add`), which makes the hearer take the shooter as an attacker.
+- `CDangerManager` (`danger_manager.cpp:301`) files it as an attack sound, mutants set its power to 1
+  (`base_monster_feel.cpp:63`), and scripts get it in the sound callback (`callback.sound`,
+  `CScriptEntity::sound_callback`) with the shot type.
+
+So today NPCs hear each shell insert, each shotgun close and the BM16's second reload as a gunshot. That is an old
+engine quirk and it stays. The sound events (`CSoundRender_Emitter::Event_Propagade`,
+`IGame_Level::SoundEvent_Dispatch`) carry `g_type` and never read `mix_type`; `tests/audio_mix_test.cpp` checks that,
+and that the AI type argument of every one of these `LoadSound` calls is unchanged.
+
+**For engine code.** `m_sounds.LoadSound(section, line, alias, exclusive, ai_type, listener_type)`: the last argument
+is optional. `ref_sound::set_mix_type(type)` does the same for a single `ref_sound`. `clone`, `play_no_feedback` and
+a script's `COnBeforePlayHudSound` sound override keep it. There is no Lua function: a script's own sounds are not
+heard by the AI unless the script says so, and their category is set with `set_audio_category`.
 
 ## Measurements: why footsteps were hard to hear
 
@@ -244,8 +297,9 @@ The loud-sound limiter.
   2 to 6 as a gentle compressor.
 
 **How it works.** Once per sound update, the detector takes the loudest **loud** sound playing.
-- A sound is loud when its AI sound type has a bit of the detect mask. By default that is shots and explosions
-  (`CExplosive` types its explosion sound as weapon shooting).
+- A sound is loud when its sound type has a bit of the detect mask. By default that is shots and explosions
+  (`CExplosive` types its explosion sound as weapon shooting). The type is the AI sound type, except for the few
+  reload sounds listed in [Listener-side sound types](#listener-side-sound-types).
 - The level of that sound at the listener is `base volume × distance falloff × occlusion × fade`, in dB. It is
   measured before the user's volume sliders. A shot next to you is about 0 dB. Half its audible distance away is
   about -6 dB.
@@ -712,7 +766,7 @@ The compressor of the `headphones-compressor` exe is still there and unchanged. 
 Run these from the debug console with a Lua line, e.g. `run_string` / a debug script, or from your headset script.
 Check the effect by ear, and with `audio_get_*` printed to the log.
 
-1. **Feature check.** `printf("audio_api %s", audio_api())` prints 4095.
+1. **Feature check.** `printf("audio_api %s", audio_api())` prints 8191 (4095 on the `headphones-autogain` exe).
 2. **Ambient / weather.**
    1. Stand outside in rain.
    2. `audio_set_category_gain("weather", 0, 2000)`: the rain fades out over 2 s. Thunder is silent.
@@ -812,3 +866,9 @@ Check the effect by ear, and with `audio_get_*` printed to the log.
     settings. Get hurt or sprint until the heartbeat and breathing play: they are exactly as loud as with
     `audio_reset(0)`, and firing a shot does not change them. `audio_set_category_gain("body", 0.5, 0)` makes only
     them quieter. `audio_get_category_rule_count()` is 4; after `audio_reset(0)` it is 0.
+25. **Reload sounds are not bangs.** With the suggested headset settings on, load a pump shotgun shell by shell and
+    reload a BM16, printing `audio_get_bang_guard_reduction()` every frame: it stays 0 through the open, every shell
+    and the close (on the `headphones-autogain` exe each shell and the close show a dip). A shot still shows the dip.
+    Stand near an NPC reloading a shotgun: the world does not dip with each shell.
+26. **AI hearing of reloads.** Reload a shotgun near neutral or unaware NPCs with `audio_reset(0)`, then with the
+    headset settings on: they must react the same both times, and the same as on the `headphones-autogain` exe.

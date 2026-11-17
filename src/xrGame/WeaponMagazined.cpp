@@ -125,7 +125,9 @@ void CWeaponMagazined::Load(LPCSTR section)
 	if (WeaponSoundExist(section, "snd_reload_empty"))
 		m_sounds.LoadSound(section, "snd_reload_empty", "sndReloadEmpty", true, m_eSoundReloadEmpty);
 	if (WeaponSoundExist(section, "snd_reload_misfire"))
-		m_sounds.LoadSound(section, "snd_reload_misfire", "sndReloadMisfire", true, m_eSoundReloadMisfire);
+		// headphones: m_eSoundReloadMisfire was never given a value and the AI keeps hearing whatever it holds; for the
+		// listener-side mix the jammed reload is a reload (the last argument)
+		m_sounds.LoadSound(section, "snd_reload_misfire", "sndReloadMisfire", true, m_eSoundReloadMisfire, m_eSoundReload);
 	if (WeaponSoundExist(section, "snd_switch_mode"))
 		m_sounds.LoadSound(section, "snd_switch_mode", "sndSwitchMode", true, m_eSoundEmptyClick);
 	if (WeaponSoundExist(section, "snd_misfire"))
@@ -136,7 +138,7 @@ void CWeaponMagazined::Load(LPCSTR section)
 	if (WeaponSoundExist(section, "snd_reload_empty_actor"))
 		m_sounds.LoadSound(section, "snd_reload_empty_actor", "sndReloadEmptyActor", true, m_eSoundReloadEmpty);
 	if (WeaponSoundExist(section, "snd_reload_misfire_actor"))
-		m_sounds.LoadSound(section, "snd_reload_misfire_actor", "sndReloadMisfireActor", true, m_eSoundReloadMisfire);
+		m_sounds.LoadSound(section, "snd_reload_misfire_actor", "sndReloadMisfireActor", true, m_eSoundReloadMisfire, m_eSoundReload);
 	if (WeaponSoundExist(section, "snd_empty_actor"))
 		m_sounds.LoadSound(section, "snd_empty_actor", "sndEmptyClickActor", true, m_eSoundEmptyClick);
 	if (WeaponSoundExist(section, "snd_misfire_actor"))

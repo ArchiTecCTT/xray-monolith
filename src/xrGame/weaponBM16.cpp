@@ -10,7 +10,8 @@ CWeaponBM16::~CWeaponBM16()
 void CWeaponBM16::Load(LPCSTR section)
 {
 	inherited::Load(section);
-	m_sounds.LoadSound(section, "snd_reload_1", "sndReload1", true, m_eSoundShot);
+	// headphones: the AI hears this reload as a shot, as it always did; for the listener-side mix it is a reload
+	m_sounds.LoadSound(section, "snd_reload_1", "sndReload1", true, m_eSoundShot, m_eSoundReload);
 }
 
 void CWeaponBM16::PlayReloadSound()

@@ -12,6 +12,16 @@
 // SOUND_TYPE_SHOOTING (0x00200000) | SOUND_TYPE_OBJECT_EXPLODING (0x00000100), see ai_sounds.h
 #define SOUND_MIX_DEFAULT_LOUD_MASK 0x00200100u
 
+// The sound type the detect masks test. A sound has one type for the AI (ref_sound_data::g_type, carried by its sound
+// events) and may have another for the listener (ref_sound_data::mix_type): some weapon handling sounds are typed as
+// shots for the AI (shotgun shell inserts, the BM16's second reload), and a headset must not treat them as bangs.
+// SOUND_MIX_TYPE_AUTO (= sg_SourceType) means the sound has no listener type of its own: the AI type is used.
+#define SOUND_MIX_TYPE_AUTO 0xFFFFFFFFu
+inline u32 sound_mix_type(u32 ai_type, u32 listener_type)
+{
+	return listener_type == SOUND_MIX_TYPE_AUTO ? ai_type : listener_type;
+}
+
 // One frame of the loud-sound limiter: a hard-knee gain computer on the detector level and a one-pole smoother on the
 // gain reduction in dB (attack when it deepens, release when it recovers). level_lin: the loudest "loud" sound at the
 // listener this frame (linear, 1 = full). Returns the detector level in dB (-120 = nothing). Self-contained so

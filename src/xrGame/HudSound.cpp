@@ -16,7 +16,7 @@ void InitHudSoundSettings()
 }
 
 void HUD_SOUND_ITEM::LoadSound(LPCSTR section, LPCSTR line,
-                               HUD_SOUND_ITEM& hud_snd, int type)
+                               HUD_SOUND_ITEM& hud_snd, int type, int mix_type)
 {
 	hud_snd.m_activeSnd = NULL;
 	hud_snd.sounds.clear();
@@ -29,7 +29,7 @@ void HUD_SOUND_ITEM::LoadSound(LPCSTR section, LPCSTR line,
 		hud_snd.sounds.push_back(SSnd());
 		SSnd& s = hud_snd.sounds.back();
 
-		LoadSound(section, sound_line, s.snd, type, &s.volume, &s.delay);
+		LoadSound(section, sound_line, s.snd, type, &s.volume, &s.delay, mix_type);
 		xr_sprintf(sound_line, "%s%d", line, ++k);
 	} //while
 }
@@ -39,7 +39,8 @@ void HUD_SOUND_ITEM::LoadSound(LPCSTR section,
                                ref_sound& snd,
                                int type,
                                float* volume,
-                               float* delay)
+                               float* delay,
+                               int mix_type)
 {
 	LPCSTR str = pSettings->r_string(section, line);
 	string256 buf_str;
@@ -49,6 +50,9 @@ void HUD_SOUND_ITEM::LoadSound(LPCSTR section,
 
 	_GetItem(str, 0, buf_str);
 	snd.create(buf_str, st_Effect, type);
+	// headphones: a type for the listener-side mix only; the AI keeps hearing 'type' (docs/audio_api.md)
+	if (mix_type != sg_SourceType)
+		snd.set_mix_type(u32(mix_type));
 
 
 	if (volume != NULL)
@@ -230,15 +234,17 @@ void HUD_SOUND_COLLECTION::StopAllSounds()
 	}
 }
 
-void HUD_SOUND_COLLECTION::LoadSound(LPCSTR section, LPCSTR line, LPCSTR alias, bool exclusive, int type)
+void HUD_SOUND_COLLECTION::LoadSound(LPCSTR section, LPCSTR line, LPCSTR alias, bool exclusive, int type,
+                                     int mix_type)
 {
 	R_ASSERT(NULL==FindSoundItem(alias, false));
 	m_sound_items.resize(m_sound_items.size() + 1);
 	HUD_SOUND_ITEM& snd_item = m_sound_items.back();
-	HUD_SOUND_ITEM::LoadSound(section, line, snd_item, type);
+	HUD_SOUND_ITEM::LoadSound(section, line, snd_item, type, mix_type);
 	snd_item.m_alias = alias;
 	snd_item.m_b_exclusive = exclusive;
 	snd_item.m_type = type;
+	snd_item.m_mix_type = mix_type;
 }
 
 //Alundaio:
@@ -370,7 +376,8 @@ void HUD_SOUND_COLLECTION_LAYERED::PlaySound(LPCSTR alias, const Fvector& positi
 						if (old_sound)
 						{
 							alias_to_play = new_alias.c_str();
-							LoadSound(section, line, alias_to_play, old_sound->m_b_exclusive, old_sound->m_type);
+							LoadSound(section, line, alias_to_play, old_sound->m_b_exclusive, old_sound->m_type,
+							          old_sound->m_mix_type);
 
 							// Crash if override sound was defined but wasn't loaded correctly
 							R_ASSERT2(FindSoundItem(alias_to_play, false), make_string("!_G.COnBeforePlayHudSound callback, HUD_SOUND_COLLECTION_LAYERED::PlaySound, failed to override sound item %s with %s, failed to load section %s line %s", alias, alias_to_play, section, line));
@@ -414,13 +421,14 @@ HUD_SOUND_ITEM* HUD_SOUND_COLLECTION_LAYERED::FindSoundItem(LPCSTR alias, bool b
 	return (0);
 }
 
-void HUD_SOUND_COLLECTION_LAYERED::LoadSound(LPCSTR section, LPCSTR line, LPCSTR alias, bool exclusive, int type)
+void HUD_SOUND_COLLECTION_LAYERED::LoadSound(LPCSTR section, LPCSTR line, LPCSTR alias, bool exclusive, int type,
+                                             int mix_type)
 {
-	LoadSound(pSettings, section, line, alias, exclusive, type);
+	LoadSound(pSettings, section, line, alias, exclusive, type, mix_type);
 }
 
 void HUD_SOUND_COLLECTION_LAYERED::LoadSound(CInifile const* ini, LPCSTR section, LPCSTR line, LPCSTR alias,
-                                             bool exclusive, int type)
+                                             bool exclusive, int type, int mix_type)
 {
 	if (!ini->line_exist(section, line))
 		return;
@@ -442,7 +450,7 @@ void HUD_SOUND_COLLECTION_LAYERED::LoadSound(CInifile const* ini, LPCSTR section
 		{
 			m_sound_items.resize(m_sound_items.size() + 1);
 			HUD_SOUND_COLLECTION& snd_item = m_sound_items.back();
-			snd_item.LoadSound(buf_str, sound_line, alias, exclusive, type);
+			snd_item.LoadSound(buf_str, sound_line, alias, exclusive, type, mix_type);
 			snd_item.m_alias = alias;
 			xr_sprintf(sound_line, "snd_%d_layer", ++k);
 		}
@@ -451,7 +459,7 @@ void HUD_SOUND_COLLECTION_LAYERED::LoadSound(CInifile const* ini, LPCSTR section
 	{
 		m_sound_items.resize(m_sound_items.size() + 1);
 		HUD_SOUND_COLLECTION& snd_item = m_sound_items.back();
-		snd_item.LoadSound(section, line, alias, exclusive, type);
+		snd_item.LoadSound(section, line, alias, exclusive, type, mix_type);
 		snd_item.m_alias = alias;
 	}
 }
