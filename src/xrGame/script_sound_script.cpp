@@ -28,9 +28,16 @@ using namespace luabind;
 //       audio_get_compressor_category / audio_get_compressor_enabled / audio_get_compressor_gain /
 //       audio_get_compressor_level
 // 128 = distance curve per category: audio_set_category_rolloff / audio_get_category_rolloff
-static int audio_api() { return 1 | 2 | 4 | 8 | 16 | 32 | 64 | 128; }
+// 256 = per-source auto-gain and the bang guard: audio_set_autogain / audio_set_autogain_category /
+//       audio_get_autogain_category / audio_get_autogain_enabled / audio_get_autogain_min / audio_get_autogain_max /
+//       audio_set_bang_guard / audio_set_bang_guard_detect / audio_get_bang_guard_enabled /
+//       audio_get_bang_guard_reduction
+// 512 = the "own" category: audio_set_own_split / audio_get_own_split
+// 1024 = the steps range of audio_set_steps_others no longer changes what the AI hears
+static int audio_api() { return 1 | 2 | 4 | 8 | 16 | 32 | 64 | 128 | 256 | 512 | 1024; }
 
-static const char* const audio_category_names[smc_count] = {"world", "ambient", "weather", "steps_others", "ui", "music"};
+static const char* const audio_category_names[smc_count] = {"world", "ambient", "weather", "steps_others", "ui", "music",
+                                                            "own"};
 
 static int audio_category_id(LPCSTR name)
 {
@@ -132,6 +139,44 @@ static float audio_get_category_rolloff(LPCSTR category)
 	return c < 0 ? 1.f : ::Sound->mix_get_category_rolloff(u32(c));
 }
 
+static void audio_set_autogain(bool enabled, float target_db, float ratio, float max_boost_db, float max_cut_db,
+                               float attack_ms, float release_ms)
+{
+	::Sound->mix_set_autogain(enabled, target_db, ratio, max_boost_db, max_cut_db, attack_ms, release_ms);
+}
+
+static bool audio_set_autogain_category(LPCSTR category, float amount)
+{
+	const int c = audio_category_id(category);
+	return c >= 0 && ::Sound->mix_set_autogain_category(u32(c), amount);
+}
+
+static float audio_get_autogain_category(LPCSTR category)
+{
+	const int c = audio_category_id(category);
+	return c < 0 ? 0.f : ::Sound->mix_get_autogain_category(u32(c));
+}
+
+static bool audio_get_autogain_enabled() { return ::Sound->mix_get_autogain_enabled(); }
+static float audio_get_autogain_min() { return ::Sound->mix_get_autogain_min_db(); }
+static float audio_get_autogain_max() { return ::Sound->mix_get_autogain_max_db(); }
+
+static void audio_set_bang_guard(bool enabled, float threshold_db, float max_duck_db, float hold_ms, float release_ms)
+{
+	::Sound->mix_set_bang_guard(enabled, threshold_db, max_duck_db, hold_ms, release_ms);
+}
+
+static void audio_set_bang_guard_detect(double game_type_mask)
+{
+	const u32 mask = (game_type_mask >= 0. && game_type_mask <= 4294967295.) ? u32(game_type_mask) : 0x00200100u;
+	::Sound->mix_set_bang_guard_detect(mask);
+}
+
+static bool audio_get_bang_guard_enabled() { return ::Sound->mix_get_bang_guard_enabled(); }
+static float audio_get_bang_guard_reduction() { return ::Sound->mix_get_bang_guard_reduction_db(); }
+static void audio_set_own_split(bool enabled) { ::Sound->mix_set_own_split(enabled); }
+static bool audio_get_own_split() { return ::Sound->mix_get_own_split(); }
+
 bool CScriptSound::SetAudioCategory(LPCSTR name)
 {
 	if (name && !xr_strcmp(name, "auto"))
@@ -220,6 +265,18 @@ void CScriptSound::script_register(lua_State* L)
 		def("audio_get_compressor_gain", &audio_get_compressor_gain),
 		def("audio_get_compressor_level", &audio_get_compressor_level),
 		def("audio_set_category_rolloff", &audio_set_category_rolloff),
-		def("audio_get_category_rolloff", &audio_get_category_rolloff)
+		def("audio_get_category_rolloff", &audio_get_category_rolloff),
+		def("audio_set_autogain", &audio_set_autogain),
+		def("audio_set_autogain_category", &audio_set_autogain_category),
+		def("audio_get_autogain_category", &audio_get_autogain_category),
+		def("audio_get_autogain_enabled", &audio_get_autogain_enabled),
+		def("audio_get_autogain_min", &audio_get_autogain_min),
+		def("audio_get_autogain_max", &audio_get_autogain_max),
+		def("audio_set_bang_guard", &audio_set_bang_guard),
+		def("audio_set_bang_guard_detect", &audio_set_bang_guard_detect),
+		def("audio_get_bang_guard_enabled", &audio_get_bang_guard_enabled),
+		def("audio_get_bang_guard_reduction", &audio_get_bang_guard_reduction),
+		def("audio_set_own_split", &audio_set_own_split),
+		def("audio_get_own_split", &audio_get_own_split)
 	];
 }

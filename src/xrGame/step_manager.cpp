@@ -206,11 +206,15 @@ void CStepManager::update(bool b_hud_view)
 
 				CGameObject* object = smart_cast<CGameObject*>(m_object);
 				const bool step_is_actor = object && object->ID() == 0;
-				// headphones: with a range factor below 1 an NPC's step can be out of sound range but still inside
-				// step_sound_distance; its eOnFootStep callback fires exactly as before the headphones range
-				if (!step_is_actor && object && b_play_sound && !b_play_others_sound && is_on_ground())
-					object->FootStepCallback(m_step_info.params.step[i].power, b_play_sound, is_on_ground(), b_hud_view);
-             if ((step_is_actor ? b_play_sound : b_play_others_sound) && is_on_ground() && object)
+				// headphones: an NPC's step plays when it is inside step_sound_distance (as always) or inside the
+				// player's headset range. The AI must hear exactly what it heard without a headset, and it does hear
+				// these sounds (play_no_feedback makes AI sound events), so:
+				//  - a step beyond step_sound_distance that only the headset range reaches plays for the player alone
+				//    (smf_listener_only: no AI event);
+				//  - a step inside step_sound_distance that a range below 1 cuts still plays, muted (smf_mute), so its
+				//    AI event stays.
+				const bool b_play_step = step_is_actor ? b_play_sound : (b_play_sound || b_play_others_sound);
+             if (b_play_step && is_on_ground() && object)
 				{
 					if (step_is_actor)
 					{
@@ -227,7 +231,8 @@ void CStepManager::update(bool b_hud_view)
 					}
 					else
 					{
-						m_step_sound.play_next(mtl_pair, m_object, m_step_info.params.step[i].power, b_hud_view, true);
+						const u8 step_flags = u8((b_play_sound ? 0 : smf_listener_only) | (b_play_others_sound ? 0 : smf_mute));
+						m_step_sound.play_next(mtl_pair, m_object, m_step_info.params.step[i].power, b_hud_view, true, step_flags);
 						if (b_play_sound) // as before the headphones range: only within step_sound_distance
                      object->FootStepCallback(m_step_info.params.step[i].power, b_play_sound, is_on_ground(), b_hud_view);
 					}	
@@ -344,7 +349,7 @@ float CStepManager::get_blend_time()
 }
 
 void CStepManager::material_sound::play_next(SGameMtlPair* mtl_pair, CEntityAlive* object, float volume,
-                                             bool b_hud_mode, bool others)
+                                             bool b_hud_mode, bool others, u8 mix_flags)
 {
 	if (mtl_pair->StepSounds.empty())
 		return;
@@ -375,13 +380,20 @@ void CStepManager::material_sound::play_next(SGameMtlPair* mtl_pair, CEntityAliv
 	// tag is put back right after play_no_feedback copied it.
 	ref_sound& step_snd = mtl_pair->StepSounds[m_last_step_sound_played];
 	const u8 prev_mix = step_snd.get_mix_category();
+	const u8 prev_flags = step_snd.get_mix_flags();
 	if (others)
+	{
 		step_snd.set_mix_category(smc_steps_others);
+		step_snd.set_mix_flags(mix_flags); // listener-only / muted (headset range), copied by play_no_feedback
+	}
 	step_snd.play_no_feedback(object,
 	                          b_hud_mode ? sm_2D : 0,
 	                          0,
 	                          &sound_pos,
 	                          &vol);
 	if (others)
+	{
 		step_snd.set_mix_category(prev_mix);
+		step_snd.set_mix_flags(prev_flags);
+	}
 }

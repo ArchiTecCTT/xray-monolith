@@ -362,6 +362,7 @@ void CSoundRender_Core::play_no_feedback(ref_sound& S, CObject* O, u32 flags, fl
 	S._p->g_type = orig->g_type;
 	S._p->g_object = O;
 	S._p->mix_cat = orig->mix_cat; // listener-side mix category (headphones), set by the caller on the original
+	S._p->mix_flags = orig->mix_flags; // and its listener-only / mute flags
 	S._p->dwBytesTotal = orig->dwBytesTotal;
 	S._p->fTimeTotal = orig->fTimeTotal;
 	S._p->fn_attached[0] = orig->fn_attached[0];
@@ -423,6 +424,7 @@ void CSoundRender_Core::_create_data(ref_sound_data& S, LPCSTR fName, esound_typ
 	S.g_object = 0;
 	S.g_userdata = 0;
 	S.mix_cat = smc_auto;
+	S.mix_flags = 0;
 	S.dwBytesTotal = S.handle->bytes_total();
 	S.fTimeTotal = S.handle->length_sec();
 }
@@ -574,17 +576,44 @@ u32 CSoundRender_Core::mix_category(CSoundRender_Emitter* E) const
 		return smc_music;
 	if (!d->g_object && E->b2D)
 		return smc_ui;
+	// the player's own sounds, once a script asked for them as a category of their own: anything the listener's object
+	// plays, and 2D sounds with a game object (first-person weapon handling is played 2D with the actor as the object)
+	if (mix.own_split && d->g_object && (E->b2D || d->g_object == mix.listener_obj))
+		return smc_own;
 	return smc_world;
 }
 
-float CSoundRender_Core::mix_gain(CSoundRender_Emitter* E) const
+float CSoundRender_Core::mix_gain(CSoundRender_Emitter* E)
 {
 	const u32 c = mix_category(E);
 	float g = mix.cat[c].cur;
 	if (c != smc_ui && c != smc_music)
-		g *= mix.lim_gain;
+		g *= mix.lim_gain * mix.bang_gain;
 	if (mix.comp_cats_cur & (1u << c))
 		g *= mix.comp_gain;
+
+	// per-source auto-gain: this source's own level at the listener (engine level x OpenAL distance x category gain,
+	// without fades and sliders) through the curve, smoothed per source. A source's first rendered update takes its
+	// gain at once, so a loud onset is never played at full gain first. Off and settled, this is one compare.
+	// The player's own sounds (smc_own) are never lifted: their boost ceiling is 0.
+	if (mix.ag_on_cur || E->mix_ag_db != 0.f || !E->mix_ag_set)
+		sound_mix_autogain_source(E->mix_ag_db, E->mix_ag_set, E->mix_src_level * mix.cat[c].cur, mix.ag_on_cur,
+		                          mix.ag_amount_cur[c], mix.ag_target_cur, mix.ag_ratio_cur,
+		                          c == smc_own ? 0.f : mix.ag_boost_cur, mix.ag_cut_cur, mix.ag_k_attack,
+		                          mix.ag_k_release);
+	if (E->mix_ag_db != 0.f)
+	{
+		g *= sound_mix_db_to_gain(E->mix_ag_db);
+		if (E->mix_ag_db < mix.ag_min_acc)
+			mix.ag_min_acc = E->mix_ag_db;
+		if (E->mix_ag_db > mix.ag_max_acc)
+			mix.ag_max_acc = E->mix_ag_db;
+	}
+
+	// a footstep a headset cut short of the step gate still plays for the AI; the player gets silence
+	const ref_sound_data* d = E->owner_data._get();
+	if (d && (d->mix_flags & smf_mute))
+		g = 0.f;
 	return g;
 }
 
@@ -620,7 +649,27 @@ void CSoundRender_Core::mix_update(float dt)
 	const float c_makeup = mix.comp_makeup_db;
 	const float c_attack = mix.comp_attack_ms * 0.001f;
 	const float c_release = mix.comp_release_ms * 0.001f;
+	const bool b_on = mix.bang_on;
+	const u32 b_mask = mix.bang_mask;
+	const float b_thr = mix.bang_threshold_db;
+	const float b_duck = mix.bang_max_duck_db;
+	const float b_hold = mix.bang_hold_ms * 0.001f;
+	const float b_release = mix.bang_release_ms * 0.001f;
+	// this update's auto-gain parameters, read per source by mix_gain
+	mix.ag_on_cur = mix.ag_on;
+	mix.ag_target_cur = mix.ag_target_db;
+	mix.ag_ratio_cur = mix.ag_ratio;
+	mix.ag_boost_cur = mix.ag_max_boost_db;
+	mix.ag_cut_cur = mix.ag_max_cut_db;
+	mix.ag_k_attack = sound_mix_smooth_k(dt, mix.ag_attack_ms * 0.001f);
+	mix.ag_k_release = sound_mix_smooth_k(dt, mix.ag_release_ms * 0.001f);
+	for (u32 i = 0; i < smc_count; ++i)
+		mix.ag_amount_cur[i] = mix.ag_amount[i];
 	mix.lock.Leave();
+	// the range of the auto-gains mix_gain applied in the update before this one
+	mix.ag_min_db = mix.ag_min_acc;
+	mix.ag_max_db = mix.ag_max_acc;
+	mix.ag_min_acc = mix.ag_max_acc = 0.f;
 
 	// detector: the loudest "loud" sound at the listener (shots, explosions), without the user's volume sliders
 	float level = 0.f;
@@ -671,6 +720,31 @@ void CSoundRender_Core::mix_update(float dt)
 	// a category leaves the compressed set only once the gain is back at 0 dB, so switching off (or audio_reset) fades
 	if (c_on || mix.comp_gain_db == 0.f)
 		mix.comp_cats_cur = c_cats;
+
+	// bang guard detector: the loudest bang (a one-shot sound whose type has a bit of the mask) that began to play
+	// within the hold time, as it is heard, with its category gain. Only the onset counts, not the rest of the sample,
+	// so the duck is over tens of milliseconds after the bang, however long its tail is.
+	float b_level = 0.f;
+	if (b_on && b_mask)
+	{
+		for (CSoundRender_Emitter* E : s_emitters)
+		{
+			const ref_sound_data* d = E->owner_data._get();
+			if (!d || !(u32(d->g_type) & b_mask))
+				continue;
+			const float age = E->mix_onset_age(fTimer_Value);
+			if (age < 0.f || age > b_hold)
+				continue;
+			const u32 c = mix_category(E);
+			if (c == smc_ui || c == smc_music)
+				continue;
+			const float l = E->mix_heard * mix.cat[c].cur;
+			if (l > b_level)
+				b_level = l;
+		}
+	}
+	sound_mix_bang_step(mix.bang_gr_db, b_level, b_on, b_thr, b_duck, b_release, dt);
+	mix.bang_gain = sound_mix_db_to_gain(mix.bang_gr_db);
 }
 
 static float mix_clamp(float v, float lo, float hi, float bad)
@@ -750,8 +824,69 @@ void CSoundRender_Core::mix_reset(float fade_ms)
 	mix.comp_own_k = 1.f;
 	for (u32 i = 0; i < smc_count; ++i)
 		mix.rolloff_k[i] = 1.f;
+	mix.ag_on = false; // every source's auto-gain goes back to 0 dB through its own smoother
+	for (u32 i = 0; i < smc_count; ++i)
+		mix.ag_amount[i] = (i == smc_world || i == smc_steps_others || i == smc_own) ? 1.f : 0.f;
+	mix.bang_on = false; // the duck releases
+	mix.bang_mask = SOUND_MIX_DEFAULT_LOUD_MASK;
+	mix.own_split = false;
 	mix.lock.Leave();
 }
+
+void CSoundRender_Core::mix_set_autogain(bool enabled, float target_db, float ratio, float max_boost_db,
+                                         float max_cut_db, float attack_ms, float release_ms)
+{
+	mix.lock.Enter();
+	mix.ag_on = enabled;
+	mix.ag_target_db = mix_clamp(target_db, -60.f, 0.f, -14.f);
+	mix.ag_ratio = mix_clamp(ratio, 1.f, 20.f, 3.f);
+	mix.ag_max_boost_db = mix_clamp(max_boost_db, 0.f, 24.f, 12.f);
+	mix.ag_max_cut_db = mix_clamp(max_cut_db, 0.f, 40.f, 12.f);
+	mix.ag_attack_ms = mix_clamp(attack_ms, 0.f, 1000.f, 5.f);
+	mix.ag_release_ms = mix_clamp(release_ms, 0.f, 10000.f, 80.f);
+	mix.lock.Leave();
+}
+
+bool CSoundRender_Core::mix_set_autogain_category(u32 cat, float amount)
+{
+	if (cat >= smc_count || cat == smc_ui || cat == smc_music)
+		return false; // menus and music never get auto-gain
+	mix.lock.Enter();
+	mix.ag_amount[cat] = mix_clamp(amount, 0.f, 1.f, 0.f);
+	mix.lock.Leave();
+	return true;
+}
+
+float CSoundRender_Core::mix_get_autogain_category(u32 cat) { return cat < smc_count ? mix.ag_amount[cat] : 0.f; }
+bool CSoundRender_Core::mix_get_autogain_enabled() { return mix.ag_on; }
+float CSoundRender_Core::mix_get_autogain_min_db() { return mix.ag_min_db; }
+float CSoundRender_Core::mix_get_autogain_max_db() { return mix.ag_max_db; }
+
+void CSoundRender_Core::mix_set_bang_guard(bool enabled, float threshold_db, float max_duck_db, float hold_ms,
+                                           float release_ms)
+{
+	mix.lock.Enter();
+	mix.bang_on = enabled;
+	mix.bang_threshold_db = mix_clamp(threshold_db, -60.f, 0.f, -9.f);
+	mix.bang_max_duck_db = mix_clamp(max_duck_db, 0.f, 40.f, 6.f);
+	mix.bang_hold_ms = mix_clamp(hold_ms, 0.f, 500.f, 30.f);
+	mix.bang_release_ms = mix_clamp(release_ms, 0.f, 1000.f, 25.f);
+	mix.lock.Leave();
+}
+
+void CSoundRender_Core::mix_set_bang_guard_detect(u32 game_type_mask)
+{
+	mix.lock.Enter();
+	mix.bang_mask = game_type_mask;
+	mix.lock.Leave();
+}
+
+bool CSoundRender_Core::mix_get_bang_guard_enabled() { return mix.bang_on; }
+float CSoundRender_Core::mix_get_bang_guard_reduction_db() { return mix.bang_gr_db; }
+
+void CSoundRender_Core::mix_set_own_split(bool enabled) { mix.own_split = enabled; }
+bool CSoundRender_Core::mix_get_own_split() { return mix.own_split; }
+void CSoundRender_Core::mix_set_listener_object(CObject* O) { mix.listener_obj = O; }
 
 void CSoundRender_Core::mix_set_compressor(bool enabled, float threshold_db, float ratio, float attack_ms,
                                            float release_ms, float makeup_db, float knee_db)

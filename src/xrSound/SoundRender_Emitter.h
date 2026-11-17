@@ -50,6 +50,9 @@ public:
 	float fade_volume;
 	float mix_level; // headphones limiter detector: base_volume x distance x occlusion x fade, without the volume sliders
 	float mix_heard; // headphones compressor detector: mix_level (at most 1) x OpenAL's distance attenuation
+	float mix_src_level; // headphones auto-gain: the same without the fade in / out (the source's own level)
+	float mix_ag_db; // this source's auto-gain, dB, smoothed (CSoundRender_Core::mix_gain)
+	bool mix_ag_set; // false until the source's first rendered update, which takes its auto-gain without smoothing
 	Fvector occluder [3];
 
 	State m_current_state;
@@ -78,6 +81,11 @@ public:
 	void Event_Propagade();
 	void Event_ReleaseOwner();
 	BOOL isPlaying(void) { return m_current_state != stStopped; }
+	// headphones bang guard: seconds since this one-shot sound began to play; -1 while it waits, loops or is stopped
+	float mix_onset_age(float now) const
+	{
+		return (m_current_state == stPlaying || m_current_state == stSimulating) ? now - fTimeStarted : -1.f;
+	}
 
 	virtual BOOL is_2D() { return b2D; }
 	virtual void switch_to_2D();

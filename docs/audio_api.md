@@ -8,6 +8,7 @@ lists the engine functions those scripts call.
 
 **What this never changes:**
 - AI hearing: sound power, `p_source.volume`, `max_ai_distance`, the sound events, or the `feel_sound` path.
+  NPCs and mutants hear exactly the same sounds, at the same strength and range, whatever a script sets here.
 - Anything saved or sent over the network.
 
 Every value goes back to its default when the game starts. Call `audio_reset(0)` to reset by hand.
@@ -16,7 +17,9 @@ Code:
 - `src/xrSound/SoundRender_Mix.h`
 - the "Listener-side mix" block at the end of `src/xrSound/SoundRender_Core.cpp`
 - `CSoundRender_TargetA::fill_parameters`
-- `CSoundRender_Emitter::update_culling` (the level each sound has at the listener, for the limiter and the compressor)
+- `CSoundRender_Emitter::update_culling` (the level each sound has at the listener, for the limiter, the compressor
+  and auto-gain)
+- `CSoundRender_Core::mix_gain` (the gain of one source, with its auto-gain)
 - the Lua exports in `src/xrGame/script_sound_script.cpp`
 
 Test: `tests/audio_mix_test.cpp`. CI runs it on every push.
@@ -38,7 +41,15 @@ local bits = audio_api and audio_api() or 0
 | 64 | compressor: `audio_set_compressor`, `audio_set_compressor_detect`, `audio_set_compressor_category`, `audio_get_compressor_category`, `audio_get_compressor_enabled`, `audio_get_compressor_gain`, `audio_get_compressor_level` |
 | 128 | distance curve: `audio_set_category_rolloff`, `audio_get_category_rolloff` |
 
-Bits 64 and 128 are new on branch `headphones-compressor`; the `headphones-audio` exe reports 63.
+| 256 | per-source auto-gain and the bang guard: `audio_set_autogain`, `audio_set_autogain_category`, `audio_get_autogain_category`, `audio_get_autogain_enabled`, `audio_get_autogain_min`, `audio_get_autogain_max`, `audio_set_bang_guard`, `audio_set_bang_guard_detect`, `audio_get_bang_guard_enabled`, `audio_get_bang_guard_reduction` |
+| 512 | the `own` category: `audio_set_own_split`, `audio_get_own_split`, and `"own"` as a category name everywhere |
+| 1024 | the steps range of `audio_set_steps_others` no longer changes what the AI hears |
+
+| exe (fork branch) | `audio_api()` |
+|---|---|
+| `headphones-audio` | 63 |
+| `headphones-compressor` | 255 |
+| `headphones-autogain` | 2047 |
 
 Use `bit.band(audio_api(), 4) ~= 0` (or the bit library you use elsewhere) before calling a function. An exe without
 this feature has no `audio_api` at all.
@@ -63,15 +74,25 @@ Each playing sound is in exactly one category. The engine picks it in this order
 2. **No tag:**
    - `music`: `st_Music` sounds (level music tracks) and intro / video sounds.
    - `ui`: 2D sounds with no game object (menus, UI clicks, most PDA sounds).
-   - `world`: everything else. That is weapons (yours and others'), bullet impacts, explosions, voices, monsters (except their steps), physics, anomalies, items, and **your own footsteps**.
+   - `own`: your own sounds, **only after a script called `audio_set_own_split(true)`**. That is every untagged
+     sound that the object you are (the actor) plays, and every 2D sound that has a game object. It covers your
+     first-person weapon sounds (shots, reload, inspect), your footsteps, your character's voice, and PDA and item
+     sounds a script plays on the actor. Without the split these are in `world`, as before.
+   - `world`: everything else. That is weapons, bullet impacts, explosions, voices, monsters (except their steps),
+     physics, anomalies and items; and, without the own split, your own sounds too.
 
 Notes:
 - **Wind.** Anomaly has no separate wind sound. Wind is part of the environment ambient channels, which is why
   files with `wind` in the path go to `weather`. A wind bed whose file name has none of the four words lands in
   `ambient`.
-- **Your own weapon.** Your first-person weapon sounds are in `world`. This includes HUD sounds, which play in 2D with
-  you as the object.
+- **Your own weapon.** Your first-person weapon sounds are in `world`, or in `own` once a script switched the own
+  split on. This includes HUD sounds, which play in 2D with you as the object.
 - **The limiter** works on every category except `ui` and `music`.
+- **Auto-gain** works on `world`, `steps_others` and `own` unless a script changes that. It can never work on `ui`
+  or `music`, and it never lifts `own`.
+- **2D sounds with no game object are `ui`**, also when they are not menu sounds (some mods play PDA beeps and
+  voice lines that way). Auto-gain, the compressor and the limiter never touch them. If such a sound is too loud,
+  use `audio_set_category_gain("ui", ...)`, or tag the `sound_object` with `set_audio_category("own")`.
 - **The compressor** works on `world` and `steps_others` unless a script changes the set. It can never work on `ui`
   or `music`.
 
@@ -187,8 +208,16 @@ Footsteps of NPCs and monsters, never your own.
   1. the engine's step gate, which only plays steps within `step_sound_distance` (50 m by default) of the camera;
   2. the step sound's own maximum audible distance, which also stretches the engine's linear fade with distance.
 
-  The `eOnFootStep` script callback still fires only within `step_sound_distance`. The AI never hears footsteps from
-  this path at all: steps play through `play_no_feedback`.
+  The `eOnFootStep` script callback still fires only within `step_sound_distance`.
+
+  **NPCs and mutants do hear these footsteps.** The step sound makes AI sound events like any other sound with a
+  game object and a type (`CSoundRender_Emitter::Event_Propagade`). An earlier version of this page said they do
+  not; that was wrong.
+  - With feature bit 1024 the range is safe for the AI. A step that plays only because the range is above 1 (beyond
+    `step_sound_distance`) is played for you alone and makes no AI event. A step that a range below 1 cuts (inside
+    `step_sound_distance`) is still played, silently, so its AI event stays.
+  - On an exe without bit 1024 (`audio_api()` 63 or 255) a range other than 1 adds or removes those AI events.
+    Leave the range at 1 there.
 - `fade_ms`: 0 … 60000. Applies to the gain only. The range applies to steps that start after the call.
 
 ### `audio_get_steps_range() -> number`
@@ -358,6 +387,134 @@ files), the rolloff makes them audible on the way there.
 
 The current factor. Returns 1 for an unknown name.
 
+### `audio_set_autogain(enabled, target_db, ratio, max_boost_db, max_cut_db, attack_ms, release_ms)`
+
+Per-source auto-gain, the way electronic hearing protection works: every sound gets its own gain from how loud it
+is at your ears. A quiet, distant sound is lifted. A loud, close one is turned down. No sound changes the gain of
+another, so nothing "goes quiet for a bit" after a shot.
+
+- `enabled`: true / false. Default false. When you disable it, each source's gain goes back to 0 dB through its own
+  smoother; nothing jumps.
+- `target_db`: -60 ... 0. Default -14. The level sounds are pulled toward.
+- `ratio`: 1 ... 20. Default 3. A sound d dB away from the target comes out d / ratio dB away. 1 switches the
+  effect off; a high ratio makes everything equally loud.
+- `max_boost_db`: 0 ... 24. Default 12. The most a quiet sound is lifted (the makeup ceiling).
+- `max_cut_db`: 0 ... 40. Default 12. The most a loud sound is turned down.
+- `attack_ms`: 0 ... 1000. Default 5. How fast a source's gain falls when the source gets louder.
+- `release_ms`: 0 ... 10000. Default 80. How fast it rises when the source gets quieter.
+
+**How it works.** For every source that is being played, once per sound update:
+
+1. **Its level:** `base volume x engine fade with distance x OpenAL distance x occlusion`, times its category gain.
+   The fade in and out of the sound and the volume sliders are left out.
+2. **Its gain:** `(target - level) x (1 - 1/ratio)` dB, limited to `+max_boost` and `-max_cut`, times the amount of
+   its category (`audio_set_autogain_category`).
+3. **Smoothing, per source.** A sound that starts takes its gain at once: a loud onset is never played at full
+   volume first. After that the gain follows the sound's level with the attack and release times. The level of a
+   sound changes with distance and occlusion, so this is slow, gentle movement.
+4. The gain multiplies the source, on top of its category gain, the limiter, the compressor and the bang guard.
+
+With the defaults (target -14, ratio 3, boost 12, cut 12), using the levels of the measurements above:
+
+| Sound | Its level | Auto-gain | Comes out at |
+|---|---|---|---|
+| NPC step, walking, 30 m | -35.7 dB | +12.0 dB (the ceiling) | -23.7 dB |
+| NPC step, walking, 15 m | -29.8 dB | +10.5 dB | -19.3 dB |
+| NPC step, crouching, 5 m | -28.8 dB | +9.9 dB | -18.9 dB |
+| Gunshot, 100 m | -23.7 dB | +6.5 dB | -17.2 dB |
+| Idle voice, 15 m | -18.1 dB | +2.7 dB | -15.4 dB |
+| Gunshot, 30 m | -13.5 dB | -0.3 dB | -13.8 dB |
+| Shout, 15 m | -12.8 dB | -0.8 dB | -13.6 dB |
+| NPC step, running, 5 m | -9.6 dB | -2.9 dB | -12.5 dB |
+| Gunshot, 15 m | -8.0 dB | -4.0 dB | -12.0 dB |
+| Shout, 5 m | -3.6 dB | -6.9 dB | -10.5 dB |
+| Your own shot, reload, inspect, PDA or voice at full volume (`own`) | 0 dB | -9.3 dB | -9.3 dB |
+| A quiet sound of your own (`own`) | -30 dB | 0 dB (never lifted) | -30 dB |
+
+A louder sound always still comes out louder than a quieter one, so distance can still be heard; the differences
+are a third of what they were. An anomaly is a sound like any other here: a far one is lifted, a near one is turned
+down a little, and no shot makes it disappear.
+
+**Limits.**
+- The engine knows a sound's gain, not its waveform. A file that is quiet inside is treated like a loud one at the
+  same gain.
+- Only sources that are actually being played are processed. A sound that is too quiet for the engine to play at
+  all (under its cull level before the mix) is not brought back by auto-gain. Use `audio_set_category_rolloff` and
+  the steps range to make far footsteps exist; auto-gain then lifts them.
+- Auto-gain reads levels after the category gains. A category gain of +6 dB therefore ends up as about +2 dB at
+  ratio 3. To make the headset louder or quieter as a whole, move `target_db` and `max_boost_db` (see "Suggested
+  headset settings").
+- Use it instead of the compressor. With both on, the compressor adds its makeup and its ducking on top.
+
+### `audio_set_autogain_category(category, amount) -> bool` / `audio_get_autogain_category(category) -> number`
+
+How much of the auto-gain a category gets.
+- `amount`: 0 ... 1. 0 = none, 1 = all of it, 0.5 = half the dB.
+- Defaults: `world` 1, `steps_others` 1, `own` 1, `ambient` 0, `weather` 0.
+- `"ui"`, `"music"` and unknown names return `false`: they never get auto-gain.
+- `own` is never lifted, whatever the amount: its boost ceiling is 0. With amount 1 your own loud sounds are turned
+  down like any other loud sound; with 0 they are left alone.
+
+The amount also sets how much of a level difference survives. Two sounds d dB apart come out
+`d x (1 - amount x (1 - 1/ratio))` dB apart. A crouching and a walking NPC are 8 dB apart: at ratio 3 that is
+2.7 dB with amount 1, 5.3 dB with amount 0.5 and the full 8 dB with amount 0.
+
+### `audio_get_autogain_enabled() -> bool`
+
+Whether auto-gain is on.
+
+### `audio_get_autogain_min() -> number` / `audio_get_autogain_max() -> number`
+
+The lowest and the highest auto-gain, in dB, among the sources played in the last sound update (0 and 0 when no
+source has one). For a debug HUD: with a shot nearby and steps far away you see about -9 and +12.
+
+### `audio_set_bang_guard(enabled, threshold_db, max_duck_db, hold_ms, release_ms)`
+
+A very short duck of everything when a loud bang starts. It stands in for the clamp of real electronic ear
+protection, and it is the only part of the auto-gain set where one sound changes the others.
+
+- `enabled`: true / false. Default false. When you disable it during a duck, the duck releases.
+- `threshold_db`: -60 ... 0. Default -9. Bangs heard above this level trigger it.
+- `max_duck_db`: 0 ... 40. Default 6. The duck is the overshoot over the threshold, at most this much.
+- `hold_ms`: 0 ... 500. Default 30. How long the start of a bang counts.
+- `release_ms`: 0 ... 1000. Default 25. How fast the duck goes away after the hold.
+
+**How it works.** A bang is a one-shot sound whose type has a bit of the detect mask (shots and explosions by
+default). Only its first `hold_ms` count, not the rest of its sample. While it counts, every category except `ui`
+and `music` is ducked at once. After the hold the duck fades with the release time. With the defaults a
+full-volume shot ducks 6 dB for 30 ms, less than 1 dB is left 50 ms later, about 0.1 dB after 100 ms and nothing
+after 0.25 s. The limiter and the compressor, in contrast, hold for as long as the shot's sample plays, which is
+what made the world go quiet.
+
+The shot itself is turned down by its own auto-gain for its whole length; the guard is only the click of protection
+on everything else. In automatic fire the guard re-triggers with every shot, so continuous sounds flutter slightly
+at the rate of fire. Lower `max_duck_db` if that is unpleasant.
+
+### `audio_set_bang_guard_detect(game_type_mask)`
+
+Which sounds are bangs: bits of `ESoundTypes`. Default `0x00200100` (shots and explosions), for 3D sounds and for
+your own. Add `0x00080000` for bullet impacts.
+
+### `audio_get_bang_guard_enabled() -> bool` / `audio_get_bang_guard_reduction() -> number`
+
+Whether the guard is on, and its current duck in dB (≤ 0).
+
+### `audio_set_own_split(enabled)` / `audio_get_own_split() -> bool`
+
+Switches the `own` category on (see [Categories](#categories)). Default false.
+
+- With the split on, your own sounds leave `world`. A boost on `world`, the compressor's makeup and the auto-gain's
+  lift then no longer reach your reload, inspect, PDA and voice sounds.
+- `audio_set_category_gain("own", gain, fade_ms)` sets their volume directly.
+- The compressor's set does not contain `own` by default, so with the split on your own shots neither get
+  compressed nor drive the compressor. Add it with `audio_set_compressor_category("own", true)` if you still use the
+  compressor. The limiter covers `own` like every category but `ui` and `music`.
+- Switching it while sounds play moves them between `world` and `own` at once. Set it before the gains, when the
+  headset goes on.
+
+A script can also put any `sound_object` into the category by hand: `snd:set_audio_category("own")`. That works
+without the split.
+
 ### `audio_reset(fade_ms)`
 
 Puts everything back to the defaults:
@@ -366,7 +523,10 @@ Puts everything back to the defaults:
 - the limiter is switched off (its reduction releases);
 - the limiter's detect mask goes back to the default and `own_k` to 1;
 - the compressor is switched off (its gain goes back to 0 dB over its release time), its category set goes back to
-  `world` and `steps_others`, and its detect masks and `own_k` go back to the defaults.
+  `world` and `steps_others`, and its detect masks and `own_k` go back to the defaults;
+- auto-gain is switched off (each source's gain goes back to 0 dB) and its category amounts go back to the defaults;
+- the bang guard is switched off and its detect mask goes back to the default;
+- the own split is switched off.
 
 ### `sound_object:set_audio_category(name) -> bool` / `sound_object:get_audio_category() -> string`
 
@@ -433,43 +593,85 @@ The limiter, the compressor and the category gains above are therefore done in s
 With no script calls:
 - Every factor is 1, the limiter and the compressor are off, the step range is 1 and every rolloff is 1. Each
   source gets exactly the gain and the rolloff it had before.
-- Per frame: one pass over the playing emitters for the limiter and one for the compressor, each only while it is
-  enabled, plus a few multiplies per source and one distance formula per playing sound.
+- Per frame: one pass over the playing emitters for the limiter, one for the compressor and one for the bang guard,
+  each only while it is enabled, plus a few multiplies per source and one distance formula per playing sound.
+
+**Cost of auto-gain.** It runs once per source that is being played, per sound update: one logarithm, the curve, the
+smoother and one exponential. `tests/audio_mix_test.cpp` times exactly the functions the engine calls, with every
+source changing its level on every update (the worst case):
+
+| Sources being played | Time per update | Share of a 60 fps frame (16.7 ms) |
+|---|---|---|
+| 64 | 0.8 µs | 0.005 % |
+| 256 | 3.4 µs | 0.02 % |
+| 1024 (the engine's maximum, `snd_targets`) | 13.5 µs | 0.08 % |
+
+That is 13 ns per source, measured offline on ornyx-1 (AMD EPYC 9V74, g++ -O2), not in a running game. A laptop CPU
+several times slower still stays under 0.1 ms at the maximum. Switched off, a source costs one compare. The bang
+guard's pass does a type test per emitter and a few operations for the rare bang.
 
 ## Suggested headset settings
 
-A starting point for a good headset, from the measurements. Not played yet.
+A starting point for a good headset on the `headphones-autogain` exe (`audio_api()` 2047), from the measurements.
+Not played yet.
 
 ```lua
-audio_set_limiter(false, -12, 5, 400, 20)             -- the compressor replaces it
-audio_set_category_rolloff("steps_others", 0.3)       -- steps lose less with distance
-audio_set_steps_others(2.0, 1.5, 750)                 -- +6 dB, audible to about 60 m
-audio_set_compressor(true, -24, 4, 10, 250, 10, 6)    -- squash loud, lift quiet by 10 dB
+audio_set_own_split(true)                              -- your own sounds become the "own" category
+audio_set_limiter(false, -12, 5, 400, 20)              -- replaced by auto-gain and the bang guard
+audio_set_compressor(false, -24, 4, 10, 250, 0, 6)     -- replaced by auto-gain
+audio_set_category_rolloff("steps_others", 0.3)        -- steps lose less with distance
+audio_set_steps_others(1.0, 1.5, 750)                  -- steps exist to about 60 m (safe for the AI with bit 1024)
+audio_set_autogain_category("steps_others", 0.5)       -- keeps 5 of the 8 dB between crouching and walking
+audio_set_autogain(true, -14, 3, 12, 12, 5, 80)        -- every sound levelled by its own loudness
+audio_set_bang_guard(true, -9, 6, 30, 25)              -- a 6 dB click of protection at the start of a bang
 ```
 
-What an NPC's footsteps then come out at (dB, quiet scene):
+What an NPC's footsteps then come out at (dB; vanilla step files, the louder-footsteps mod not counted):
 
 | | 5 m | 15 m | 30 m | 50 m |
 |---|---|---|---|---|
 | Crouching, nothing set | -28.8 | -37.8 | -43.7 | silent |
-| Crouching, these settings | -12.4 | -14.3 | -18.4 | -22.3 |
+| Crouching, these settings | -20.4 | -24.4 | -28.4 | -32.4 |
 | Walking, nothing set | -20.8 | -29.8 | -35.7 | silent |
-| Walking, these settings | -10.4 | -11.9 | -13.1 | -17.7 |
+| Walking, these settings | -15.1 | -19.1 | -22.3 | -27.7 |
 | Running, nothing set | -9.6 | -21.5 | -35.4 | silent |
-| Running, these settings | -7.5 | -9.5 | -11.6 | -17.7 |
+| Running, these settings | -7.5 | -12.6 | -18.2 | -27.7 |
 
-A walking step at 15 m gains 18 dB and ends up as loud as a shout at the same distance. Your own shot comes out
-8 dB down. For a cheaper headset, use less makeup (4 to 6 dB) and a rolloff nearer 1 (0.5 to 0.6).
+With `audio_set_autogain_category("steps_others", 1)` the walking step is at -14.6 / -16.6 / -18.2 / -21.7 dB, but a
+crouching NPC is then only 2.6 dB quieter than a walking one.
 
-The same two step lines without the compressor (`audio_set_category_rolloff` and `audio_set_steps_others` only) are
-the "louder steps for everyone" setting: they need no headset.
+**Volume steps (PgUp / PgDn).** Move `target_db` and `max_boost_db` together, 3 dB per step. Each step makes quiet
+and far sounds 3 dB louder and everything else 2 dB louder:
+
+| Step | `target_db` | `max_boost_db` | Walking step 30 m | Walking step 15 m | Idle voice 15 m | Gunshot 15 m | Your own shot |
+|---|---|---|---|---|---|---|---|
+| 1 | -20 | 6 | -29.7 | -23.8 | -19.4 | -16.0 | -12.0 |
+| 2 | -17 | 9 | -26.7 | -21.3 | -17.4 | -14.0 | -11.3 |
+| 3 | -14 | 12 | -23.7 | -19.3 | -15.4 | -12.0 | -9.3 |
+| 4 | -11 | 15 | -20.7 | -17.3 | -13.4 | -10.0 | -7.3 |
+| 5 | -8 | 18 | -17.7 | -15.3 | -11.4 | -8.0 | -5.3 |
+
+(The step columns are at auto-gain amount 1 and without the rolloff, to show the curve alone.)
+
+**Auto-gain switched off by the player (a fixed boost).** `audio_set_autogain(false, ...)`, then a plain category
+gain: `audio_set_category_gain("world", g, fade)` and `audio_set_steps_others(g, range, fade)`. With the own split
+on, that boost does not reach your own reload, inspect, PDA and voice sounds. Keep the bang guard on.
+
+**A cheaper headset:** a lower `max_boost_db` (4 to 6) and a rolloff nearer 1 (0.5 to 0.6).
+
+**Louder steps for everyone, no headset:** `audio_set_category_rolloff("steps_others", k)` and
+`audio_set_steps_others(gain, range, fade)` alone.
+
+The compressor of the `headphones-compressor` exe is still there and unchanged. Its settings were
+`audio_set_compressor(true, -24, 4, 10, 250, 10, 6)` with a step rolloff of 0.3 and
+`audio_set_steps_others(2.0, 1.5, 750)`.
 
 ## Test plan (in game)
 
 Run these from the debug console with a Lua line, e.g. `run_string` / a debug script, or from your headset script.
 Check the effect by ear, and with `audio_get_*` printed to the log.
 
-1. **Feature check.** `printf("audio_api %s", audio_api())` prints 255.
+1. **Feature check.** `printf("audio_api %s", audio_api())` prints 2047.
 2. **Ambient / weather.**
    1. Stand outside in rain.
    2. `audio_set_category_gain("weather", 0, 2000)`: the rain fades out over 2 s. Thunder is silent.
@@ -529,7 +731,39 @@ Check the effect by ear, and with `audio_get_*` printed to the log.
     2. `audio_set_compressor_category("ambient", true)`, then switch the compressor on: ambient beds are louder too
        and dip with your shots. `audio_set_compressor_category("music", true)` returns false.
     3. `audio_reset(500)`: everything is back to normal; `audio_get_compressor_category("ambient")` is false.
-14. **The suggested headset settings.** Run the four lines of "Suggested headset settings". A walking NPC at 15 m
-    should be about as loud as someone talking at that distance; with `audio_reset(0)` they are barely audible.
+14. **The compressor settings.** `audio_set_limiter(false, -12, 5, 400, 20)`,
+    `audio_set_category_rolloff("steps_others", 0.3)`, `audio_set_steps_others(2.0, 1.5, 750)`,
+    `audio_set_compressor(true, -24, 4, 10, 250, 10, 6)`. A walking NPC at 15 m should be about as loud as someone
+    talking at that distance; with `audio_reset(0)` they are barely audible.
 15. **AI hearing with the compressor.** Repeat test 7 with the suggested settings on, then with
     `audio_set_category_rolloff("world", 0)` and a makeup of 24. NPCs must react exactly as with `audio_reset(0)`.
+16. **Auto-gain, far and near.** `audio_reset(0)`, then `audio_set_autogain(true, -14, 3, 12, 12, 5, 80)`.
+    1. Distant voices, steps and far gunfire are clearly louder. An NPC talking next to you is a little quieter.
+    2. Walk toward a talking NPC from 30 m: they get louder as you approach, but much less than without auto-gain.
+    3. Print `audio_get_autogain_min()` and `audio_get_autogain_max()` from a timer: about +12 with only far sounds
+       around, about -7 to -9 next to a loud one.
+17. **Nothing goes quiet after a shot.** With auto-gain on (and limiter and compressor off), stand near an anomaly
+    field or a campfire and fire. The anomaly and every other sound keep their loudness during and after the shot.
+    The shot itself is quieter than with auto-gain off. Do the same with a reload: nothing else changes.
+18. **Bang guard.** `audio_set_bang_guard(true, -9, 6, 30, 25)`. Fire single shots near a steady sound: at most a
+    very short dip right at the shot, gone before the shot's tail. `audio_get_bang_guard_reduction()` printed every
+    frame shows -6 for one or two frames, then 0 within a few frames. Try `max_duck_db` 20 to hear the dip clearly.
+19. **Your own sounds.** `audio_set_own_split(true)`.
+    1. Reload, inspect the weapon, open the PDA, trigger a voice line of your character: with auto-gain on they are
+       quieter than without, and never louder.
+    2. `audio_set_autogain(false, -14, 3, 12, 12, 5, 80)` and `audio_set_category_gain("world", 3, 0)`: the world is
+       louder, your reload and inspect sounds are not. `audio_set_category_gain("own", 0.3, 0)` turns only them down.
+    3. If a PDA or voice sound does not react, it is played without a game object and is in `ui`; see "Categories".
+    4. `audio_set_own_split(false)`: your sounds follow `world` again.
+20. **Crouch gap.** With auto-gain on, listen to an NPC crouch-walking and then walking at about 10 m, once with
+    `audio_set_autogain_category("steps_others", 1)` and once with 0.5. With 0.5 the crouched steps are clearly the
+    quieter ones.
+21. **Steps range and the AI.** `audio_set_steps_others(1, 4, 0)`: you hear NPC steps far beyond 50 m. NPCs and
+    mutants must not react to those far steps any differently than with `audio_reset(0)`. Then
+    `audio_set_steps_others(1, 0.2, 0)`: you hear steps only within 10 m, and NPCs still react to each other's steps
+    as before.
+22. **Auto-gain off and reset.** `audio_set_autogain(false, -14, 3, 12, 12, 5, 80)`: within a fraction of a second
+    everything is at its normal loudness, no jump. `audio_reset(0)`: `audio_get_own_split()` is false,
+    `audio_get_autogain_category("world")` is 1, `audio_get_bang_guard_enabled()` is false.
+23. **AI hearing with auto-gain.** Repeat test 7 with the suggested headset settings on. NPCs must react exactly as
+    with `audio_reset(0)`.

@@ -138,9 +138,13 @@ public:
 
 	// Listener-side mix (headphones), SoundRender_Mix.h / docs/audio_api.md
 	CSoundRender_Mix mix;
-	void mix_update(float dt); // fades, the limiter and the compressor; once per sound update, after the emitters
+	// fades, the limiter, the compressor, the bang guard and this update's auto-gain parameters; once per sound update,
+	// after the emitters
+	void mix_update(float dt);
 	u32 mix_category(CSoundRender_Emitter* E) const; // esound_mix_category of a playing emitter
-	float mix_gain(CSoundRender_Emitter* E) const; // listener-only gain factor (1 = unchanged)
+	// listener-only gain factor of a rendering source (1 = unchanged); also runs the source's auto-gain smoother, so it
+	// is called exactly once per source per sound update (CSoundRender_TargetA::fill_parameters)
+	float mix_gain(CSoundRender_Emitter* E);
 
 	void mix_set_category_gain(u32 cat, float gain, float fade_ms) override;
 	float mix_get_category_gain(u32 cat, bool target) override;
@@ -163,6 +167,20 @@ public:
 	void mix_set_category_rolloff(u32 cat, float k) override;
 	float mix_get_category_rolloff(u32 cat) override;
 	float mix_rolloff_k(CSoundRender_Emitter* E) const; // listener-only factor on OpenAL's rolloff (1 = unchanged)
+	void mix_set_autogain(bool enabled, float target_db, float ratio, float max_boost_db, float max_cut_db,
+	                      float attack_ms, float release_ms) override;
+	bool mix_set_autogain_category(u32 cat, float amount) override;
+	float mix_get_autogain_category(u32 cat) override;
+	bool mix_get_autogain_enabled() override;
+	float mix_get_autogain_min_db() override;
+	float mix_get_autogain_max_db() override;
+	void mix_set_bang_guard(bool enabled, float threshold_db, float max_duck_db, float hold_ms, float release_ms) override;
+	void mix_set_bang_guard_detect(u32 game_type_mask) override;
+	bool mix_get_bang_guard_enabled() override;
+	float mix_get_bang_guard_reduction_db() override;
+	void mix_set_own_split(bool enabled) override;
+	bool mix_get_own_split() override;
+	void mix_set_listener_object(CObject* O) override;
 };
 
 extern CSoundRender_Core* SoundRender;

@@ -2,27 +2,31 @@
 // not an engine build.
 //
 // Part 1 runs the header the engine includes: the category fade ramp, the loud-sound limiter step (gain computer and
-// attack / release smoother), the compressor (soft-knee curve, makeup, attack / release, switching off) and OpenAL's
-// distance formula used by the compressor's detector, including frame-rate independence.
+// attack / release smoother), the compressor (soft-knee curve, makeup, attack / release, switching off), OpenAL's
+// distance formula used by the detectors, the per-source auto-gain (curve, per-source smoother, first update, switching
+// off) and the bang guard, including frame-rate independence. It also times the auto-gain for many sources.
 // Part 2 reads the engine sources and checks the wiring: the mix only scales the OpenAL gain and rolloff, the AI hearing
 // path (Event_Propagade, SoundEvent_Register) does not read it, play_no_feedback carries the category, the footstep
-// gate, the compressor's detector chain and the Lua exports.
+// gate and its AI-neutral flags, the compressor's detector chain, the auto-gain and bang guard wiring, the "own"
+// category and the Lua exports.
 //
 //   g++ -std=c++17 -g -Wall -fsanitize=address,undefined tests/audio_mix_test.cpp -o /tmp/audio_mix_test
 //   /tmp/audio_mix_test .
 // The argument is the repository root (default ".").
 
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <vector>
 
 // stubs for what SoundRender_Mix.h takes from xrCore / Sound.h
 typedef unsigned int u32;
 template <class T> T _abs(T v) { return v < 0 ? -v : v; }
 struct xrCriticalSection { void Enter() {} void Leave() {} };
-enum { smc_world = 0, smc_steps_others = 3, smc_count = 6 }; // as in Sound.h (checked in part 2)
+enum { smc_world = 0, smc_steps_others = 3, smc_ui = 4, smc_music = 5, smc_own = 6, smc_count = 7 }; // as in Sound.h (checked in part 2)
 
 #include "../src/xrSound/SoundRender_Mix.h"
 
@@ -237,6 +241,183 @@ int main(int argc, char** argv)
 		for (int i = 0; i < smc_count; ++i)
 			CHECK(m.rolloff_k[i] == 1.f && m.cat[i].cur == 1.f);
 		CHECK(!m.lim_on && m.lim_gain == 1.f);
+		CHECK(!m.ag_on && !m.ag_on_cur && !m.bang_on && m.bang_gain == 1.f && m.bang_gr_db == 0.f && !m.own_split);
+		CHECK(m.listener_obj == nullptr && m.bang_mask == 0x00200100u);
+		// auto-gain acts on world, others' steps and the player's own sounds unless a script says otherwise
+		for (int i = 0; i < smc_count; ++i)
+			CHECK(m.ag_amount[i] == ((i == smc_world || i == smc_steps_others || i == smc_own) ? 1.f : 0.f));
+	}
+
+	// ---- part 1: auto-gain curve (one source's gain in dB for its own level)
+	{
+		const float T = -14.f, R = 3.f, B = 12.f, C = 12.f;
+		// at the target nothing changes; quieter sounds come up, louder ones go down, by 2/3 of the distance
+		CHECK(sound_mix_autogain_curve(T, T, R, B, C) == 0.f);
+		CHECK(near(sound_mix_autogain_curve(-29.f, T, R, B, C), 10.f, 1e-4f));
+		CHECK(near(sound_mix_autogain_curve(-8.f, T, R, B, C), -4.f, 1e-4f));
+		CHECK(near(sound_mix_autogain_curve(0.f, T, R, B, C), -9.3333f, 1e-3f));
+		// the makeup ceiling and the deepest cut
+		CHECK(sound_mix_autogain_curve(-60.f, T, R, B, C) == B);
+		CHECK(sound_mix_autogain_curve(-120.f, T, R, B, C) == B);
+		CHECK(sound_mix_autogain_curve(0.f, T, R, B, 5.f) == -5.f);
+		// a boost ceiling of 0 (the player's own sounds): never lifted, still turned down
+		CHECK(sound_mix_autogain_curve(-40.f, T, R, 0.f, C) == 0.f);
+		CHECK(near(sound_mix_autogain_curve(0.f, T, R, 0.f, C), -9.3333f, 1e-3f));
+		// ratio 1 (or less): no auto-gain
+		CHECK(sound_mix_autogain_curve(-40.f, T, 1.f, B, C) == 0.f);
+		// a louder source never comes out quieter than a quieter one (distance order is kept)
+		float prev = -1000.f;
+		bool mono = true;
+		for (float l = -100.f; l <= 12.f; l += 0.25f)
+		{
+			const float out = l + sound_mix_autogain_curve(l, T, R, B, C);
+			mono = mono && out >= prev - 1e-4f;
+			prev = out;
+		}
+		CHECK(mono);
+		// a 30 dB spread (walking step at 15 m .. own shot) comes out within 10 dB
+		const float lo = -29.8f + sound_mix_autogain_curve(-29.8f, T, R, B, C);
+		const float hi = 0.f + sound_mix_autogain_curve(0.f, T, R, B, C);
+		CHECK(near(hi - lo, 29.8f / 3.f, 0.01f));
+		// dB to gain
+		CHECK(sound_mix_db_to_gain(0.f) == 1.f);
+		CHECK(near(sound_mix_db_to_gain(-6.f), std::pow(10.f, -6.f / 20.f), 1e-5f));
+		CHECK(near(sound_mix_db_to_gain(12.f), std::pow(10.f, 12.f / 20.f), 1e-4f));
+	}
+
+	// ---- part 1: one source's auto-gain over time
+	{
+		const float T = -14.f, R = 3.f, B = 12.f, C = 12.f;
+		auto run = [&](float fps, float seconds, float level, bool on, float amount, float att, float rel, float g0,
+		               bool set0) {
+			float g = g0;
+			bool set = set0;
+			const float dt = 1.f / fps;
+			const float ka = sound_mix_smooth_k(dt, att), kr = sound_mix_smooth_k(dt, rel);
+			const int n = int(std::lround(seconds * fps));
+			for (int i = 0; i < n; ++i)
+				sound_mix_autogain_source(g, set, level, on, amount, T, R, B, C, ka, kr);
+			return g;
+		};
+		const float quiet = std::pow(10.f, -29.f / 20.f), loud = 1.f;
+		// off: a source never gets a gain, and its first update marks it as seen
+		{
+			float g = 0.f;
+			bool set = false;
+			CHECK(sound_mix_autogain_source(g, set, loud, false, 1.f, T, R, B, C, 1.f, 1.f) == 0.f && set);
+		}
+		// the first update of a source takes the gain at once: a loud onset is not played at full gain first
+		{
+			float g = 0.f;
+			bool set = false;
+			const float ka = sound_mix_smooth_k(1.f / 60.f, .005f), kr = sound_mix_smooth_k(1.f / 60.f, .08f);
+			CHECK(near(sound_mix_autogain_source(g, set, loud, true, 1.f, T, R, B, C, ka, kr), -9.3333f, 1e-3f));
+			g = 0.f;
+			set = false;
+			CHECK(near(sound_mix_autogain_source(g, set, quiet, true, 1.f, T, R, B, C, ka, kr), 10.f, 1e-3f));
+		}
+		// a category amount scales the gain; amount 0 = untouched
+		CHECK(near(run(60.f, 1.f, quiet, true, 0.5f, .005f, .08f, 0.f, false), 5.f, 1e-3f));
+		CHECK(run(60.f, 1.f, quiet, true, 0.f, .005f, .08f, 0.f, false) == 0.f);
+		// a source that was already playing when the auto-gain is switched on ramps to its gain: release when it has to
+		// rise, attack when it has to fall, and the attack is the faster one
+		const float up = run(60.f, 0.08f, quiet, true, 1.f, .005f, .08f, 0.f, true);
+		CHECK(up > 5.5f && up < 7.5f); // about 1 - e^-1 of the way to +10 after one release time
+		const float down = run(60.f, 0.05f, loud, true, 1.f, .005f, .08f, 0.f, true);
+		CHECK(near(down, -9.3333f, 0.01f)); // there within 50 ms
+		// it lands on exactly the target, and exactly 0 after switching off (so the gain factor is exactly 1 again)
+		const float quiet_gain = sound_mix_autogain_curve(20.f * std::log10(quiet), T, R, B, C);
+		CHECK(near(quiet_gain, 10.f, 1e-3f));
+		CHECK(run(60.f, 3.f, quiet, true, 1.f, .005f, .08f, 0.f, true) == quiet_gain);
+		CHECK(run(60.f, 3.f, quiet, false, 1.f, .005f, .08f, 10.f, true) == 0.f);
+		CHECK(run(60.f, 3.f, loud, false, 1.f, .005f, .08f, -9.3333f, true) == 0.f);
+		// nothing "goes quiet for a bit": 250 ms after a source dropped from full level to a quiet one (a door closing
+		// between) its gain has come all the way from the deepest cut to within 1 dB of its lift
+		const float back = run(60.f, 0.25f, quiet, true, 1.f, .005f, .08f, -9.3333f, true);
+		CHECK(back > 9.f);
+		// frame-rate independence (30 vs 150 fps, release 80 ms, at 0.1 s)
+		const float r30 = run(30.f, 0.1f, quiet, true, 1.f, .005f, .08f, 0.f, true);
+		const float r150 = run(150.f, 0.1f, quiet, true, 1.f, .005f, .08f, 0.f, true);
+		CHECK(near(r30, r150, 0.002f));
+		// paused (dt 0): holds; zero time constants: jumps
+		CHECK(sound_mix_smooth_k(0.f, .08f) == 0.f && sound_mix_smooth_k(.016f, 0.f) == 1.f);
+		std::printf("auto-gain: +10 dB lift after one release time %.2f dB, 30 vs 150 fps %.3f / %.3f dB\n", up, r30, r150);
+	}
+
+	// ---- part 1: bang guard (a short duck at the start of a loud bang)
+	{
+		float gr = 0.f;
+		// off, or under the threshold: nothing
+		sound_mix_bang_step(gr, 1.f, false, -9.f, 6.f, .025f, 1.f / 60.f);
+		CHECK(gr == 0.f);
+		sound_mix_bang_step(gr, 0.3f /* -10.5 dB */, true, -9.f, 6.f, .025f, 1.f / 60.f);
+		CHECK(gr == 0.f);
+		// a full-scale bang: the duck is there in the same update, limited to max_duck
+		CHECK(near(sound_mix_bang_step(gr, 1.f, true, -9.f, 6.f, .025f, 1.f / 60.f), 0.f, 1e-4f));
+		CHECK(gr == -6.f);
+		// a bang 4 dB over the threshold ducks 4 dB
+		float gr2 = 0.f;
+		sound_mix_bang_step(gr2, std::pow(10.f, -5.f / 20.f), true, -9.f, 6.f, .025f, 1.f / 60.f);
+		CHECK(near(gr2, -4.f, 1e-3f));
+		// a deeper duck replaces a shallower one at once; a shallower one does not lift a deeper one at once
+		sound_mix_bang_step(gr2, 1.f, true, -9.f, 6.f, .025f, 1.f / 60.f);
+		CHECK(gr2 == -6.f);
+		sound_mix_bang_step(gr2, std::pow(10.f, -5.f / 20.f), true, -9.f, 6.f, .025f, 1.f / 60.f);
+		CHECK(gr2 < -4.f && gr2 > -6.f);
+		// once the onset is over (the detector sees no bang) it recovers within tens of milliseconds: under 1 dB left
+		// after 50 ms, under 0.1 dB after 100 ms, exactly 0 soon after, at 60 and at 30 fps
+		for (float fps : {60.f, 30.f})
+		{
+			float g = -6.f;
+			int frames = 0;
+			float at50 = 0.f, at100 = 0.f;
+			while (g != 0.f && frames < 1000)
+			{
+				sound_mix_bang_step(g, 0.f, true, -9.f, 6.f, .025f, 1.f / fps);
+				++frames;
+				if (frames == int(std::ceil(0.05f * fps))) at50 = g;
+				if (frames == int(std::ceil(0.10f * fps))) at100 = g;
+			}
+			CHECK(at50 > -1.f && at100 > -0.15f);
+			CHECK(g == 0.f && frames / fps < 0.3f);
+		}
+		// switched off mid-duck: releases, no jump
+		float g3 = -6.f;
+		sound_mix_bang_step(g3, 1.f, false, -9.f, 6.f, .025f, 1.f / 60.f);
+		CHECK(g3 < 0.f && g3 > -6.f);
+	}
+
+	// ---- part 1: cost of the per-source auto-gain (the engine calls sound_mix_autogain_source and sound_mix_db_to_gain
+	// once per rendering source per sound update; snd_targets allows 32 .. 1024 sources). Printed, not asserted: the
+	// number depends on the machine and the build (this test is built without optimisation and with sanitizers).
+	{
+		for (int sources : {64, 256, 1024})
+		{
+			std::vector<float> g(sources, 0.f), lvl(sources);
+			std::vector<char> set(sources, 0);
+			for (int i = 0; i < sources; ++i)
+				lvl[i] = std::pow(10.f, -(float(i % 60)) / 20.f);
+			const int frames = 400;
+			const float ka = sound_mix_smooth_k(1.f / 60.f, .005f), kr = sound_mix_smooth_k(1.f / 60.f, .08f);
+			volatile float sink = 0.f;
+			const auto t0 = std::chrono::steady_clock::now();
+			for (int f = 0; f < frames; ++f)
+			{
+				float acc = 0.f;
+				for (int i = 0; i < sources; ++i)
+				{
+					bool s = set[i] != 0;
+					// a moving source: its level changes every update, so the smoother and both transcendental calls run
+					const float l = lvl[i] * (1.f + 0.2f * float((f + i) & 7));
+					acc += sound_mix_db_to_gain(sound_mix_autogain_source(g[i], s, l, true, 1.f, -14.f, 3.f, 12.f, 12.f, ka, kr));
+					set[i] = s;
+				}
+				sink = sink + acc;
+			}
+			const double us = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - t0).count();
+			std::printf("auto-gain cost: %4d sources: %.2f us per update, %.1f ns per source\n", sources, us / frames,
+			            us * 1000. / frames / sources);
+		}
 	}
 	std::printf("part 1 (math): %s\n", g_fail ? "FAIL" : "ok");
 
@@ -264,9 +445,18 @@ int main(int argc, char** argv)
 	CHECK(c1 < c2 && c2 < c3 && c3 < c4);
 	CHECK(target.find("AL_MAX_GAIN, SOUND_MIX_MAX_GAIN") != std::string::npos);
 
-	// the AI path never reads the mix
-	const std::string prop = body(emitter, "void CSoundRender_Emitter::Event_Propagade()");
-	CHECK(!prop.empty() && prop.find("mix") == std::string::npos && prop.find("max_ai_distance") != std::string::npos);
+	// the AI path never reads the mix. The one thing it reads is the listener-only flag of a play: a footstep that
+	// exists only because a headset stretches the player's step range makes no AI event, as it made none before
+	const std::string prop = strip_comments(body(emitter, "void CSoundRender_Emitter::Event_Propagade()"));
+	CHECK(!prop.empty() && prop.find("max_ai_distance") != std::string::npos);
+	const size_t lo_at = prop.find("if (owner_data->mix_flags & smf_listener_only) return;");
+	CHECK(lo_at != std::string::npos);
+	{
+		std::string rest = prop;
+		if (lo_at != std::string::npos)
+			rest.erase(lo_at, std::string("if (owner_data->mix_flags & smf_listener_only) return;").size());
+		CHECK(rest.find("mix") == std::string::npos); // nothing else of the mix, in particular no gain, range or category
+	}
 	const std::string reg = body(level, "void IGame_Level::SoundEvent_Register(");
 	CHECK(!reg.empty() && reg.find("mix") == std::string::npos);
 	// and the mix never writes what the AI reads
@@ -281,11 +471,11 @@ int main(int argc, char** argv)
 	const std::string cats = body(sound_h, "enum esound_mix_category");
 	const size_t e0 = cats.find("smc_world = 0,"), e1 = cats.find("smc_ambient,"), e2 = cats.find("smc_weather,");
 	const size_t e3 = cats.find("smc_steps_others,"), e4 = cats.find("smc_ui,"), e5 = cats.find("smc_music,");
-	const size_t e6 = cats.find("smc_count,");
-	CHECK(e0 != std::string::npos && e6 != std::string::npos);
-	CHECK(e0 < e1 && e1 < e2 && e2 < e3 && e3 < e4 && e4 < e5 && e5 < e6);
+	const size_t e6 = cats.find("smc_own,"), e7 = cats.find("smc_count,");
+	CHECK(e0 != std::string::npos && e7 != std::string::npos);
+	CHECK(e0 < e1 && e1 < e2 && e2 < e3 && e3 < e4 && e4 < e5 && e5 < e6 && e6 < e7);
 	// the compressor gain reaches a source only through mix_gain, for the categories of the compressed set
-	const std::string mg = body(core, "float CSoundRender_Core::mix_gain(CSoundRender_Emitter* E) const");
+	const std::string mg = body(core, "float CSoundRender_Core::mix_gain(CSoundRender_Emitter* E)");
 	CHECK(mg.find("if (mix.comp_cats_cur & (1u << c))") != std::string::npos);
 	CHECK(mg.find("g *= mix.comp_gain;") != std::string::npos);
 	// menus and music can never be put into the compressed set
@@ -318,10 +508,16 @@ int main(int argc, char** argv)
 	CHECK(rst.find("mix.comp_on = false;") != std::string::npos && rst.find("mix.rolloff_k[i] = 1.f;") != std::string::npos);
 	CHECK(rst.find("mix.comp_cats = (1u << smc_world) | (1u << smc_steps_others);") != std::string::npos);
 	// Lua: the feature bits and every export
-	CHECK(lua.find("static int audio_api() { return 1 | 2 | 4 | 8 | 16 | 32 | 64 | 128; }") != std::string::npos);
+	CHECK(lua.find("static int audio_api() { return 1 | 2 | 4 | 8 | 16 | 32 | 64 | 128 | 256 | 512 | 1024; }") !=
+	      std::string::npos);
+	CHECK(lua.find("\"steps_others\", \"ui\", \"music\",") != std::string::npos && lua.find("\"own\"};") != std::string::npos);
 	for (const char* fn : {"audio_set_compressor", "audio_set_compressor_detect", "audio_set_compressor_category",
 	                       "audio_get_compressor_category", "audio_get_compressor_enabled", "audio_get_compressor_gain",
-	                       "audio_get_compressor_level", "audio_set_category_rolloff", "audio_get_category_rolloff"})
+	                       "audio_get_compressor_level", "audio_set_category_rolloff", "audio_get_category_rolloff",
+	                       "audio_set_autogain", "audio_set_autogain_category", "audio_get_autogain_category",
+	                       "audio_get_autogain_enabled", "audio_get_autogain_min", "audio_get_autogain_max",
+	                       "audio_set_bang_guard", "audio_set_bang_guard_detect", "audio_get_bang_guard_enabled",
+	                       "audio_get_bang_guard_reduction", "audio_set_own_split", "audio_get_own_split"})
 	{
 		const std::string d = std::string("def(\"") + fn + "\", &" + fn + ")";
 		if (lua.find(d) == std::string::npos)
@@ -331,22 +527,70 @@ int main(int argc, char** argv)
 		}
 	}
 
-	// play_no_feedback carries the category to its private copy
+	// ---- auto-gain, bang guard, the own category
+	// one call per source per update: the level is the source's own (no fade) x its category gain; the player's own
+	// sounds get a boost ceiling of 0; the result multiplies the gain only when it is not 0 dB
+	CHECK(mg.find("sound_mix_autogain_source(E->mix_ag_db, E->mix_ag_set, E->mix_src_level * mix.cat[c].cur, mix.ag_on_cur,") !=
+	      std::string::npos);
+	CHECK(mg.find("c == smc_own ? 0.f : mix.ag_boost_cur") != std::string::npos);
+	CHECK(mg.find("if (mix.ag_on_cur || E->mix_ag_db != 0.f || !E->mix_ag_set)") != std::string::npos);
+	const size_t ag1 = mg.find("if (E->mix_ag_db != 0.f)"), ag2 = mg.find("g *= sound_mix_db_to_gain(E->mix_ag_db);");
+	CHECK(ag1 != std::string::npos && ag2 != std::string::npos && ag1 < ag2);
+	// the bang guard ducks what the limiter ducks (everything but menus and music), and a muted step is silent
+	CHECK(mg.find("g *= mix.lim_gain * mix.bang_gain;") != std::string::npos);
+	const size_t mute_at = mg.find("if (d && (d->mix_flags & smf_mute))");
+	CHECK(mute_at != std::string::npos && mg.find("g = 0.f;", mute_at) != std::string::npos);
+	// menus and music can never get auto-gain
+	const std::string sac = body(core, "bool CSoundRender_Core::mix_set_autogain_category(u32 cat, float amount)");
+	CHECK(sac.find("cat == smc_ui || cat == smc_music") != std::string::npos);
+	// the source's own level leaves out the fade in / out and gets the same OpenAL distance gain as the heard level
+	CHECK(cull.find("mix_src_level = _min(p_source.base_volume * volume_att * occluder_volume, 1.f);") != std::string::npos);
+	CHECK(cull.find("mix_src_level *= al_att;") != std::string::npos && cull.find("mix_heard *= al_att;") != std::string::npos);
+	// the bang guard's detector counts only the onset of a one-shot bang, with its category gain
+	CHECK(mu.find("const float age = E->mix_onset_age(fTimer_Value);") != std::string::npos);
+	CHECK(mu.find("if (age < 0.f || age > b_hold)") != std::string::npos);
+	CHECK(mu.find("const float l = E->mix_heard * mix.cat[c].cur;") != std::string::npos);
+	const std::string emitter_h = read_file(snd + "SoundRender_Emitter.h");
+	CHECK(emitter_h.find("return (m_current_state == stPlaying || m_current_state == stSimulating) ? now - fTimeStarted : -1.f;") !=
+	      std::string::npos);
+	// every new source starts without an auto-gain and unseen
+	const std::string startstop = read_file(snd + "SoundRender_Emitter_StartStop.cpp");
+	CHECK(startstop.find("mix_ag_db = 0.f;") != std::string::npos && startstop.find("mix_ag_set = false;") != std::string::npos);
+	CHECK(emitter.find("mix_ag_db = 0.f;") != std::string::npos && emitter.find("mix_ag_set = false;") != std::string::npos);
+	// the own category: only once a script asked for it, only for untagged sounds with a game object
+	const std::string mc = body(core, "u32 CSoundRender_Core::mix_category(CSoundRender_Emitter* E) const");
+	const size_t tag_at = mc.find("if (d->mix_cat < smc_count)"), ui_at = mc.find("return smc_ui;");
+	const size_t own_at = mc.find("if (mix.own_split && d->g_object && (E->b2D || d->g_object == mix.listener_obj))");
+	CHECK(tag_at != std::string::npos && ui_at != std::string::npos && own_at != std::string::npos);
+	CHECK(tag_at < ui_at && ui_at < own_at && mc.find("return smc_own;") > own_at);
+	const std::string xray = read_file(root + "/src/xrEngine/x_ray.cpp");
+	CHECK(xray.find("::Sound->mix_set_listener_object(g_pGameLevel ? g_pGameLevel->CurrentViewEntity() : NULL);") !=
+	      std::string::npos);
+	// audio_reset switches all of it off
+	CHECK(rst.find("mix.ag_on = false;") != std::string::npos && rst.find("mix.bang_on = false;") != std::string::npos &&
+	      rst.find("mix.own_split = false;") != std::string::npos);
+
+	// play_no_feedback carries the category and the flags to its private copy
 	const std::string pnf = body(core, "void CSoundRender_Core::play_no_feedback(");
 	CHECK(pnf.find("S._p->mix_cat = orig->mix_cat;") != std::string::npos);
+	CHECK(pnf.find("S._p->mix_flags = orig->mix_flags;") != std::string::npos);
 
 	// footsteps: the actor keeps the plain distance, the script callback too; others are tagged
 	const std::string upd = body(step, "void CStepManager::update(bool b_hud_view)");
-	CHECK(upd.find("(step_is_actor ? b_play_sound : b_play_others_sound)") != std::string::npos);
-	CHECK(upd.find("m_step_sound.play_next(mtl_pair, m_object, m_step_info.params.step[i].power, b_hud_view, true);") !=
+	CHECK(upd.find("const bool b_play_step = step_is_actor ? b_play_sound : (b_play_sound || b_play_others_sound);") !=
 	      std::string::npos);
 	CHECK(upd.find("if (b_play_sound) // as before the headphones range") != std::string::npos);
-	// range factor < 1: the callback still fires out to step_sound_distance (the sound alone is cut)
-	CHECK(upd.find("if (!step_is_actor && object && b_play_sound && !b_play_others_sound && is_on_ground())") !=
+	// the AI hears others' steps exactly as without a headset: a step the headset range adds beyond the step gate is
+	// listener-only (no AI event), a step a range below 1 cuts inside the gate still plays, muted (its AI event stays)
+	CHECK(upd.find("const u8 step_flags = u8((b_play_sound ? 0 : smf_listener_only) | (b_play_others_sound ? 0 : smf_mute));") !=
+	      std::string::npos);
+	CHECK(upd.find("m_step_sound.play_next(mtl_pair, m_object, m_step_info.params.step[i].power, b_hud_view, true, step_flags);") !=
 	      std::string::npos);
 	const std::string pn = body(step, "void CStepManager::material_sound::play_next(");
 	CHECK(pn.find("step_snd.set_mix_category(smc_steps_others);") != std::string::npos);
 	CHECK(pn.find("step_snd.set_mix_category(prev_mix);") != std::string::npos);
+	CHECK(pn.find("step_snd.set_mix_flags(mix_flags);") != std::string::npos);
+	CHECK(pn.find("step_snd.set_mix_flags(prev_flags);") != std::string::npos);
 	CHECK(pn.find("&vol);") != std::string::npos); // the AI-visible volume is still the step power
 
 	std::printf("part 2 (sources in %s): %s\n", root.c_str(), g_fail != before ? "FAIL" : "ok");

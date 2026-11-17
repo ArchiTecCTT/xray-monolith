@@ -128,8 +128,19 @@ enum esound_mix_category
 	smc_steps_others, // footsteps of NPCs and monsters (not the actor's own)
 	smc_ui, // 2D sounds without a game object (menus, UI clicks, PDA)
 	smc_music, // st_Music sounds (level music)
+	smc_own, // the player's own sounds (weapon handling, steps, PDA, voice); only filled while the own split is on
 	smc_count,
-	smc_auto = 0xFF, // no tag: the category follows from the sound (music, ui or world)
+	smc_auto = 0xFF, // no tag: the category follows from the sound (music, ui, own or world)
+};
+
+// Listener-side flags of one play (headphones), set by the caller around play_no_feedback like the category.
+enum esound_mix_flag
+{
+	// the sound exists only because a headset lets the player hear further (others' steps beyond the step gate): it
+	// makes no AI sound event, so the AI hears exactly what it heard without the headset
+	smf_listener_only = 1,
+	// the sound is played for the AI only (others' steps a headset cut short of the step gate): OpenAL gain 0
+	smf_mute = 2,
 };
 
 class CSound_UserDataVisitor;
@@ -159,6 +170,7 @@ public:
 	CSound_UserDataPtr g_userdata;
 	shared_str fn_attached [2];
 	u8 mix_cat; //!< esound_mix_category (listener-side mix only), smc_auto = derived from the sound
+	u8 mix_flags; //!< esound_mix_flag bits of this play (0 for everything but headset-ranged footsteps)
 
 	u32 dwBytesTotal;
 	float fTimeTotal;
@@ -214,6 +226,9 @@ public:
 	//! player hears. play_no_feedback copies it. No-op on an empty ref.
 	IC void set_mix_category(u8 cat) { if (_p) _p->mix_cat = cat; }
 	IC u8 get_mix_category() const { return _p ? _p->mix_cat : u8(smc_auto); }
+	//! esound_mix_flag bits of what this ref plays from now on; play_no_feedback copies them. No-op on an empty ref.
+	IC void set_mix_flags(u8 flags) { if (_p) _p->mix_flags = flags; }
+	IC u8 get_mix_flags() const { return _p ? _p->mix_flags : u8(0); }
 
 	IC CSound_UserDataPtr _g_userdata()
 	{
@@ -485,6 +500,28 @@ public:
 	// distance curve of a category: k 0 .. 2 on OpenAL's rolloff factor (1 = unchanged, 0 = only the linear fade)
 	virtual void mix_set_category_rolloff(u32 cat, float k) = 0;
 	virtual float mix_get_category_rolloff(u32 cat) = 0;
+	// per-source auto-gain: every source of a category with an amount above 0 gets its own gain from its own level at
+	// the listener: (target - level) x (1 - 1/ratio) dB, at most +max_boost and -max_cut, x the category's amount,
+	// smoothed per source (attack when the gain falls, release when it rises). smc_own is never lifted.
+	virtual void mix_set_autogain(bool enabled, float target_db, float ratio, float max_boost_db, float max_cut_db,
+	                              float attack_ms, float release_ms) = 0;
+	virtual bool mix_set_autogain_category(u32 cat, float amount) = 0; // 0 .. 1; false: ui / music / unknown
+	virtual float mix_get_autogain_category(u32 cat) = 0;
+	virtual bool mix_get_autogain_enabled() = 0;
+	virtual float mix_get_autogain_min_db() = 0; // lowest / highest auto-gain of the sources rendered last update
+	virtual float mix_get_autogain_max_db() = 0;
+	// bang guard: a short duck of every category but ui and music while a loud bang starts (the first hold_ms of a
+	// sound whose g_type has a bit of the mask), instant attack, release in tens of ms
+	virtual void mix_set_bang_guard(bool enabled, float threshold_db, float max_duck_db, float hold_ms,
+	                                float release_ms) = 0;
+	virtual void mix_set_bang_guard_detect(u32 game_type_mask) = 0;
+	virtual bool mix_get_bang_guard_enabled() = 0;
+	virtual float mix_get_bang_guard_reduction_db() = 0; // current duck, dB (<= 0)
+	// own split: untagged sounds of the listener's object (and 2D sounds with a game object) are smc_own, not smc_world
+	virtual void mix_set_own_split(bool enabled) = 0;
+	virtual bool mix_get_own_split() = 0;
+	// the object the listener is (the actor); compared only, never dereferenced. Set by the engine every frame.
+	virtual void mix_set_listener_object(CObject* O) = 0;
 #ifdef __BORLANDC__
 	virtual SoundEnvironment_LIB*	get_env_library			()																						= 0;
 	virtual void					refresh_env_library		()																						= 0;
@@ -506,6 +543,7 @@ IC ref_sound_data::ref_sound_data()
 	g_object = 0;
 	s_type = st_Effect;
 	mix_cat = smc_auto;
+	mix_flags = 0;
 }
 
 IC ref_sound_data::ref_sound_data(LPCSTR fName, esound_type sound_type, int game_type)

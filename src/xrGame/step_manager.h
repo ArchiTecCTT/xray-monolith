@@ -27,7 +27,9 @@ class CStepManager
 		}
 
 		// others: an NPC's or monster's step (headphones: tagged smc_steps_others, the listener-side mix only)
-		void play_next(SGameMtlPair* mtl_pair, CEntityAlive* object, float volume, bool b_hud_mode, bool others = false);
+		// mix_flags: esound_mix_flag bits for an others' step that the headset range adds (listener only) or cuts (mute)
+		void play_next(SGameMtlPair* mtl_pair, CEntityAlive* object, float volume, bool b_hud_mode, bool others = false,
+		               u8 mix_flags = 0);
 	} m_step_sound;
 
 	u32 m_time_anim_started;

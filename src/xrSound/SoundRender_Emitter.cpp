@@ -33,6 +33,9 @@ CSoundRender_Emitter::CSoundRender_Emitter(void)
 	fade_volume = 1.f;
 	mix_level = 0.f;
 	mix_heard = 0.f;
+	mix_src_level = 0.f;
+	mix_ag_db = 0.f;
+	mix_ag_set = false;
 	occluder[0].set(0, 0, 0);
 	occluder[1].set(0, 0, 0);
 	occluder[2].set(0, 0, 0);
@@ -83,6 +86,9 @@ void CSoundRender_Emitter::Event_Propagade()
 	if (0 == owner_data->g_type) return;
 	if (0 == owner_data->g_object)return;
 	if (0 == SoundRender->Handler)return;
+	// headphones: a footstep that plays only because a headset stretches the player's step range (smf_listener_only)
+	// makes no AI event, as it made none before the headset; this reads the play's flag, never a mix parameter
+	if (owner_data->mix_flags & smf_listener_only) return;
 
 	VERIFY(_valid(p_source.volume));
 	// Calculate range

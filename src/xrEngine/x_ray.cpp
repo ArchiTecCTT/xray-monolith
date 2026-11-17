@@ -149,6 +149,8 @@ struct _SoundProcessor : public pureFrame
 	{
 		//Msg ("------------- sound: %d [%3.2f,%3.2f,%3.2f]",u32(Device.dwFrame),VPUSH(Device.vCameraPosition));
 		Device.Statistic->Sound.Begin();
+		// headphones: the object the listener is (the actor), for the "own" mix category; a pointer to compare with only
+		::Sound->mix_set_listener_object(g_pGameLevel ? g_pGameLevel->CurrentViewEntity() : NULL);
 		::Sound->update(Device.vCameraPosition, Device.vCameraDirection, Device.vCameraTop);
 		Device.Statistic->Sound.End();
 	}

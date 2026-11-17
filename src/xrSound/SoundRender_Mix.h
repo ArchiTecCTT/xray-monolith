@@ -89,6 +89,89 @@ inline float sound_mix_al_distance_gain(float dist, float ref_dist, float max_di
 	return den > 0.f ? ref_dist / den : 1.f;
 }
 
+// ---- per-source auto-gain (docs/audio_api.md "Auto-gain") ------------------------------------------------------------
+// The gain in dB one source gets for its own level at the listener: levels are pulled toward target_db by the ratio
+// (a level d dB away from the target comes out d / ratio dB away), quiet sounds by at most +max_boost_db, loud ones by
+// at most -max_cut_db. Never turns the order of two levels around: a louder input never comes out quieter.
+inline float sound_mix_autogain_curve(float level_db, float target_db, float ratio, float max_boost_db,
+                                      float max_cut_db)
+{
+	if (ratio <= 1.f)
+		return 0.f;
+	float g = (target_db - level_db) * (1.f - 1.f / ratio);
+	if (g > max_boost_db)
+		g = max_boost_db;
+	if (g < -max_cut_db)
+		g = -max_cut_db;
+	return g;
+}
+
+// 1 - e^(-dt / tau): the share of the way to its target a one-pole smoother goes in one frame (1 = jump)
+inline float sound_mix_smooth_k(float dt, float tau_sec)
+{
+	if (tau_sec <= 0.f)
+		return 1.f;
+	return dt > 0.f ? 1.f - expf(-dt / tau_sec) : 0.f;
+}
+
+// One frame of one source's auto-gain smoother: attack (k_attack) when the gain has to fall, that is when the source
+// got louder, release (k_release) when it may rise. Ends on exactly the target.
+inline void sound_mix_autogain_smooth(float& gain_db, float target_db, float k_attack, float k_release)
+{
+	gain_db += (target_db - gain_db) * (target_db < gain_db ? k_attack : k_release);
+	if (_abs(target_db - gain_db) < 1e-3f)
+		gain_db = target_db;
+}
+
+inline float sound_mix_db_to_gain(float db) { return db == 0.f ? 1.f : expf(db * 0.11512925465f); } // 10^(db / 20)
+
+// One source, one sound update: its auto-gain in dB. level_lin: the source's own level at the listener (linear,
+// 1 = full). amount: its category's share of the curve (0 = none). The first call of a source (set == false) takes the
+// gain at once, so a loud onset is never played at full gain first and a quiet one does not fade in; after that the
+// gain follows through the smoother. Off (or amount 0) the target is 0 dB, so switching off fades each source back.
+inline float sound_mix_autogain_source(float& gain_db, bool& set, float level_lin, bool on, float amount,
+                                       float target_db, float ratio, float max_boost_db, float max_cut_db,
+                                       float k_attack, float k_release)
+{
+	float target = 0.f;
+	if (on && amount > 0.f)
+	{
+		const float level_db = level_lin > 1e-6f ? 20.f * log10f(level_lin) : -120.f;
+		target = amount * sound_mix_autogain_curve(level_db, target_db, ratio, max_boost_db, max_cut_db);
+	}
+	if (!set)
+	{
+		set = true;
+		gain_db = target;
+	}
+	else if (gain_db != target)
+		sound_mix_autogain_smooth(gain_db, target, k_attack, k_release);
+	return gain_db;
+}
+
+// ---- bang guard -----------------------------------------------------------------------------------------------------
+// One frame of the bang guard: a duck in dB (<= 0) for everything but menus and music. level_lin: the loudest bang
+// that started within the hold time (linear, 0 = none). Over the threshold the duck is the overshoot, at most
+// max_duck_db, at once (no attack time); after the hold it recovers with the release time and ends on exactly 0.
+inline float sound_mix_bang_step(float& gr_db, float level_lin, bool on, float threshold_db, float max_duck_db,
+                                 float release_sec, float dt)
+{
+	const float level_db = level_lin > 1e-6f ? 20.f * log10f(level_lin) : -120.f;
+	float target = 0.f;
+	if (on && level_db > threshold_db)
+	{
+		const float over = level_db - threshold_db;
+		target = -(over < max_duck_db ? over : max_duck_db);
+	}
+	if (target <= gr_db)
+		gr_db = target;
+	else
+		gr_db += (target - gr_db) * sound_mix_smooth_k(dt, release_sec);
+	if (target == 0.f && gr_db > -1e-3f)
+		gr_db = 0.f;
+	return level_db;
+}
+
 struct CSoundRender_Mix
 {
 	// a gain that fades linearly to its target over the time given when it was set (real time, not game time)
@@ -150,7 +233,29 @@ struct CSoundRender_Mix
 
 	// distance curve per category: a factor on OpenAL's rolloff (1 = unchanged, 0 = no inverse-distance falloff, only
 	// the engine's linear fade to max_distance). Read by fill_parameters and the detector; never by the AI path.
-	float rolloff_k[smc_count] = {1.f, 1.f, 1.f, 1.f, 1.f, 1.f};
+	float rolloff_k[smc_count] = {1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f};
+
+	// per-source auto-gain; ag_amount: how much of the curve a category gets (0 = none, 1 = all), ui and music stay 0
+	bool ag_on = false;
+	float ag_target_db = -14.f;
+	float ag_ratio = 3.f;
+	float ag_max_boost_db = 12.f; // smc_own is never boosted, whatever this says
+	float ag_max_cut_db = 12.f;
+	float ag_attack_ms = 5.f;
+	float ag_release_ms = 80.f;
+	float ag_amount[smc_count] = {1.f, 0.f, 0.f, 1.f, 0.f, 0.f, 1.f}; // world, steps_others, own
+
+	// bang guard
+	bool bang_on = false;
+	float bang_threshold_db = -9.f;
+	float bang_max_duck_db = 6.f;
+	float bang_hold_ms = 30.f;
+	float bang_release_ms = 25.f;
+	u32 bang_mask = SOUND_MIX_DEFAULT_LOUD_MASK;
+
+	// own split: untagged sounds of the listener's object, and 2D sounds with a game object, are smc_own
+	bool own_split = false;
+	const void* listener_obj = nullptr; // compared with ref_sound_data::g_object only, never dereferenced
 
 	// state, written by the sound update only
 	float lim_gr_db = 0.f; // current gain reduction (<= 0)
@@ -160,6 +265,15 @@ struct CSoundRender_Mix
 	float comp_gain = 1.f; // 10^(comp_gain_db / 20)
 	float comp_level_db = -120.f; // last compressor detector level
 	u32 comp_cats_cur = 0; // comp_cats as of the last update (read by mix_gain without the lock)
+	// auto-gain parameters as of the last update (read per source by mix_gain without the lock)
+	bool ag_on_cur = false;
+	float ag_target_cur = -14.f, ag_ratio_cur = 3.f, ag_boost_cur = 12.f, ag_cut_cur = 12.f;
+	float ag_k_attack = 1.f, ag_k_release = 1.f; // this update's smoother shares
+	float ag_amount_cur[smc_count] = {0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f};
+	float ag_min_db = 0.f, ag_max_db = 0.f; // range of the auto-gains applied in the last update
+	float ag_min_acc = 0.f, ag_max_acc = 0.f; // the same, being collected in this update
+	float bang_gr_db = 0.f; // current bang duck (<= 0)
+	float bang_gain = 1.f; // 10^(bang_gr_db / 20)
 
 	xrCriticalSection lock;
 };

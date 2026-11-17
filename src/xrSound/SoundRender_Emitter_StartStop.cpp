@@ -28,6 +28,9 @@ void CSoundRender_Emitter::start(ref_sound* _owner, BOOL _loop, float delay)
 		p_source.max_distance *= SoundRender->mix.steps_range_k;
 	mix_level = 0.f;
 	mix_heard = 0.f;
+	mix_src_level = 0.f;
+	mix_ag_db = 0.f;
+	mix_ag_set = false;
 
 	if (fis_zero(delay, EPS_L))
 	{
