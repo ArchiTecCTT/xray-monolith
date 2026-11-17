@@ -365,6 +365,7 @@ BOOL CSoundRender_Emitter::update_culling(float dt)
 		{
 			smooth_volume = 0;
 			mix_level = 0.f;
+			mix_heard = 0.f;
 			return FALSE;
 		}
 
@@ -397,6 +398,18 @@ BOOL CSoundRender_Emitter::update_culling(float dt)
 
 	// headphones limiter detector (listener-side only): the level at the listener without the user's volume sliders
 	mix_level = p_source.base_volume * volume_att * occluder_volume * fade_volume;
+	// headphones compressor detector (listener-side only): the same level as it is heard. The engine gain is clamped to
+	// 1 (fill_parameters); a mono source also gets OpenAL's inverse-distance attenuation, with the rolloff factor of its
+	// mix category. A 2D source's position is relative to the listener. Reads p_source only.
+	mix_heard = _min(mix_level, 1.f);
+	if (source()->channels_num() == 1)
+	{
+		const float al_dist = b2D
+			? p_source.position.magnitude()
+			: SoundRender->listener_position().distance_to(p_source.position);
+		mix_heard *= sound_mix_al_distance_gain(al_dist, p_source.min_distance, p_source.max_distance,
+		                                        psSoundRolloff * SoundRender->mix_rolloff_k(this));
+	}
 
 	if (smooth_volume < psSoundCull)
 		return FALSE;	// allow volume to go up

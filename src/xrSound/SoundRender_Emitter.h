@@ -49,6 +49,7 @@ public:
 	float occluder_volume; // USER
 	float fade_volume;
 	float mix_level; // headphones limiter detector: base_volume x distance x occlusion x fade, without the volume sliders
+	float mix_heard; // headphones compressor detector: mix_level (at most 1) x OpenAL's distance attenuation
 	Fvector occluder [3];
 
 	State m_current_state;

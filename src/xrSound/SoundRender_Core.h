@@ -138,7 +138,7 @@ public:
 
 	// Listener-side mix (headphones), SoundRender_Mix.h / docs/audio_api.md
 	CSoundRender_Mix mix;
-	void mix_update(float dt); // fades and the limiter; once per sound update, after the emitters
+	void mix_update(float dt); // fades, the limiter and the compressor; once per sound update, after the emitters
 	u32 mix_category(CSoundRender_Emitter* E) const; // esound_mix_category of a playing emitter
 	float mix_gain(CSoundRender_Emitter* E) const; // listener-only gain factor (1 = unchanged)
 
@@ -152,6 +152,17 @@ public:
 	float mix_get_limiter_reduction_db() override;
 	float mix_get_loud_level_db() override;
 	void mix_reset(float fade_ms) override;
+	void mix_set_compressor(bool enabled, float threshold_db, float ratio, float attack_ms, float release_ms,
+	                        float makeup_db, float knee_db) override;
+	void mix_set_compressor_detect(u32 game_type_mask, u32 own_type_mask, float own_k) override;
+	bool mix_set_compressor_category(u32 cat, bool enabled) override;
+	bool mix_get_compressor_category(u32 cat) override;
+	bool mix_get_compressor_enabled() override;
+	float mix_get_compressor_gain_db() override;
+	float mix_get_compressor_level_db() override;
+	void mix_set_category_rolloff(u32 cat, float k) override;
+	float mix_get_category_rolloff(u32 cat) override;
+	float mix_rolloff_k(CSoundRender_Emitter* E) const; // listener-only factor on OpenAL's rolloff (1 = unchanged)
 };
 
 extern CSoundRender_Core* SoundRender;

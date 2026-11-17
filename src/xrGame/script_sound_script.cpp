@@ -24,7 +24,11 @@ using namespace luabind;
 //   8 = gains above 1 really get louder (up to 4)
 //  16 = sound_object:set_audio_category / get_audio_category
 //  32 = audio_reset
-static int audio_api() { return 1 | 2 | 4 | 8 | 16 | 32; }
+//  64 = compressor: audio_set_compressor / audio_set_compressor_detect / audio_set_compressor_category /
+//       audio_get_compressor_category / audio_get_compressor_enabled / audio_get_compressor_gain /
+//       audio_get_compressor_level
+// 128 = distance curve per category: audio_set_category_rolloff / audio_get_category_rolloff
+static int audio_api() { return 1 | 2 | 4 | 8 | 16 | 32 | 64 | 128; }
 
 static const char* const audio_category_names[smc_count] = {"world", "ambient", "weather", "steps_others", "ui", "music"};
 
@@ -82,6 +86,51 @@ static bool audio_get_limiter_enabled() { return ::Sound->mix_get_limiter_enable
 static float audio_get_limiter_reduction() { return ::Sound->mix_get_limiter_reduction_db(); }
 static float audio_get_loud_level() { return ::Sound->mix_get_loud_level_db(); }
 static void audio_reset(float fade_ms) { ::Sound->mix_reset(fade_ms); }
+
+static void audio_set_compressor(bool enabled, float threshold_db, float ratio, float attack_ms, float release_ms,
+                                 float makeup_db, float knee_db)
+{
+	::Sound->mix_set_compressor(enabled, threshold_db, ratio, attack_ms, release_ms, makeup_db, knee_db);
+}
+
+static void audio_set_compressor_detect(double game_type_mask, double own_type_mask, float own_k)
+{
+	// out-of-range numbers fall back to the defaults (SOUND_MIX_DEFAULT_COMP_MASK, SOUND_MIX_DEFAULT_LOUD_MASK)
+	const u32 mask = (game_type_mask >= 0. && game_type_mask <= 4294967295.) ? u32(game_type_mask) : 0x07FFFF00u;
+	const u32 own = (own_type_mask >= 0. && own_type_mask <= 4294967295.) ? u32(own_type_mask) : 0x00200100u;
+	::Sound->mix_set_compressor_detect(mask, own, own_k);
+}
+
+static bool audio_set_compressor_category(LPCSTR category, bool enabled)
+{
+	const int c = audio_category_id(category);
+	return c >= 0 && ::Sound->mix_set_compressor_category(u32(c), enabled);
+}
+
+static bool audio_get_compressor_category(LPCSTR category)
+{
+	const int c = audio_category_id(category);
+	return c >= 0 && ::Sound->mix_get_compressor_category(u32(c));
+}
+
+static bool audio_get_compressor_enabled() { return ::Sound->mix_get_compressor_enabled(); }
+static float audio_get_compressor_gain() { return ::Sound->mix_get_compressor_gain_db(); }
+static float audio_get_compressor_level() { return ::Sound->mix_get_compressor_level_db(); }
+
+static bool audio_set_category_rolloff(LPCSTR category, float k)
+{
+	const int c = audio_category_id(category);
+	if (c < 0)
+		return false;
+	::Sound->mix_set_category_rolloff(u32(c), k);
+	return true;
+}
+
+static float audio_get_category_rolloff(LPCSTR category)
+{
+	const int c = audio_category_id(category);
+	return c < 0 ? 1.f : ::Sound->mix_get_category_rolloff(u32(c));
+}
 
 bool CScriptSound::SetAudioCategory(LPCSTR name)
 {
@@ -162,6 +211,15 @@ void CScriptSound::script_register(lua_State* L)
 		def("audio_get_limiter_enabled", &audio_get_limiter_enabled),
 		def("audio_get_limiter_reduction", &audio_get_limiter_reduction),
 		def("audio_get_loud_level", &audio_get_loud_level),
-		def("audio_reset", &audio_reset)
+		def("audio_reset", &audio_reset),
+		def("audio_set_compressor", &audio_set_compressor),
+		def("audio_set_compressor_detect", &audio_set_compressor_detect),
+		def("audio_set_compressor_category", &audio_set_compressor_category),
+		def("audio_get_compressor_category", &audio_get_compressor_category),
+		def("audio_get_compressor_enabled", &audio_get_compressor_enabled),
+		def("audio_get_compressor_gain", &audio_get_compressor_gain),
+		def("audio_get_compressor_level", &audio_get_compressor_level),
+		def("audio_set_category_rolloff", &audio_set_category_rolloff),
+		def("audio_get_category_rolloff", &audio_get_category_rolloff)
 	];
 }

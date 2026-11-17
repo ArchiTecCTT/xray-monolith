@@ -583,7 +583,14 @@ float CSoundRender_Core::mix_gain(CSoundRender_Emitter* E) const
 	float g = mix.cat[c].cur;
 	if (c != smc_ui && c != smc_music)
 		g *= mix.lim_gain;
+	if (mix.comp_cats_cur & (1u << c))
+		g *= mix.comp_gain;
 	return g;
+}
+
+float CSoundRender_Core::mix_rolloff_k(CSoundRender_Emitter* E) const
+{
+	return mix.rolloff_k[mix_category(E)];
 }
 
 void CSoundRender_Core::mix_update(float dt)
@@ -602,6 +609,17 @@ void CSoundRender_Core::mix_update(float dt)
 	const float ratio = mix.lim_ratio;
 	const float attack = mix.lim_attack_ms * 0.001f;
 	const float release = mix.lim_release_ms * 0.001f;
+	const bool c_on = mix.comp_on;
+	const u32 c_cats = mix.comp_cats;
+	const u32 c_mask = mix.comp_mask;
+	const u32 c_own_mask = mix.comp_own_mask;
+	const float c_own_k = mix.comp_own_k;
+	const float c_thr = mix.comp_threshold_db;
+	const float c_ratio = mix.comp_ratio;
+	const float c_knee = mix.comp_knee_db;
+	const float c_makeup = mix.comp_makeup_db;
+	const float c_attack = mix.comp_attack_ms * 0.001f;
+	const float c_release = mix.comp_release_ms * 0.001f;
 	mix.lock.Leave();
 
 	// detector: the loudest "loud" sound at the listener (shots, explosions), without the user's volume sliders
@@ -623,6 +641,36 @@ void CSoundRender_Core::mix_update(float dt)
 	// gain computer (hard knee) and an attack / release smoother on the gain reduction in dB
 	mix.lim_level_db = sound_mix_limiter_step(mix.lim_gr_db, level, on, thr, ratio, attack, release, dt);
 	mix.lim_gain = mix.lim_gr_db == 0.f ? 1.f : powf(10.f, mix.lim_gr_db / 20.f);
+
+	// compressor detector: the loudest counted sound of the compressed categories as it is heard, that is with OpenAL's
+	// distance attenuation, the category gain and the limiter (the chain is category gain -> limiter -> compressor),
+	// without the user's volume sliders. One pass over the playing emitters, only while the compressor is on.
+	float c_level = 0.f;
+	if (c_on && (c_mask | c_own_mask) && c_cats)
+	{
+		for (CSoundRender_Emitter* E : s_emitters)
+		{
+			const ref_sound_data* d = E->owner_data._get();
+			// 2D sounds (the actor's own) have their own type mask: by default only shots and explosions count
+			if (!d || !E->isPlaying() || !(u32(d->g_type) & (E->b2D ? c_own_mask : c_mask)))
+				continue;
+			const u32 c = mix_category(E);
+			if (!(c_cats & (1u << c)))
+				continue;
+			float l = E->mix_heard * mix.cat[c].cur * mix.lim_gain;
+			if (E->b2D)
+				l *= c_own_k;
+			if (l > c_level)
+				c_level = l;
+		}
+	}
+	// soft-knee gain computer, makeup, and an attack / release smoother on the gain in dB
+	mix.comp_level_db = sound_mix_compressor_step(mix.comp_gain_db, c_level, c_on, c_thr, c_ratio, c_knee, c_makeup,
+	                                              c_attack, c_release, dt);
+	mix.comp_gain = mix.comp_gain_db == 0.f ? 1.f : powf(10.f, mix.comp_gain_db / 20.f);
+	// a category leaves the compressed set only once the gain is back at 0 dB, so switching off (or audio_reset) fades
+	if (c_on || mix.comp_gain_db == 0.f)
+		mix.comp_cats_cur = c_cats;
 }
 
 static float mix_clamp(float v, float lo, float hi, float bad)
@@ -695,5 +743,68 @@ void CSoundRender_Core::mix_reset(float fade_ms)
 	mix.lim_on = false; // the gain reduction releases with the release time
 	mix.lim_mask = SOUND_MIX_DEFAULT_LOUD_MASK;
 	mix.lim_own_k = 1.f;
+	mix.comp_on = false; // the gain goes back to 0 dB with the release time (mix_update keeps the old categories till then)
+	mix.comp_cats = (1u << smc_world) | (1u << smc_steps_others);
+	mix.comp_mask = SOUND_MIX_DEFAULT_COMP_MASK;
+	mix.comp_own_mask = SOUND_MIX_DEFAULT_LOUD_MASK;
+	mix.comp_own_k = 1.f;
+	for (u32 i = 0; i < smc_count; ++i)
+		mix.rolloff_k[i] = 1.f;
 	mix.lock.Leave();
 }
+
+void CSoundRender_Core::mix_set_compressor(bool enabled, float threshold_db, float ratio, float attack_ms,
+                                           float release_ms, float makeup_db, float knee_db)
+{
+	mix.lock.Enter();
+	mix.comp_on = enabled;
+	mix.comp_threshold_db = mix_clamp(threshold_db, -60.f, 0.f, -24.f);
+	mix.comp_ratio = mix_clamp(ratio, 1.f, 20.f, 4.f);
+	mix.comp_attack_ms = mix_clamp(attack_ms, 0.f, 1000.f, 10.f);
+	mix.comp_release_ms = mix_clamp(release_ms, 0.f, 10000.f, 250.f);
+	mix.comp_makeup_db = mix_clamp(makeup_db, -24.f, 24.f, 0.f);
+	mix.comp_knee_db = mix_clamp(knee_db, 0.f, 24.f, 6.f);
+	mix.lock.Leave();
+}
+
+void CSoundRender_Core::mix_set_compressor_detect(u32 game_type_mask, u32 own_type_mask, float own_k)
+{
+	mix.lock.Enter();
+	mix.comp_mask = game_type_mask;
+	mix.comp_own_mask = own_type_mask;
+	mix.comp_own_k = mix_clamp(own_k, 0.f, 4.f, 1.f);
+	mix.lock.Leave();
+}
+
+bool CSoundRender_Core::mix_set_compressor_category(u32 cat, bool enabled)
+{
+	if (cat >= smc_count || cat == smc_ui || cat == smc_music)
+		return false; // menus and music are never compressed
+	mix.lock.Enter();
+	if (enabled)
+		mix.comp_cats |= 1u << cat;
+	else
+		mix.comp_cats &= ~(1u << cat);
+	mix.lock.Leave();
+	return true;
+}
+
+bool CSoundRender_Core::mix_get_compressor_category(u32 cat)
+{
+	return cat < smc_count && (mix.comp_cats & (1u << cat)) != 0;
+}
+
+bool CSoundRender_Core::mix_get_compressor_enabled() { return mix.comp_on; }
+float CSoundRender_Core::mix_get_compressor_gain_db() { return mix.comp_gain_db; }
+float CSoundRender_Core::mix_get_compressor_level_db() { return mix.comp_level_db; }
+
+void CSoundRender_Core::mix_set_category_rolloff(u32 cat, float k)
+{
+	if (cat >= smc_count)
+		return;
+	mix.lock.Enter();
+	mix.rolloff_k[cat] = mix_clamp(k, 0.f, 2.f, 1.f);
+	mix.lock.Leave();
+}
+
+float CSoundRender_Core::mix_get_category_rolloff(u32 cat) { return cat < smc_count ? mix.rolloff_k[cat] : 1.f; }

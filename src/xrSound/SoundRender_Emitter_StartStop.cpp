@@ -27,6 +27,7 @@ void CSoundRender_Emitter::start(ref_sound* _owner, BOOL _loop, float delay)
 	if (owner_data->mix_cat == smc_steps_others)
 		p_source.max_distance *= SoundRender->mix.steps_range_k;
 	mix_level = 0.f;
+	mix_heard = 0.f;
 
 	if (fis_zero(delay, EPS_L))
 	{

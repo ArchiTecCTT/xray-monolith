@@ -469,7 +469,22 @@ public:
 	virtual bool mix_get_limiter_enabled() = 0;
 	virtual float mix_get_limiter_reduction_db() = 0; // current gain reduction, dB (<= 0)
 	virtual float mix_get_loud_level_db() = 0; // current detector level, dB (-120 = nothing loud)
-	virtual void mix_reset(float fade_ms) = 0; // all gains to 1, limiter off, steps range 1
+	virtual void mix_reset(float fade_ms) = 0; // all gains to 1, limiter and compressor off, steps range and rolloff 1
+	// compressor on the categories of mix_set_compressor_category (default world + steps_others): detector = the
+	// loudest counted sound at the listener, soft-knee gain computer, attack / release, makeup gain. threshold dB
+	// (-60 .. 0), ratio 1 .. 20, attack / release ms, makeup dB (-24 .. 24), knee dB (0 .. 24)
+	virtual void mix_set_compressor(bool enabled, float threshold_db, float ratio, float attack_ms, float release_ms,
+	                                float makeup_db, float knee_db) = 0;
+	// which g_type bits drive it: game_type_mask for 3D sounds, own_type_mask (x own_k) for 2D, the actor's own
+	virtual void mix_set_compressor_detect(u32 game_type_mask, u32 own_type_mask, float own_k) = 0;
+	virtual bool mix_set_compressor_category(u32 cat, bool enabled) = 0; // false: ui / music / unknown (never)
+	virtual bool mix_get_compressor_category(u32 cat) = 0;
+	virtual bool mix_get_compressor_enabled() = 0;
+	virtual float mix_get_compressor_gain_db() = 0; // current gain (makeup + reduction), dB
+	virtual float mix_get_compressor_level_db() = 0; // current detector level, dB (-120 = nothing counted)
+	// distance curve of a category: k 0 .. 2 on OpenAL's rolloff factor (1 = unchanged, 0 = only the linear fade)
+	virtual void mix_set_category_rolloff(u32 cat, float k) = 0;
+	virtual float mix_get_category_rolloff(u32 cat) = 0;
 #ifdef __BORLANDC__
 	virtual SoundEnvironment_LIB*	get_env_library			()																						= 0;
 	virtual void					refresh_env_library		()																						= 0;

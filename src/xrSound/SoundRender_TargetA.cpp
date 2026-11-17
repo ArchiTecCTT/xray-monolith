@@ -178,7 +178,9 @@ void CSoundRender_TargetA::fill_parameters()
 	VERIFY2(m_pEmitter, SE->source()->file_name());
 	A_CHK(alSourcei (pSource, AL_SOURCE_RELATIVE, m_pEmitter->b2D));
 
-	A_CHK(alSourcef (pSource, AL_ROLLOFF_FACTOR, psSoundRolloff));
+	// headphones: the distance curve of the source's mix category (a factor on the rolloff, exactly 1 unless a script
+	// set it); only what the player hears, the AI range (max_ai_distance) never reads it
+	A_CHK(alSourcef (pSource, AL_ROLLOFF_FACTOR, psSoundRolloff * SoundRender->mix_rolloff_k(m_pEmitter)));
 
 	VERIFY2(m_pEmitter, SE->source()->file_name());
 	float _gain = m_pEmitter->smooth_volume;
