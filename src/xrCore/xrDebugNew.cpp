@@ -65,6 +65,28 @@ static BOOL bException = FALSE;
 
 XRCORE_API xrDebug Debug;
 
+// ---------------------------------------------------------------------------------------------
+// How much the crash dump written by save_mini_dump() contains.
+//
+//   0  Default. Threads, call stacks and the module list only: a small file (about 1 MB or less).
+//      Gives a call stack, but none of the game's own memory, so the objects that were involved
+//      in the crash cannot be read from it.
+//   1  "-big_dump" on the command line, or "crash_dump_level 1" in the console. Adds the global
+//      variables of every module and the memory that the stacks and registers point at.
+//      Expect tens to a few hundred MB.
+//   2  "-full_dump" on the command line, or "crash_dump_level 2" in the console. All memory of
+//      the process, so any object can be inspected afterwards. The file is about as large as the
+//      memory the game was using when it crashed (several GB); on a slow disk writing it takes
+//      minutes and the game window stays frozen until it is done.
+//
+// The console variable is saved in user.ltx. The command line switches also cover a crash that
+// happens before user.ltx has been read. The higher of the two settings is used.
+// Level 2 uses the full-memory format on purpose: it is the minidump layout made for files
+// larger than 4 GB. If dbghelp.dll refuses a level, a simpler one is tried, down to the default dump.
+// The sizes above are estimates, they have not been measured on this build.
+// ---------------------------------------------------------------------------------------------
+XRCORE_API int g_crash_dump_level = 0;
+
 static bool error_after_dialog = false;
 
 namespace crash_saving
@@ -661,6 +683,30 @@ typedef BOOL (WINAPI* MINIDUMPWRITEDUMP)(HANDLE hProcess, DWORD dwPid, HANDLE hF
     CONST PMINIDUMP_CALLBACK_INFORMATION CallbackParam
     );
 
+static int crash_dump_level()
+{
+    int level = g_crash_dump_level;
+    LPCSTR command_line = GetCommandLine();
+    if (command_line)
+    {
+        if (level < 1 && strstr(command_line, "-big_dump")) level = 1;
+        if (level < 2 && strstr(command_line, "-full_dump")) level = 2;
+    }
+    if (level < 0) level = 0;
+    if (level > 2) level = 2;
+    return level;
+}
+
+static LPCSTR crash_dump_level_info(int level)
+{
+    switch (level)
+    {
+    case 1: return "level 1: call stacks, globals and the memory the stacks point at; tens to a few hundred MB";
+    case 2: return "level 2: all memory of the game; several GB, can take minutes on a slow disk";
+    default: return "level 0: call stacks only; about 1 MB";
+    }
+}
+
 void save_mini_dump (_EXCEPTION_POINTERS* pExceptionInfo)
 {
     // firstly see if dbghelp.dll is around and has the function we need
@@ -686,6 +732,7 @@ void save_mini_dump (_EXCEPTION_POINTERS* pExceptionInfo)
     }
 
     LPCTSTR szResult = NULL;
+    string1024 szScratch;
 
     if (hDll)
     {
@@ -693,7 +740,6 @@ void save_mini_dump (_EXCEPTION_POINTERS* pExceptionInfo)
         if (pDump)
         {
             string_path szDumpPath;
-            string_path szScratch;
             string64 t_stemp;
 
             timestamp (t_stemp);
@@ -734,12 +780,64 @@ void save_mini_dump (_EXCEPTION_POINTERS* pExceptionInfo)
                 ExInfo.ClientPointers = NULL;
 
                 // write the dump
-                MINIDUMP_TYPE dump_flags = MINIDUMP_TYPE(MiniDumpNormal | MiniDumpFilterMemory | MiniDumpScanMemory );
+                // Level 0 is exactly what this function has always written. The bigger levels are
+                // opt-in, see the comment at g_crash_dump_level.
+                const MINIDUMP_TYPE flags_default = MINIDUMP_TYPE(MiniDumpNormal | MiniDumpFilterMemory | MiniDumpScanMemory );
+                const int dump_level = crash_dump_level();
 
-                BOOL bOK = pDump( GetCurrentProcess(), GetCurrentProcessId(), hFile, dump_flags, &ExInfo, NULL, NULL );
+                // What to try, most detailed first; the last entry is always the default dump.
+                MINIDUMP_TYPE attempt_flags[4];
+                int attempt_level[4];
+                int attempt_count = 0;
+                if (dump_level >= 2)
+                {
+                    // with the extra bookkeeping streams first, then plain full memory in case the
+                    // dbghelp.dll that got loaded is too old to know the extra flags
+                    attempt_flags[attempt_count] = MINIDUMP_TYPE(MiniDumpWithFullMemory | MiniDumpWithFullMemoryInfo |
+                        MiniDumpWithThreadInfo | MiniDumpWithUnloadedModules | MiniDumpIgnoreInaccessibleMemory);
+                    attempt_level[attempt_count++] = 2;
+                    attempt_flags[attempt_count] = MINIDUMP_TYPE(MiniDumpWithFullMemory);
+                    attempt_level[attempt_count++] = 2;
+                }
+                if (dump_level >= 1)
+                {
+                    attempt_flags[attempt_count] = MINIDUMP_TYPE(MiniDumpNormal | MiniDumpWithDataSegs |
+                        MiniDumpWithIndirectlyReferencedMemory);
+                    attempt_level[attempt_count++] = 1;
+                }
+                attempt_flags[attempt_count] = flags_default;
+                attempt_level[attempt_count++] = 0;
+
+                if (dump_level > 0 && shared_str_initialized)
+                {
+                    Msg("* Writing crash dump '%s' (%s). The game is not hung, wait for it to finish.",
+                        szDumpPath, crash_dump_level_info(dump_level));
+                    xrLogger::FlushLog();
+                }
+
+                BOOL bOK = FALSE;
+                int written_level = 0;
+                for (int attempt = 0; attempt < attempt_count && !bOK; ++attempt)
+                {
+                    if (attempt > 0)
+                    {
+                        // the previous attempt failed: start the file again from empty
+                        ::SetFilePointer(hFile, 0, NULL, FILE_BEGIN);
+                        ::SetEndOfFile(hFile);
+                    }
+                    written_level = attempt_level[attempt];
+                    bOK = pDump( GetCurrentProcess(), GetCurrentProcessId(), hFile, attempt_flags[attempt], &ExInfo, NULL, NULL );
+                    if (!bOK && dump_level > 0 && shared_str_initialized)
+                        Msg("! Crash dump level %d failed (error 0x%08x)", written_level, GetLastError());
+                }
+
                 if (bOK)
                 {
-                    xr_sprintf( szScratch, "Saved dump file to '%s'", szDumpPath );
+                    LARGE_INTEGER dump_size;
+                    dump_size.QuadPart = 0;
+                    ::GetFileSizeEx(hFile, &dump_size);
+                    xr_sprintf( szScratch, "Saved dump file to '%s' (%u KB, %s)", szDumpPath,
+                                u32(dump_size.QuadPart / 1024), crash_dump_level_info(written_level) );
                     szResult = szScratch;
                     // retval = EXCEPTION_EXECUTE_HANDLER;
                 }
@@ -764,6 +862,13 @@ void save_mini_dump (_EXCEPTION_POINTERS* pExceptionInfo)
     else
     {
         szResult = "DBGHELP.DLL not found";
+    }
+
+    // say in the log where the dump went (or why there is none) and how detailed it is
+    if (szResult && shared_str_initialized)
+    {
+        Msg("* %s", szResult);
+        xrLogger::FlushLog();
     }
 }
 #endif //-USE_OWN_MINI_DUMP

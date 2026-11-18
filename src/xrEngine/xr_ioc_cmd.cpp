@@ -1270,7 +1270,7 @@ void CCC_Register()
 	CMD4(CCC_Integer, "g_ai_unlimited_ammo", &g_ai_unlimited_ammo, 0, 1);
 
 	// Crash dump detail, saved in user.ltx: 0 = small (default), 1 = + globals and referenced memory,
-	// 2 = full process memory (several GB). See xrCore/xrDebug.cpp.
+	// 2 = full process memory (several GB). See xrCore/xrDebugNew.cpp.
 	CMD4(CCC_Integer, "crash_dump_level", &g_crash_dump_level, 0, 2);
 
 	// Render device states
