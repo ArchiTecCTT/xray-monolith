@@ -90,6 +90,10 @@ IC std::string __cdecl make_string(LPCSTR format, ...)
 
 extern XRCORE_API xrDebug Debug;
 
+// Crash dump detail: 0 = small dump (default), 1 = adds globals and memory referenced from the stacks,
+// 2 = full process memory. Console variable "crash_dump_level"; see xrDebug.cpp for sizes.
+extern XRCORE_API int g_crash_dump_level;
+
 XRCORE_API void LogStackTrace(LPCSTR header);
 
 #include "xrDebug_macros.h"
