@@ -23,6 +23,136 @@ extern float r_ssaDONTSORT;
 extern float r_ssaHZBvsTEX;
 extern float r_ssaGLOD_start, r_ssaGLOD_end;
 
+#if	RENDER==R_R1
+// ---------------------------------------------------------------------------------------------
+// Guarded front-to-back sort of a spatial list (R1 sorts lstRenderables and lstLights this way).
+//
+// The old code handed std::sort a comparator that read spatial.sphere.P of both objects on every
+// comparison. That is only safe when each comparison of the same pair always gives the same answer.
+// It does not: the scheduler and particle tasks run on other threads while the frame is being
+// calculated (see CRenderDevice::on_idle / XRay::Engine::GameThread) and CObject::spatial_move()
+// rewrites sphere.P in place, so a position can change in the middle of the sort. std::sort then
+// walks past the start of the vector (native crash in _Insertion_sort_unchecked). A null entry or
+// a NaN position also made the old comparator an invalid ordering.
+//
+// Here every position is read exactly once, turned into an integer key, and only the keys are
+// sorted. Entries that cannot be ordered (null, or a position / radius that is not a finite
+// number) are left out of the list for this frame and reported in the log by name.
+// Cost: one pass over the list plus a sort of 64-bit integers; the scratch vectors keep their
+// capacity between frames, so there is no allocation once they have grown.
+// ---------------------------------------------------------------------------------------------
+namespace
+{
+	ICF u32 spatial_sort_float_bits(float value) noexcept
+	{
+		u32 bits;
+		memcpy(&bits, &value, sizeof(bits));
+		return bits;
+	}
+
+	// false for NaN and +-Inf (exponent bits all set)
+	ICF bool spatial_sort_is_finite(float value) noexcept
+	{
+		return (spatial_sort_float_bits(value) & 0x7f800000u) != 0x7f800000u;
+	}
+
+	// Log limiter: an object that stays broken is reported once, and no matter how many different
+	// objects break, the log gets at most 32 lines plus one line per 60 frames after that.
+	// R1 calculates the frame on the main thread only, so plain statics are enough here.
+	bool spatial_sort_report_allowed(u64 identity)
+	{
+		static u64 recent[16] = {};
+		static u32 recent_next = 0;
+		static u32 lines_total = 0;
+		static u32 last_frame = 0;
+
+		for (u64 known : recent)
+			if (known == identity) return false;
+
+		if (lines_total >= 32 && (Device.dwFrame - last_frame) < 60)
+			return false;
+
+		recent[recent_next] = identity;
+		recent_next = (recent_next + 1) % 16;
+		++lines_total;
+		last_frame = Device.dwFrame;
+		return true;
+	}
+
+	void spatial_sort_report(ISpatial* spatial, const Fvector& P, float R, LPCSTR list_name)
+	{
+		if (CObject* object = spatial->dcast_CObject())
+		{
+			// top bit set: can never collide with a pointer value
+			if (!spatial_sort_report_allowed(0x8000000000000000ull | u64(object->ID())))
+				return;
+
+			LPCSTR name = object->cName().c_str();
+			LPCSTR section = object->cNameSect().c_str();
+			Msg("! [render] object '%s' (section '%s', id %u) has a broken position [%f, %f, %f], radius %f: left out of the %s list (reported once)",
+				name ? name : "?", section ? section : "?", u32(object->ID()), P.x, P.y, P.z, R, list_name);
+		}
+		else
+		{
+			if (!spatial_sort_report_allowed(u64(size_t(spatial))))
+				return;
+
+			Msg("! [render] spatial %p (type 0x%x, no game object) has a broken position [%f, %f, %f], radius %f: left out of the %s list (reported once)",
+				(void*)spatial, spatial->spatial.type, P.x, P.y, P.z, R, list_name);
+		}
+	}
+
+	void spatial_sort_by_distance(xr_vector<ISpatialShared>& list, xr_vector<u64>& keys,
+	                              xr_vector<ISpatialShared>& scratch, LPCSTR list_name)
+	{
+		const u32 count = u32(list.size());
+		if (0 == count) return;
+
+		// one copy of the camera position for the whole sort
+		const Fvector eye = Device.vCameraPosition_saved;
+		if (!spatial_sort_is_finite(eye.x) || !spatial_sort_is_finite(eye.y) || !spatial_sort_is_finite(eye.z))
+			return; // no usable camera: keep the list as it is, the order is only an optimisation
+
+		keys.clear();
+		for (u32 it = 0; it < count; ++it)
+		{
+			ISpatial* spatial = list[it].get();
+			if (0 == spatial) continue; // dropped
+
+			// read the sphere once; from here on only this copy is used
+			const Fvector P = spatial->spatial.sphere.P;
+			const float R = spatial->spatial.sphere.R;
+
+			// A sum of squares is never negative, and it is NaN or Inf whenever any coordinate is,
+			// so this one test covers the whole position (and a distance that overflows).
+			const float distance = eye.distance_to_sqr(P);
+			if (!spatial_sort_is_finite(distance) || !spatial_sort_is_finite(R))
+			{
+				spatial_sort_report(spatial, P, R, list_name);
+				continue; // dropped
+			}
+
+			// For finite floats >= 0 the bit pattern orders the same way as the value. The index in
+			// the low half makes every key unique, so the order is total and repeatable.
+			keys.push_back((u64(spatial_sort_float_bits(distance)) << 32) | u64(it));
+		}
+
+		std::sort(keys.begin(), keys.end());
+
+		// Rebuild the list in key order. The pointers are swapped across, so no reference counts
+		// change; what stays behind in the old storage are the dropped entries.
+		const u32 kept = u32(keys.size());
+		scratch.clear();
+		scratch.resize(kept);
+		for (u32 it = 0; it < kept; ++it)
+			scratch[it].swap(list[u32(keys[it] & 0xffffffffull)]);
+
+		list.swap(scratch);
+		scratch.clear(); // releases the dropped entries, keeps the capacity
+	}
+}
+#endif
+
 ICF bool R4FullDetailRejectSpatial(ISpatial* spatial, bool normalPhase)
 {
 #if RENDER == R_R4
@@ -564,12 +694,7 @@ void CDSGraphManager::r_dsgraph_capture_lights()
 	);
 
 #if	RENDER==R_R1
-	std::sort(lstLights.begin(), lstLights.end(), [](const ISpatialShared& _1, const ISpatialShared& _2) noexcept
-	{
-		if (!_1.get() || !_2.get()) return false;
-
-		return	_1->spatial.sphere.P.distance_to_sqr(Device.vCameraPosition_saved) < _2->spatial.sphere.P.distance_to_sqr(Device.vCameraPosition_saved);
-	});
+	spatial_sort_by_distance(lstLights, lstSpatialSortKeys, lstSpatialSortScratch, "lights");
 #endif
 
 	for (ISpatialShared spatial : lstLights)
@@ -632,12 +757,7 @@ void CDSGraphManager::r_dsgraph_capture_dynamic(CObject* O)
 #if	RENDER==R_R1
 			if (i_mask[CDSGraphManager::fl_normal])//normal phase
 			{
-				std::sort(lstRenderables.begin(), lstRenderables.end(), [](const ISpatialShared& _1, const ISpatialShared& _2) noexcept
-				{
-					if (!_1.get() || !_2.get()) return false;
-
-					return	_1->spatial.sphere.P.distance_to_sqr(Device.vCameraPosition_saved) < _2->spatial.sphere.P.distance_to_sqr(Device.vCameraPosition_saved);
-				});
+				spatial_sort_by_distance(lstRenderables, lstSpatialSortKeys, lstSpatialSortScratch, "renderables");
 
 				if (ps_actor_shadow_flags.test(1))
 					g_hud->Render_First(dcast_IPortalTraverser());

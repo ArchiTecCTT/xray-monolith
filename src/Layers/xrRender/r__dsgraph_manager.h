@@ -36,6 +36,9 @@ public:
 	FixedMAP<CSector*, std::pair<xr_vector<CFrustum>, FixedSet<CPortal*>>>		m_sector_frustums;
 	xr_unordered_flat_set<dxRender_Visual*>				m_static_seen;
 	xr_vector<ISpatialShared>				lstRenderables, lstLights;
+	// scratch storage for the R1 distance sort of the two lists above; kept between frames so the sort does not allocate
+	xr_vector<u64>							lstSpatialSortKeys;
+	xr_vector<ISpatialShared>				lstSpatialSortScratch;
 	FixedMAP<CPortal*, float>				f_portals;
 	sPoly S, D;
 	ref_shader								f_shader;

@@ -84,6 +84,13 @@ namespace R_dsgraph
             Fmatrix* mat, ShaderElement* se, bool hud, float custom_fov = 0.f)
             : sortKey(key), ssa(_ssa), pObject(obj), pVisual(vis),
             pMatrix(mat), pSE(se), b_hud_mode(hud), fov(custom_fov) {
+            // A NaN key (an object with a broken transform) compares false against everything, which is
+            // not a valid ordering for the std::sort calls on these lists. Park such an item at the far end.
+            if constexpr (std::is_floating_point_v<T>)
+            {
+                if (sortKey != sortKey)
+                    sortKey = T(flt_max);
+            }
         }
 
         bool operator<(const DSGraphItem& other) const noexcept
