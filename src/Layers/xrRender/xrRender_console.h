@@ -127,6 +127,7 @@ extern ECORE_API int ps_r1_thermal_particles;
 extern ECORE_API int ps_r1_thermal_look;
 extern ECORE_API int ps_r1_thermal_palette;
 extern ECORE_API float ps_r1_thermal_soft;
+extern ECORE_API float ps_r1_thermal_body;
 extern ECORE_API float ps_r1_thermal_round;
 extern ECORE_API float ps_r1_thermal_ring;
 extern ECORE_API float ps_r1_thermal_glow;

@@ -178,13 +178,14 @@ int ps_r1_thermal_particles = 1; // fires, embers and heat haze: particle effect
 int ps_r1_thermal_look = 1; // 0 = masks only (a mod makes the look), 1 = shown on the screen and in the SVP lens, 2 = built into $user$thermal but not shown on the screen
 int ps_r1_thermal_palette = 0; // 0 = white hot, 1 = black hot, 2 = colour
 float ps_r1_thermal_soft = 3.f; // screen pixels per sensor pixel
-float ps_r1_thermal_round = 0.3f; // how much darker a body is where its surface turns away from the camera
-float ps_r1_thermal_ring = 0.7f; // the thin dark ring right outside a hot thing
+float ps_r1_thermal_body = 0.95f; // grey level of a hot body where it faces the camera (1 = pure white)
+float ps_r1_thermal_round = 0.5f; // how much darker a body is where its surface turns away from the camera
+float ps_r1_thermal_ring = 1.5f; // the thin dark ring right outside a hot thing
 float ps_r1_thermal_glow = 0.12f; // the glow around a hot thing
 float ps_r1_thermal_grain = 0.027f; // moving sensor grain
 float ps_r1_thermal_fpn = 0.006f; // fixed pattern: columns and lines
-float ps_r1_thermal_world = 0.5f; // contrast of the world
-float ps_r1_thermal_world_base = 0.07f; // grey level of a black world pixel
+float ps_r1_thermal_world = 0.45f; // contrast of the world
+float ps_r1_thermal_world_base = 0.1f; // grey level of a black world pixel
 float ps_r1_thermal_world_gamma = 0.85f;
 float ps_r1_thermal_sky = 0.035f; // grey level of the sky
 float ps_r1_thermal_sky_clouds = 0.1f; // how much of the sky's own brightness stays
@@ -1475,6 +1476,7 @@ void xrRender_initconsole()
 	CMD4(CCC_Integer, "r1_thermal_look", &ps_r1_thermal_look, 0, 2);
 	CMD4(CCC_Integer, "r1_thermal_palette", &ps_r1_thermal_palette, 0, 2);
 	CMD4(CCC_Float, "r1_thermal_soft", &ps_r1_thermal_soft, 1.f, 8.f);
+	CMD4(CCC_Float, "r1_thermal_body", &ps_r1_thermal_body, 0.f, 1.f);
 	CMD4(CCC_Float, "r1_thermal_round", &ps_r1_thermal_round, 0.f, 1.f);
 	CMD4(CCC_Float, "r1_thermal_ring", &ps_r1_thermal_ring, 0.f, 2.f);
 	CMD4(CCC_Float, "r1_thermal_glow", &ps_r1_thermal_glow, 0.f, 1.f);

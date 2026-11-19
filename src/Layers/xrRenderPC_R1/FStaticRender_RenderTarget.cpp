@@ -1376,8 +1376,10 @@ bool CRenderTarget::look_build(u32 view, u32 src_w, u32 src_h)
 	}
 
 	look_consts& c = look_c;
-	// without the edge term in the mask (no alpha channel) bodies are flat
-	c.body.set(heat_alpha ? ps_r1_thermal_round : 0.f, ps_r1_thermal_ring, ps_r1_thermal_glow, 0.f);
+	// a body: its level where it faces the camera, darker by 'round' of it where it is seen edge-on. Without the
+	// edge term in the mask (no alpha channel) bodies are flat
+	c.body.set(heat_alpha ? ps_r1_thermal_body * ps_r1_thermal_round : 0.f, ps_r1_thermal_ring, ps_r1_thermal_glow,
+	           ps_r1_thermal_body);
 	c.world.set(ps_r1_thermal_world_base, ps_r1_thermal_world, ps_r1_thermal_world_gamma, 0.f);
 	c.sky.set(ps_r1_thermal_sky, ps_r1_thermal_sky_clouds, 0.f, 0.f);
 	// columns a little stronger than the lines; the line term is +-0.25 in the shader
@@ -1387,7 +1389,8 @@ bool CRenderTarget::look_build(u32 view, u32 src_w, u32 src_h)
 	c.noise_b.set(look_noise_shift.x, look_noise_shift.y, 0.f, 0.f);
 	c.col_a.set(w / 128.f, 0.f, 0.f, 0.f);
 	c.col_b.set(0.f, 47.5f / 128.f, 0.f, 0.f);
-	c.palette.set(0 == heat_cfg_palette ? 1.f : 0.f, 1 == heat_cfg_palette ? 1.f : 0.f, 2 == heat_cfg_palette ? 1.f : 0.f, 0.f);
+	// black hot is the inverse held a little under white, or the cold sky and the world wash out
+	c.palette.set(0 == heat_cfg_palette ? 1.f : 0.f, 1 == heat_cfg_palette ? .8f : 0.f, 2 == heat_cfg_palette ? 1.f : 0.f, 0.f);
 	c.ring_a.set(1.f / w, 1.f / h, 0.f, 0.f);
 	c.ring_b.set(1.f / w, -1.f / h, 0.f, 0.f);
 
