@@ -9,23 +9,69 @@ buffer of the scene that was just drawn. The scene is not rendered a second time
 from the scene and the mask in a few small passes. Off, nothing is queued, drawn or created, and the
 picture is exactly what it was.
 
+## Wiring a device (goggles, a helmet sight, a 2D scope)
+
+Everything a device needs is four shader bus lanes. Nothing needs the console, and no console value is
+saved (see "Console values are for the session"). A lane keeps the value it was last given, so write
+when something changes; writing every frame is fine too.
+
+```lua
+local thermal = shader_bus.try_register("thermal", "My Mod", "R1 thermal: x on/off, y look, z colour mode, w targets")
+local region  = shader_bus.try_register("thermal_region", "My Mod", "R1 thermal circle: x, y, radius, soft edge")
+local sensor  = shader_bus.try_register("thermal_sensor", "My Mod", "R1 thermal sensor: x size, y grain, z pattern, w contrast")
+
+local function device_on(mode, gen)                  -- mode: 1 white hot, 2 black hot, 3 colour
+    shader_bus.set(region, 0.5, 0.5, 0.35, 0.02)     -- the overlay's opening: centre x, y (0..1 of the screen),
+                                                     -- radius and soft edge in screen heights
+    if gen == "old" then shader_bus.set(sensor, 6, 0.07, 0.02, 0.7)          -- see "Generations"
+    elseif gen == "modern" then shader_bus.set(sensor, 1.5, 0.006, 0.001, 1.25)
+    else shader_bus.set(sensor, 0, 0, 0, 0) end
+    shader_bus.set(thermal, 1, 1, mode, 1)           -- on, the engine's look, colour mode, the screen only
+end
+
+local function device_off()
+    shader_bus.set(thermal, -1, 0, 0, 0)             -- off, whatever the console says
+    shader_bus.set(region, 0, 0, 0, 0)
+    shader_bus.set(sensor, 0, 0, 0, 0)
+end
+```
+
+| lane | set it to | when |
+|---|---|---|
+| `thermal` | `1, 1, mode, 1` | the device is switched on. `mode` again when the player changes the colour mode |
+| `thermal_region` | centre x, centre y, radius, soft edge | with it, and when the overlay's opening moves or changes size. Radius `-1` = the whole screen |
+| `thermal_sensor` | pixel size, grain, pattern, contrast factor | once per device (changing the size re-creates targets, do not animate it) |
+| all three | `device_off()` | the device is taken off or runs out of power, the actor dies, and **on every level start** when the device is not on |
+
+Rules:
+
+- **Lane values outlive a level change and a loaded save.** Decide the state again on the first update
+  of every level (`actor_on_first_update`): call `device_on` or `device_off`, never assume. Call
+  `device_off` in the death callback too.
+- Draw the overlay as normal UI. The thermal picture is drawn before the HUD and all UI, inside the
+  circle only; the frame around it, the overlay and the HUD keep their own colours.
+- The engine hides thermal by itself while the main menu or the pause menu is open.
+- Night, weather, moving shadows: the engine handles them, a device sets nothing for them.
+- Which colour modes and which sensor a device has is the mod's rule: it simply never sets the others.
+- A scope lens that should be thermal too: `w = 3` in the `thermal` lane (guns with `scope_lense_fov`).
+
 ## Switching it on and off
 
 | way | on | off | notes |
 |---|---|---|---|
-| console | `r__heatvision 1` | `r__heatvision 0` | saved in `user.ltx`, so it survives a restart |
+| console | `r__heatvision 1` | `r__heatvision 0` | for testing. Not saved on R1: a game always starts with thermal off |
 | shader bus lane `thermal` | `x > 0` | `x < 0` | `x = 0` (or no such lane) leaves it to the console. Not saved. Takes effect on the next frame |
 
-From a script, prefer the lane:
+From a script, use the lane ("Wiring a device").
 
-```lua
-local token = shader_bus and shader_bus.try_register
-    and shader_bus.try_register("thermal", "My Mod", "R1 thermal: x on/off, y look, z colour mode, w targets")
-local function thermal(on)
-    if token then shader_bus.set(token, on and 1 or -1, 0, 0, 0)
-    else get_console():execute(on and "r__heatvision 1" or "r__heatvision 0") end
-end
-```
+### Console values are for the session
+
+On R1, `r__heatvision` and every `r1_thermal_*` var live for the running session only. They are not
+written to `user.ltx`, and a value that comes from `user.ltx` is ignored, so every game start has thermal
+off and the engine's own numbers, also on a PC whose `user.ltx` still holds lines from an older exe (the
+next save drops them). The console itself and `cfg_load` of any other file (the `thermal_*` test
+shortcuts) work as before. The tuning vars are treated the same on purpose: saved numbers from an older
+round would hide new defaults. DX9 / DX10 / DX11 keep `r__heatvision` as a plain saved var.
 
 The first time it goes on (per game start or `vid_restart`) the engine compiles its shaders and creates
 its targets, which can take a moment. If a shader file is missing the log says
@@ -236,9 +282,60 @@ For testing, without waiting for the weather: `r1_thermal_force_sun` and `r1_the
 **Lightning** (`r1_thermal_lightning`, default `0.6`): while a bolt is lit the thermal sky flashes and
 the bolt itself shows.
 
-**Not built: world surfaces.** Walls, ground and roofs are as in round 2 (a grey from the scene's
-brightness). A wall in the sun is not warmer than one in the shade, and rain does not cool the open
+**Not built: world surfaces.** Walls, ground and roofs are a grey from the scene's brightness (with the
+gain of "Thermal in the dark"). A wall in the sun is not warmer than one in the shade, and rain does not cool the open
 ground. See "Limits" for what that would take.
+
+## Thermal in the dark
+
+A thermal sight sees heat, not light. The world part of the picture is made from the brightness of the
+lit scene, so it gets a gain where there is little light: a night, a dull day and a clear day give a
+world in the same grey band. Bodies, fire and the ladder are not touched. By day under the open sky the
+gain is exactly `1` and the picture is what it was before.
+
+Where the gain comes from: not from the picture, so it does not pump when the view turns.
+
+- `light` = what the weather gives a surface under the open sky: twice the ambient colour, the sky (hemi)
+  colour and half the sun colour, as brightness. These are the terms the level's own shaders light with.
+- The sky's and sun's part is scaled by how open the sky is where the viewer stands (the share of the
+  viewer's sky rays that get out; under `40` percent counts as cover). So a cellar by day is dark and
+  gets gain, a yard does not. The engine keeps that number for lighting the viewer anyway; it follows a
+  change of place in a few seconds.
+- `gain = r1_thermal_night_level / light`, from `1` up to `r1_thermal_night_max`.
+- Dynamic lights (a flashlight, a muzzle flash, a lamp) are not in it, so they cannot move it. While a
+  lightning bolt is lit the light level from before the bolt is held.
+
+In the picture the gain is `x = lum * g`, then `x / sqrt(1 + (1 - 1 / g) * (x / r1_thermal_night_lights)^2)`:
+dark things get the whole gain, and a lit patch (a lamp's pool of light, a flashlight beam) bends over
+towards `r1_thermal_night_lights`, which is about sunlit ground by day. Light is not heat: such a patch stays in
+the world's grey band, far under a body.
+
+A dark frame holds very few levels (a clear vanilla night: values 0 to 8 of 255), so the night picture has
+shapes, edges and the skyline but little fine texture. `r1_thermal_night_grain` adds grain to the world
+in step with the gain, which hides the steps.
+
+| var | range | default | meaning |
+|---|---|---|---|
+| `r1_thermal_night` | `0..1` | `1` | how much of the gain is used. `0` = none: the world is as dark as the scene (round 4) |
+| `r1_thermal_night_level` | `0.05..2` | `0.35` | the light level the thermal world never goes under. `0.35` is a dull day; a clear noon is about `1`. Higher = a brighter night, and dull days are lifted too |
+| `r1_thermal_night_max` | `1..32` | `12` | the highest gain |
+| `r1_thermal_night_rooms` | `0..1` | `1` | how much the cover over the viewer counts. `0` = the weather alone: a dark room by day stays dark |
+| `r1_thermal_night_lights` | `0.1..1` | `0.6` | the brightness a lit patch can reach under full gain |
+| `r1_thermal_night_grain` | `0..4` | `1` | extra grain of the world under gain, in steps of the dark 8-bit frame. `0` = none |
+
+## Moving shadows are not heat
+
+The shadows R1 projects under people, mutants and objects (the blob under a stalker) darken the scene,
+and would show as cold patches. They are not in the thermal picture:
+
+- thermal over the whole screen, and a thermal SVP lens frame: the shadow pass draws nothing;
+- thermal in a circle (`r1_thermal_region`): the pass leaves the shadows out of the circle. They are back
+  in full where the thermal picture starts to fade out, so the frame around the circle keeps every
+  shadow exactly as with thermal off. Inside, they fade in over the last soft-edge width before that;
+- `r1_thermal_look 0` and `2` (a mod shows the picture in its own shape): all shadows are drawn, as before.
+
+Baked shade of the level (lightmaps) stays. `r1_thermal_shadows` (`0..1`, default `0`): how much of the
+moving shadows stays in the thermal picture; `1` = all of them (round 4).
 
 ## Generations: an old, blurry thermal and a modern, sharp one
 
@@ -300,8 +397,7 @@ Built at "sensor size": the view's size divided by `r1_thermal_soft` (default `3
 | `r1_thermal_sky_clouds` | `0..1` | `0.1` | how much of the clouds stays |
 | `r1_thermal_palette` | `0..2` | `0` | colour mode |
 
-The world's grey comes from the scene's brightness, so a dark night gives a dark world with bright
-bodies; raise `r1_thermal_world_base` or `r1_thermal_world` for a lighter one.
+The world's grey comes from the scene's brightness, times the gain of "Thermal in the dark".
 
 ## The raw mask, for a mod's own look
 
@@ -349,7 +445,7 @@ does not run), `z` = `1` while `$user$thermal` holds this frame's picture, `w` =
 
 | var | range | default | meaning |
 |---|---|---|---|
-| `r__heatvision` | `0..1` | `0` | the switch |
+| `r__heatvision` | `0..1` | `0` | the switch. Like every var here it is for the session only on R1 |
 | `r1_thermal_targets` | `1..3` | `3` | `1` screen, `2` SVP lens, `3` both |
 | `r1_thermal_look` | `0..2` | `1` | `0` masks only, `1` the engine's look, `2` built into `$user$thermal` but not shown on screen |
 | `r1_thermal_region` | `x,y,r` | `0.5,0.5,0` | circle for the screen look: centre x, y, radius in screen heights; radius `0` = whole screen |
@@ -368,6 +464,8 @@ does not run), `z` = `1` while `$user$thermal` holds this frame's picture, `w` =
 | `r1_thermal_force_rain`, `r1_thermal_force_sun` | `-1..1` | `-1` | testing: rain density / sun strength instead of the weather's. `-1` = the weather |
 | `r1_thermal_lightning` | `0..2` | `0.6` | the flash of the thermal sky with a lightning bolt. `0` = off |
 | `r1_thermal_particles` | `0..1` | `1` | warm particle effects on / off |
+| `r1_thermal_night`, `_night_level`, `_night_max`, `_night_rooms`, `_night_lights`, `_night_grain` | | `1`, `0.35`, `12`, `1`, `0.6`, `1` | the world's gain in the dark, see "Thermal in the dark" |
+| `r1_thermal_shadows` | `0..1` | `0` | how much of the moving shadows stays in the thermal picture. `1` = round 4 |
 | `r1_thermal_sync` | `0..1` | `1` | the frame's skeleton poses are final before drawing starts, so the heat redraw matches the scene. If no worker has begun them the main thread computes them itself (the work of `mt_calc_bones 0` for that frame); it never waits for a job nobody is running. `0` = as round 2, for comparing if bodies flicker |
 | `r1_thermal_depth` | `0..50` cm | `2` | the heat redraw of world models gets the depth it would have this many centimetres nearer to the camera, the same at any range and with any near plane. A warm thing is never seen through cover thicker than this (plus the bias below). `0` = exactly the scene's depth. Raise it if warm bodies show holes while they move |
 | `r1_thermal_bias` | `0..4096` | `8` | depth bias of the redraw, in steps of a 24-bit depth buffer (the first-person hands and gun only have this one). In metres it grows with the square of the distance: `0.2` mm at 10 m, `2.4` cm at 100 m |
@@ -425,7 +523,27 @@ objects). It is read when the object is queued, so it follows the object from th
 - `IDSGraphManager::set_HeatOnly`, `get_HeatWanted`. `Device.bones_task_running` is gone
   (`Device.bones_task_state`, `Device.bones_task_finish()`).
 
+## Changed for mods since round 4
+
+- Console: on R1 `r__heatvision` and all `r1_thermal_*` vars are session values, not saved and not read from
+  `user.ltx`. A mod that relied on a saved `r__heatvision 1` has to use the `thermal` lane.
+- `thermal_look.ps` has a new constant `thermal_night` (`x` = gain, `y` = (1 - 1 / gain) / the lit patch top squared,
+  `z` = extra grain). A mod's own copy of the round 4 file still works and gets no gain (a dark night).
+- New files `shaders\r1\heat_shadow.vs` and `heat_shadow.ps` (the shadow pass with the circle left out;
+  constants `thermal_shadow_pos`, `thermal_shadow`). They must be installed or thermal stays off.
+- With the engine's look shown (`r1_thermal_look 1`), `$user$rendertarget` has no moving shadows where the
+  thermal picture is. Looks `0` and `2` get the scene with all its shadows, as before.
+- Round 4's picture: `r1_thermal_night 0` and `r1_thermal_shadows 1`.
+
 ## Limits
+
+- The night picture is built from a dark 8-bit frame: shapes, edges and the skyline, little texture. The
+  gain is one number for the whole view, taken where the viewer stands: from inside a dark room a sunlit
+  yard seen through the door is lifted with the room (it is held under the lit-patch top, not blown out),
+  and from a lit place a dark doorway stays dark. A room lit only by lamps counts as dark at night.
+- The cover over the viewer follows a change of place in a few seconds, not at once.
+- Moving shadows stay in the thermal picture with `r1_thermal_look 0` and `2`, and in the last soft-edge
+  width of a region circle. Shadows baked into the level stay everywhere.
 
 - A warm thing is hidden by anything that writes depth in front of it (walls, terrain, the gun,
   grass, leaves). It is not hidden by things that do not write depth: glass, smoke, particles.
@@ -471,6 +589,10 @@ On, per frame (1080p, `r1_thermal_soft 3`):
   of radius `0.35` is about a quarter of the sensor;
 - the same on SVP frames for the lens, at the lens's size.
 
+The gain in the dark: a few numbers per frame on the CPU and seven instructions in the look's shader, no pass
+and no target. Moving shadows: with the whole-screen look the shadow pass is not drawn at all (less work
+than thermal off); with a region it is drawn once, as always, by a short shader instead of fixed function.
+
 On the CPU, per frame: one distance test per dynamic model against the open fires (only while a fire is
 in view), two rays against the level per fire, one or two more per object within a fire's reach, and one
 small update per warm creature. The skeleton poses are made final before drawing starts
@@ -487,6 +609,7 @@ If it is slow, lower in this order: `r1_thermal_soft 4` (or `5`), `r1_thermal_pa
 
 The engine's game data must be installed: in `gamedata\shaders\r1\` the files `heat_mask.vs`,
 `heat_mask_lq.vs`, `heat_mask.ps`, `heat_flat.ps`, `heat_particle.vs`, `heat_particle.ps`, `heat_spot.ps`,
+`heat_shadow.vs`, `heat_shadow.ps`,
 `thermal_noise.ps`, `thermal_down.ps`, `thermal_blur.ps`, `thermal_look.ps`, `thermal_palette.ps`,
 `thermal_show.ps`, `thermal_show_region.ps`, and `gamedata\configs\r1_thermal.ltx`. No other mod ships
 files with these names, so their place in the load order does not matter. `thermal_demo.ps` and
