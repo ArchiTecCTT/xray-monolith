@@ -217,6 +217,7 @@ float ps_r1_thermal_night_max = 12.f; // the highest gain
 float ps_r1_thermal_night_rooms = 1.f; // how much the roof over the viewer counts (a dark room by day); 0 = the weather alone
 float ps_r1_thermal_night_lights = 0.6f; // how bright a lit patch (a lamp's pool, a flashlight beam) can get under full gain
 float ps_r1_thermal_night_grain = 1.f; // extra grain of the world under gain, in steps of the dark 8-bit frame
+float ps_r1_thermal_shadows = 0.f; // how much of the moving (projected) shadows stays in the thermal picture; 1 = all (round 4)
 int ps_r1_lum_adapt = 0; // r1-only: eye-like luminance adaptation for post-process shaders (s_lum_adapt), 0 = off
 float ps_r1_lum_adapt_speed = 4.f; // r1-only: rate (1/s) the adapted value follows a brighter scene
 float ps_r1_lum_adapt_speed_down = 2.f; // r1-only: rate (1/s) the adapted value follows a darker scene
@@ -1565,6 +1566,8 @@ void xrRender_initconsole()
 	CMD4(CCC_r1_Float, "r1_thermal_night_rooms", &ps_r1_thermal_night_rooms, 0.f, 1.f);
 	CMD4(CCC_r1_Float, "r1_thermal_night_lights", &ps_r1_thermal_night_lights, 0.1f, 1.f);
 	CMD4(CCC_r1_Float, "r1_thermal_night_grain", &ps_r1_thermal_night_grain, 0.f, 4.f);
+	// moving shadows are not heat
+	CMD4(CCC_r1_Float, "r1_thermal_shadows", &ps_r1_thermal_shadows, 0.f, 1.f);
 
 	// Luminance adaptation for R1 post-process shaders (s_lum_adapt). Runs only while it is on AND the post-process
 	// pass draws; the bus lane "lum_adapt" (x > 0) turns it on too. See R1-PS3-LUM-ADAPT-NOTES.md.

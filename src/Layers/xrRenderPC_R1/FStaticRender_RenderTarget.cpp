@@ -994,7 +994,7 @@ bool CRenderTarget::heat_create()
 	static const LPCSTR files[] =
 	{
 		"heat_mask.vs", "heat_mask_lq.vs", "heat_mask.ps", "heat_flat.ps", "heat_particle.vs", "heat_particle.ps",
-		"heat_spot.ps",
+		"heat_spot.ps", "heat_shadow.vs", "heat_shadow.ps",
 		"thermal_noise.ps", "thermal_down.ps", "thermal_blur.ps", "thermal_look.ps", "thermal_palette.ps",
 		"thermal_show.ps", "thermal_show_region.ps"
 	};
@@ -1645,6 +1645,37 @@ float CRenderTarget::look_night_gain()
 	const float g = clampr(ps_r1_thermal_night_level / _max(look_gain_light, ps_r1_thermal_night_level / top), 1.f, top);
 	look_gain = 1.f + (g - 1.f) * ps_r1_thermal_night;
 	return look_gain;
+}
+
+// Moving shadows are not heat (r1_thermal_shadows). The shadows R1 projects under people, mutants and objects darken
+// the scene, and the thermal world is made from the scene's brightness, so each one showed as a cold patch. Where the
+// thermal picture covers the view they are not drawn at all; with the picture in a circle (r1_thermal_region) they
+// are drawn by a pass that leaves them out of the circle. The frame around the circle keeps every shadow: they are
+// back in full where the thermal picture starts to fade out, so the normal picture never shows a weakened one.
+u32 CRenderTarget::heat_shadows(ShaderElement*& E, Fvector4& vs_c, Fvector4& ps_c)
+{
+	if (0 == heat_mode || heat_state <= 0 || !(ps_r1_thermal_shadows < 1.f))
+		return 0;
+	if (2 == heat_mode)
+		// the SVP lens picture: thermal all over, if the look can be built
+		return (heat_cfg_look && ps_r1_thermal_shadows <= 0.f && u32(-1) != look[1].w) ? 1 : 0;
+	// the screen; a mod that shows the picture itself (look 2) or makes its own (look 0) may use any shape
+	if (1 != heat_cfg_look || u32(-1) == look[0].w)
+		return 0;
+	if (!(heat_cfg_region.z > 0.f))
+		return ps_r1_thermal_shadows <= 0.f ? 1 : 0;
+
+	E = s_heat[0]->E[SE_R1_HEAT_SHADOW]._get();
+	if (!E || 0 == E->passes.size())
+		return 0;
+	// vertex shader: the place on the screen relative to the circle's centre, in screen heights, times w
+	const float aspect = float(Device.dwWidth) / float(_max(1u, Device.dwHeight));
+	vs_c.set(.5f * aspect, (.5f - heat_cfg_region.x) * aspect, .5f - heat_cfg_region.y, 0.f);
+	// pixel shader: the thermal picture is whole up to the radius minus its soft edge; the shadows fade in over the
+	// same width just inside that. x = where they start, y = 1 / the width, z = how much of them stays inside
+	const float fade = _max(heat_cfg_region.w, .005f);
+	ps_c.set(heat_cfg_region.z - heat_cfg_region.w - fade, 1.f / fade, clampr(ps_r1_thermal_shadows, 0.f, 1.f), 0.f);
+	return 2;
 }
 
 //////////////////////////////////////////////////////////////////////////

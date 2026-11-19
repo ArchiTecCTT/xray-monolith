@@ -38,6 +38,13 @@ void CBlender_r1_heat::Compile(CBlender_Compile& C)
 		C.r_Pass("heat_particle", "heat_spot", false, TRUE, FALSE, TRUE, D3DBLEND_ONE, D3DBLEND_ONE);
 		C.r_End();
 		break;
+	case SE_R1_HEAT_SHADOW:
+		// what effects\shadow_world does (the frame times the shadow texture plus the vertex colour, depth tested, no
+		// fog), with the shadow faded out inside a circle. $user$shadow is the shadow pass's own target
+		C.r_Pass("heat_shadow", "heat_shadow", false, TRUE, FALSE, TRUE, D3DBLEND_DESTCOLOR, D3DBLEND_ZERO);
+		C.r_Sampler("s_base", "$user$shadow", false, D3DTADDRESS_CLAMP, D3DTEXF_LINEAR, D3DTEXF_NONE, D3DTEXF_LINEAR);
+		C.r_End();
+		break;
 	}
 }
 

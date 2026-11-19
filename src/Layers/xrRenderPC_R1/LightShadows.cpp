@@ -381,6 +381,18 @@ IC int PLC_calc(Fvector& P, Fvector& N, light* L, float energy, Fvector& O)
 void CLightShadows::render()
 {
 	xrCriticalSectionGuard guard(&cs);
+	// R1 thermal: moving shadows are not heat. Where the thermal picture covers the whole view they are not drawn;
+	// where it is shown in a circle they are drawn by a pass that leaves them out of the circle. With thermal off
+	// this is one test and nothing else changes.
+	ShaderElement* thermal_pass = nullptr;
+	Fvector4 thermal_vs, thermal_ps;
+	const u32 thermal = RImplementation.Target->heat_shadows(thermal_pass, thermal_vs, thermal_ps);
+	if (1 == thermal)
+	{
+		shadows.clear();
+		return;
+	}
+
 	// Gain access to collision-DB
 	CDB::MODEL* DB = g_pGameLevel->ObjectSpace.GetStaticModel();
 	CDB::TRI* TRIS = DB->get_tris();
@@ -408,7 +420,15 @@ void CLightShadows::render()
 	Fvector View = Device.vCameraPosition;
 
 	// Render shadows
-	RCache.set_Shader(sh_World);
+	if (2 == thermal)
+	{
+		static shared_str n_pos = "thermal_shadow_pos", n_circle = "thermal_shadow";
+		RCache.set_Element(thermal_pass);
+		RCache.set_c(n_pos, thermal_vs);
+		RCache.set_c(n_circle, thermal_ps);
+	}
+	else
+		RCache.set_Shader(sh_World);
 	RCache.set_Geometry(geom_World);
 	int batch = 0;
 	u32 Offset = 0;

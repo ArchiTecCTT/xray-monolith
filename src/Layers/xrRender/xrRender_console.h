@@ -161,6 +161,7 @@ extern ECORE_API float ps_r1_thermal_night_max;
 extern ECORE_API float ps_r1_thermal_night_rooms;
 extern ECORE_API float ps_r1_thermal_night_lights;
 extern ECORE_API float ps_r1_thermal_night_grain;
+extern ECORE_API float ps_r1_thermal_shadows;
 extern ECORE_API int ps_r1_lum_adapt; // r1-only
 extern ECORE_API float ps_r1_lum_adapt_speed; // r1-only
 extern ECORE_API float ps_r1_lum_adapt_speed_down; // r1-only

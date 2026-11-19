@@ -1,0 +1,14 @@
+// R1 thermal (r1_thermal_shadows): a projected shadow, multiplied into the scene like effects\shadow_world does it
+// (shadow texture plus vertex colour, 1 = no shadow), but faded out inside the circle the thermal picture is shown
+// in: a moving shadow is not heat. Outside the circle, and in its soft edge where the normal frame shows through,
+// the result is the stock one.
+uniform sampler2D s_base;
+uniform float4 thermal_shadow; // x = distance from the centre at which the shadows start (screen heights),
+                               // y = 1 / the width they fade in over, z = how much of them stays inside (0 = none)
+
+float4 main(float4 c : COLOR0, float2 tc : TEXCOORD0, float3 scr : TEXCOORD1) : COLOR0
+{
+    float4 shade = saturate(tex2D(s_base, tc) + c);
+    float keep = saturate((length(scr.xy / scr.z) - thermal_shadow.x) * thermal_shadow.y);
+    return lerp(float4(1.0, 1.0, 1.0, 1.0), shade, max(keep, thermal_shadow.z));
+}
