@@ -1431,6 +1431,11 @@ public:
 typedef CCC_r1_session<CCC_Integer> CCC_r1_Integer;
 typedef CCC_r1_session<CCC_Float> CCC_r1_Float;
 typedef CCC_r1_session<CCC_Vector3> CCC_r1_Vector3;
+#else
+// the other renderers register the r1_thermal_* names too and do not read them: plain vars, as before
+typedef CCC_Integer CCC_r1_Integer;
+typedef CCC_Float CCC_r1_Float;
+typedef CCC_Vector3 CCC_r1_Vector3;
 #endif
 //-----------------------------------------------------------------------
 void xrRender_initconsole()
