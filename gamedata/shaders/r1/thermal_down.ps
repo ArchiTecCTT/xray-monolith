@@ -1,13 +1,14 @@
 // R1 thermal look, step 1: the heat mask at sensor size (one sensor pixel = r1_thermal_soft screen pixels).
 // Four taps that cover the sensor pixel, all four channels kept.
 uniform sampler2D s_heat;
-uniform float4 thermal_tap; // xy, zw = the two diagonal tap steps
+uniform float4 thermal_tap_a; // xy = the tap step along one diagonal
+uniform float4 thermal_tap_b; // xy = along the other
 
 float4 main(float2 tc : TEXCOORD0) : COLOR0
 {
-    float4 m = tex2D(s_heat, tc + thermal_tap.xy);
-    m += tex2D(s_heat, tc - thermal_tap.xy);
-    m += tex2D(s_heat, tc + thermal_tap.zw);
-    m += tex2D(s_heat, tc - thermal_tap.zw);
+    float4 m = tex2D(s_heat, tc + thermal_tap_a.xy);
+    m += tex2D(s_heat, tc - thermal_tap_a.xy);
+    m += tex2D(s_heat, tc + thermal_tap_b.xy);
+    m += tex2D(s_heat, tc - thermal_tap_b.xy);
     return m * 0.25;
 }

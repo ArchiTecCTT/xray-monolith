@@ -8,27 +8,32 @@ uniform sampler2D s_scene; // the scene
 uniform sampler2D s_down;  // the heat mask at sensor size: r hotness, b sky, a edge term
 uniform sampler2D s_glow;  // its blur
 uniform sampler2D s_noise;
-uniform float4 thermal_tap;      // scene taps: xy, zw = the two diagonal steps that cover one sensor pixel
-uniform float4 thermal_tap2;     // ring taps: xy, zw = one sensor pixel along the two diagonals
+uniform float4 thermal_tap_a;    // scene taps: xy = the step along one diagonal (four taps cover one sensor pixel)
+uniform float4 thermal_tap_b;    //             xy = along the other
+uniform float4 thermal_ring_a;   // ring taps: xy = one sensor pixel along one diagonal
+uniform float4 thermal_ring_b;   //            xy = along the other
 uniform float4 thermal_body;     // x = edge darkening, y = ring, z = glow
 uniform float4 thermal_world;    // x = base level, y = contrast, z = gamma
 uniform float4 thermal_sky;      // x = sky level, y = how much of the clouds stays
 uniform float4 thermal_grain;    // x = grain, y = column pattern, z = lines, w = half the sensor height in pixels
-uniform float4 thermal_noise_uv; // xy = sensor pixels per noise texel, zw = this frame's shift
+uniform float4 thermal_noise_a;  // xy = noise texels per picture
+uniform float4 thermal_noise_b;  // xy = this frame's shift of the grain
+uniform float4 thermal_col_a;    // x = noise texels per picture width, y = 0
+uniform float4 thermal_col_b;    // x = 0, y = the noise row the column pattern is read from
 
 float4 main(float2 tc : TEXCOORD0) : COLOR0
 {
-    float3 s = tex2D(s_scene, tc + thermal_tap.xy).rgb;
-    s += tex2D(s_scene, tc - thermal_tap.xy).rgb;
-    s += tex2D(s_scene, tc + thermal_tap.zw).rgb;
-    s += tex2D(s_scene, tc - thermal_tap.zw).rgb;
+    float3 s = tex2D(s_scene, tc + thermal_tap_a.xy).rgb;
+    s += tex2D(s_scene, tc - thermal_tap_a.xy).rgb;
+    s += tex2D(s_scene, tc + thermal_tap_b.xy).rgb;
+    s += tex2D(s_scene, tc - thermal_tap_b.xy).rgb;
     float lum = dot(s, float3(0.07475, 0.14675, 0.0285));
 
     float4 m = tex2D(s_down, tc);
-    float around = tex2D(s_down, tc + thermal_tap2.xy).r;
-    around += tex2D(s_down, tc - thermal_tap2.xy).r;
-    around += tex2D(s_down, tc + thermal_tap2.zw).r;
-    around += tex2D(s_down, tc - thermal_tap2.zw).r;
+    float around = tex2D(s_down, tc + thermal_ring_a.xy).r;
+    around += tex2D(s_down, tc - thermal_ring_a.xy).r;
+    around += tex2D(s_down, tc + thermal_ring_b.xy).r;
+    around += tex2D(s_down, tc - thermal_ring_b.xy).r;
     float glow = tex2D(s_glow, tc).r;
 
     float world = thermal_world.x + thermal_world.y * pow(lum, thermal_world.z);
@@ -38,9 +43,8 @@ float4 main(float2 tc : TEXCOORD0) : COLOR0
     v += thermal_body.z * glow * (1.0 - m.r);
     v = lerp(v, 1.0 - thermal_body.x * m.a, m.r);
 
-    float2 nuv = tc * thermal_noise_uv.xy;
-    float4 n = tex2D(s_noise, nuv + thermal_noise_uv.zw);
-    float column = tex2D(s_noise, float2(nuv.x, 0.37109375)).b;
+    float4 n = tex2D(s_noise, tc * thermal_noise_a.xy + thermal_noise_b.xy);
+    float column = tex2D(s_noise, tc * thermal_col_a.xy + thermal_col_b.xy).b;
     v += (n.r + n.g - 1.0) * thermal_grain.x;
     v += (column - 0.5) * thermal_grain.y;
     v += (frac(tc.y * thermal_grain.w) - 0.5) * thermal_grain.z;

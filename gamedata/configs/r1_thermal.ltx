@@ -1,0 +1,50 @@
+; R1 (DX8) thermal: which particle effects are warm in the heat mask. Engine file, see docs/r1_thermal.md in the
+; engine repo. Read when thermal is first switched on (and again after vid_restart).
+;
+; One line per name pattern:
+;     <part of the effect's name> = <hotness 0..1>, <gain>
+; The name is the particle effect's own name (for a group: the names of the effects inside it), lower case.
+; A pattern matches when the name contains it.
+;   - if any matching pattern has hotness 0, the effect is cold;
+;   - otherwise the longest matching pattern counts.
+; hotness: what the effect reaches in the mask (a living body is 1). It is a cap: sprites on top of each other never
+;          go above it.
+; gain:    how fast a sprite's own picture (brightness x opacity) reaches that cap. 1 = as drawn, 3 = a soft sprite
+;          already reads full in its middle. Default 2.
+;
+; A mod adds or changes lines with a DLTX file next to this one, mod_r1_thermal_<your name>.ltx:
+;     ![particles]
+;     my_plasma_bolt = 0.9, 3
+; r1_thermal_particles 0 switches all of this off.
+
+[particles]
+; open fire: campfires, burning barrels, flame anomalies going off, flamethrowers, fire mutants
+fire		= 1.0, 3
+flame		= 1.0, 3
+campfire	= 1.0, 3
+koster		= 1.0, 3
+zharka		= 1.0, 3
+napalm		= 1.0, 3
+expl		= 1.0, 3
+; a creature or the ground burning
+burn		= 0.8, 3
+; sparks and embers
+sparks		= 0.6, 3
+ember		= 0.5, 3
+; the heat anomaly family (anomaly2\effects\heat_*)
+heat_		= 0.7, 3
+; a dormant burner anomaly (zone_mine_thermal): its idle effect is a patch of heat haze. Faint on purpose, far
+; below a body, enough to see where the anomaly sits
+buble_distort	= 0.25, 3
+fire_distort	= 0.25, 3
+; the haze above a campfire
+campfire_distort = 0.3, 2
+
+; never warm, whatever else the name says
+smoke		= 0
+dust		= 0
+studen		= 0
+electra		= 0
+water		= 0
+acid		= 0
+firefl		= 0
