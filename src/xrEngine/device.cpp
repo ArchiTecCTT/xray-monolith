@@ -482,8 +482,8 @@ void CRenderDevice::on_idle()
     secondary_tasks.run(&XRay::Engine::PreRenderPostTransformsThread);
 	if (mt_calc_bones)
 	{
-		bones_task_running.store(true);
-		secondary_tasks.run(&XRay::Engine::CalculateBonesThread);
+		bones_task_state.store(1);
+		secondary_tasks.run(&XRay::Engine::CalculateBonesTask);
 	}
 	else
 		XRay::Engine::CalculateBonesThread();

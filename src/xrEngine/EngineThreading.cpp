@@ -54,12 +54,6 @@ void XRay::Engine::CalculateBonesThread()
 
 	PROF_EVENT("CalculateBones");
 
-	// whichever way this function is left, the frame's poses are final from then on (see Device.bones_task_running)
-	struct bones_done_mark
-	{
-		~bones_done_mark() { Device.bones_task_running.store(false); }
-	} done_mark;
-
 	if (!g_SpatialSpace) return;
 	if (Device.Paused()) return;
 	if (!psDeviceFlags.test(rsDrawDynamic)) return;
@@ -123,6 +117,38 @@ void XRay::Engine::CalculateBonesThread()
 
     for (const auto& snapshot : spatialsSnapshot)
         snapshot.pKin->CalculateBones(TRUE);
+}
+
+// The poses as a task of Device.secondary_tasks. A queued task only starts when a worker is free, or when the main
+// thread reaches secondary_tasks.wait() at the end of the frame. Whoever begins the job first takes it; the other finds
+// it taken and does nothing (see Device.bones_task_state).
+void XRay::Engine::CalculateBonesTask()
+{
+	int handed_out = 1;
+	if (!Device.bones_task_state.compare_exchange_strong(handed_out, 2))
+		return;
+	CalculateBonesThread();
+	Device.bones_task_state.store(0);
+}
+
+void CRenderDevice::bones_task_finish()
+{
+	int handed_out = 1;
+	if (bones_task_state.compare_exchange_strong(handed_out, 2))
+	{
+		// no worker has begun: do it here instead of waiting for one
+		XRay::Engine::CalculateBonesThread();
+		bones_task_state.store(0);
+		return;
+	}
+	// a worker is computing them. The limit is only a guard against a worker that is stuck
+	if (2 == handed_out)
+	{
+		CTimerBase wait;
+		wait.Start();
+		while (2 == bones_task_state.load() && wait.GetElapsed_ms() < 50)
+			Sleep(0);
+	}
 }
 
 extern BOOL psLua_ParallelGC;

@@ -490,9 +490,14 @@ public:
 
 	// Multi-threading
 	xr_task_group secondary_tasks;
-	// true from the moment this frame's skeleton poses are handed to a worker (mt_calc_bones) until it is done with
-	// them. The R1 thermal pass draws warm models twice in a frame and needs both draws to see the same pose.
-	std::atomic<bool> bones_task_running{false};
+	// This frame's skeleton poses (XRay::Engine::CalculateBonesThread). With mt_calc_bones they are handed to the
+	// task group, where they wait until a worker is free; whoever begins them takes them with a compare-exchange.
+	// 0 = final (computed, or not handed out), 1 = handed out and nobody has begun, 2 = being computed.
+	std::atomic<int> bones_task_state{0};
+	// Makes this frame's poses final before returning: computes them on the calling (main) thread if no worker has
+	// begun, else waits for the worker that has (it is working, so that wait is as long as the rest of its job).
+	// The R1 thermal pass draws warm models twice in a frame and needs both draws to see the same pose.
+	void bones_task_finish();
 
 	ICF void remove_from_seq_parallel(const xr_delegate<void()>& delegate)
 	{
