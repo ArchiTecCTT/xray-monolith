@@ -1,0 +1,8 @@
+// R1 thermal test look for the SVP lens (r1_thermal_demo 1): a warm visual blended white over the lens picture,
+// alpha = hotness. The engine sets r1_heat_item as for heat_mask.ps.
+uniform float4 r1_heat_item;
+
+float4 main(float2 tc : TEXCOORD0) : COLOR0
+{
+    return float4(1.0, 1.0, 1.0, r1_heat_item.x);
+}
