@@ -166,6 +166,10 @@ float ps_r1_pps_v = 0.f;
 int ps_r1_GlowsPerFrame = 16; // r1-only
 float ps_r1_fog_luminance = 1.1f; // r1-only
 int ps_r1_SoftwareSkinning = 0; // r1-only
+// r1-only thermal (heat mask), see docs/r1_thermal.md. The switch itself is r__heatvision (or the bus lane "thermal")
+int ps_r1_thermal_targets = 3; // which views get a heat mask: 1 = the screen ($user$heat), 2 = the SVP lens ($user$heat_vp2), 3 = both
+int ps_r1_thermal_demo = 0; // plain test look drawn by the engine: grey world, warm bodies white
+float ps_r1_thermal_bias = 8.f; // depth bias of the heat redraw, in steps of a 24-bit depth buffer
 int ps_r1_lum_adapt = 0; // r1-only: eye-like luminance adaptation for post-process shaders (s_lum_adapt), 0 = off
 float ps_r1_lum_adapt_speed = 4.f; // r1-only: rate (1/s) the adapted value follows a brighter scene
 float ps_r1_lum_adapt_speed_down = 2.f; // r1-only: rate (1/s) the adapted value follows a darker scene
@@ -1438,6 +1442,12 @@ void xrRender_initconsole()
 	// 1 - enabled
 	// 2 - forced hardware skinning (renderer can not override)
 	CMD4(CCC_Integer, "r1_software_skinning", &ps_r1_SoftwareSkinning, 0, 2);
+
+	// R1 thermal: r__heatvision 1 (or the bus lane "thermal", x > 0) makes the R1 renderer redraw warm bodies into a heat
+	// mask that post-process and lens shaders can sample. Off, nothing is created or drawn. See docs/r1_thermal.md.
+	CMD4(CCC_Integer, "r1_thermal_targets", &ps_r1_thermal_targets, 1, 3);
+	CMD4(CCC_Integer, "r1_thermal_demo", &ps_r1_thermal_demo, 0, 1);
+	CMD4(CCC_Float, "r1_thermal_bias", &ps_r1_thermal_bias, 0.f, 4096.f);
 
 	// Luminance adaptation for R1 post-process shaders (s_lum_adapt). Runs only while it is on AND the post-process
 	// pass draws; the bus lane "lum_adapt" (x > 0) turns it on too. See R1-PS3-LUM-ADAPT-NOTES.md.
