@@ -1,0 +1,17 @@
+// R1 thermal look: fills the small noise texture once. r, g = two random values per texel (the sensor grain),
+// b = one random value per column (the fixed column pattern).
+float thermal_hash(float2 p)
+{
+    float3 p3 = frac(p.xyx * 0.1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return frac((p3.x + p3.y) * p3.z);
+}
+
+float4 main(float2 tc : TEXCOORD0) : COLOR0
+{
+    float2 p = tc * 128.0;
+    float r = thermal_hash(p);
+    float g = thermal_hash(p + 71.7);
+    float b = thermal_hash(float2(p.x + 19.3, 3.5));
+    return float4(r, g, b, 1.0);
+}

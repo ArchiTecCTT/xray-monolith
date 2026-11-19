@@ -1,0 +1,17 @@
+// R1 thermal look, step 4: grey value -> colour. thermal_palette holds the weight of each colour mode:
+// x = white hot, y = black hot, z = colour (dark blue, purple, orange, white). The result is $user$thermal.
+uniform sampler2D s_image;
+uniform float4 thermal_palette;
+
+float4 main(float2 tc : TEXCOORD0) : COLOR0
+{
+    float t = saturate(tex2D(s_image, tc).r);
+    float3 iron = float3(0.0, 0.0, 0.04);
+    iron += float3(0.13, 0.02, 0.32) * saturate(t * 5.5556);
+    iron += float3(0.42, 0.03, 0.14) * saturate(t * 5.0 - 0.9);
+    iron += float3(0.33, 0.20, -0.38) * saturate(t * 5.0 - 1.9);
+    iron += float3(0.12, 0.41, -0.07) * saturate(t * 5.0 - 2.9);
+    iron += float3(0.0, 0.34, 0.87) * saturate(t * 4.5455 - 3.5455);
+    float3 c = thermal_palette.x * t + thermal_palette.y * (1.0 - t) + thermal_palette.z * iron;
+    return float4(c, 1.0);
+}

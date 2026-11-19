@@ -1,9 +1,10 @@
 // R1 thermal (r__heatvision): what a warm visual writes into the heat mask ($user$heat, $user$heat_vp2).
 // The engine sets r1_heat_item for every visual it draws: x = hotness 0..1 (a living body 1, a corpse cooling to 0),
-// y = 1 for the player's hands (HUD), z = w = 0. See docs/r1_thermal.md in the engine repo.
+// y = 1 for the player's hands (HUD), z = w = 0. Alpha gets the edge term: 0 where the surface faces the camera,
+// 1 where it is seen edge-on. See docs/r1_thermal.md in the engine repo.
 uniform float4 r1_heat_item;
 
-float4 main(float2 tc : TEXCOORD0) : COLOR0
+float4 main(float2 tc : TEXCOORD0, float facing : TEXCOORD1) : COLOR0
 {
-    return r1_heat_item;
+    return float4(r1_heat_item.x, r1_heat_item.y, 0.0, saturate(1.0 - facing));
 }

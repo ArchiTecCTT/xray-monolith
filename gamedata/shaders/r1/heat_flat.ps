@@ -1,0 +1,8 @@
+// R1 thermal (r__heatvision): writes the constant r1_heat_item. The engine uses it for the sky flag of the heat mask
+// (a screen quad at the far end of the depth range, blue channel only).
+uniform float4 r1_heat_item;
+
+float4 main(float2 tc : TEXCOORD0) : COLOR0
+{
+    return r1_heat_item;
+}

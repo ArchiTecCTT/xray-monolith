@@ -1,0 +1,14 @@
+// R1 thermal (r__heatvision): a warm particle effect (fire, embers, heat haze) in the heat mask. The sprite's own
+// picture decides the shape: brightness times opacity, times the gain, capped at the hotness of the effect.
+// The engine sets r1_heat_item: x = hotness of the effect, y = gain. Blended with MAX into the red channel, so many
+// sprites on top of each other never go above the hotness of the effect.
+uniform sampler2D s_base;
+uniform float4 r1_heat_item;
+
+float4 main(float2 tc : TEXCOORD0, float4 c : COLOR0) : COLOR0
+{
+    float4 t = tex2D(s_base, tc) * c;
+    float glow = max(t.r, max(t.g, t.b)) * t.a;
+    float heat = saturate(glow * r1_heat_item.y) * r1_heat_item.x;
+    return float4(heat, 0.0, 0.0, 0.0);
+}

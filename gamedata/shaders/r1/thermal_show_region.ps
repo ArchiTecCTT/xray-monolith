@@ -1,0 +1,10 @@
+// R1 thermal look, step 5 with a region (r1_thermal_region): the thermal picture blended over the finished frame
+// inside a circle. rel = the pixel's place relative to the circle's centre, in screen heights.
+uniform sampler2D s_image;
+uniform float4 thermal_region; // x = radius in screen heights, y = 1 / width of the soft edge
+
+float4 main(float2 tc : TEXCOORD0, float2 rel : TEXCOORD1) : COLOR0
+{
+    float inside = saturate((thermal_region.x - length(rel)) * thermal_region.y);
+    return float4(tex2D(s_image, tc).rgb, inside);
+}

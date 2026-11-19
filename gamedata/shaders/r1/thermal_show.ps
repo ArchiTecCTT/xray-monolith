@@ -1,0 +1,8 @@
+// R1 thermal look, step 5: the finished thermal picture stretched over the whole screen (or over the SVP lens
+// picture), in place of the post-process pass.
+uniform sampler2D s_image;
+
+float4 main(float2 tc : TEXCOORD0) : COLOR0
+{
+    return float4(tex2D(s_image, tc).rgb, 1.0);
+}
