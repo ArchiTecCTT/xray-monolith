@@ -382,6 +382,12 @@ objects). It is read when the object is queued, so it follows the object from th
   `0.8 -> 0.9`, `r1_thermal_lamp` `0.65 -> 0.45`, `r1_thermal_barrel` `0.8 -> 0.9`. Console vars are
   saved in `user.ltx`, so a PC that ran round 2 keeps the old three until they are set again.
 - `IDSGraphManager::set_ItemHeat` has a second form with a heat point.
+- A mod that ships its own `heat_mask.vs`, `heat_mask_lq.vs` or `heat_mask.ps` has to take the new
+  ones: the heat of a pixel now comes from the vertex shader (`TEXCOORD1.y`; new constants
+  `r1_heat_vs` = heat at the heat point, heat far from it, depth pull in metres, and `r1_heat_point` =
+  the point and 1 / its reach), and `heat_mask.ps` no longer reads `r1_heat_item.x`.
+- `thermal_down.ps` writes "very hot" into green, `thermal_look.ps` adds it as bloom (new constant
+  `thermal_hot`). A mod's own look that reads `$user$heat` directly is not affected.
 - No thermal while a menu is open. With a region, `$user$thermal` only holds the box around the
   circle (with `r1_thermal_look 2` it holds the whole picture, as before).
 - Round 2's picture: `r1_thermal_ladder 0`, `r1_thermal_fire_spread 0`, `r1_thermal_wet 0`,
@@ -416,7 +422,7 @@ Off: one flag test and one bus lookup per frame.
 On, per frame (1080p, `r1_thermal_soft 3`):
 
 - the mask: one clear of a screen-size target, one screen quad for the sky flag (only sky pixels pass
-  the depth test), one extra draw call per visible warm mesh part with a 4-instruction pixel shader,
+  the depth test), one extra draw call per visible warm mesh part with a 5-instruction pixel shader,
   one extra draw per visible warm particle effect, and one draw call for all soft spots together (one
   quad per open fire and per visible lamp glow);
 - the look: five passes on small targets (640x360 twice, 320x180 twice, 640x360 again), together
