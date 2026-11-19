@@ -5,6 +5,7 @@
 #include "../../xrEngine/svp_lens_zoom.h"
 #include "../xrRender/dxRenderDeviceRender.h"
 #include "Blender_lum_adapt.h"
+#include "Blender_heat.h"
 
 
 static LPCSTR RTname = "$user$rendertarget";
@@ -76,6 +77,12 @@ CRenderTarget::CRenderTarget()
 		lum_rb[i] = nullptr;
 		lum_rb_frame[i] = 0;
 	}
+	heat_state = 0;
+	heat_mode = 0;
+	heat_screen_live = false;
+	heat_svp_live = false;
+	heat_svp_valid = false;
+	b_heat = nullptr;
 	const s32 saved_skinning = Engine.External.GetSkinningMode();
 	for (s32 skinning = -1; skinning <= 4; ++skinning)
 	{
@@ -234,6 +241,7 @@ CRenderTarget::~CRenderTarget()
 	_RELEASE(ZB);
 	_RELEASE(zb_svp);
 	rt_svp_work.destroy();
+	heat_destroy();
 	lum_destroy();
 	g_postprocess_vs.destroy();
 	s_postprocess_D[1].destroy();
@@ -347,9 +355,10 @@ BOOL CRenderTarget::NeedPostProcess()
 
 BOOL CRenderTarget::Perform()
 {
+	// 1 == heat_mode: this frame builds the screen heat mask, which only the post-process quad can show
 	return Available() &&
 	(((BOOL)RImplementation.m_bMakeAsyncSS) || NeedPostProcess() || (ps_r__Supersample > 1) || (frame_distort == (
-		Device.dwFrame - 1)));
+		Device.dwFrame - 1)) || (1 == heat_mode));
 }
 
 #include <dinput.h>
@@ -528,6 +537,9 @@ void CRenderTarget::svp_publish(int shift_x, int shift_y, int grow)
 		dst.right++;
 	}
 	svp_copy(rt_svp_work->pRT, &src, rt_secondVP->pRT, &dst, same_size);
+	// R1 thermal: the lens heat mask moves with the lens picture
+	if (heat_svp_valid)
+		svp_copy(rt_heat_svp_work->pRT, &src, rt_heat_svp->pRT, &dst, same_size);
 }
 
 void CRenderTarget::svp_reproject()
@@ -624,6 +636,22 @@ void CRenderTarget::End()
 		// keep the "previous frame had distortion" state alive across the skipped phase (see Perform())
 		if (frame_distort == (Device.dwFrame - 1)) frame_distort = Device.dwFrame;
 
+		// R1 thermal: the lens heat mask of this SVP image (same depth buffer, before it is unbound)
+		if (2 == heat_mode)
+			phase_heat_svp();
+		else
+		{
+			heat_svp_valid = FALSE;
+			if (heat_svp_live)
+			{
+				// thermal went off: blank $user$heat_vp2 once so lens shaders read "no heat"
+				HW.pDevice->ColorFill(rt_heat_svp->pRT, nullptr, D3DCOLOR_XRGB(0, 0, 0));
+				heat_svp_live = false;
+			}
+		}
+		RImplementation.GMBase.RGraph.mapHeat.clear();
+		heat_mode = 0;
+
 		// back to the backbuffer
 		RCache.set_RT(HW.pBaseRT);
 		RCache.set_ZB(HW.pBaseZB);
@@ -657,6 +685,8 @@ void CRenderTarget::End()
 		// publish the finished image as $user$viewport2 (small GPU copy; scaled if viewport2 was shaped for the lens)
 		svp_lens_valid = FALSE;
 		svp_copy(rt_svp_work->pRT, nullptr, rt_secondVP->pRT, nullptr, svp_vp2_w == svp_w && svp_vp2_h == svp_h);
+		if (heat_svp_valid)
+			svp_copy(rt_heat_svp_work->pRT, nullptr, rt_heat_svp->pRT, nullptr, svp_vp2_w == svp_w && svp_vp2_h == svp_h);
 		return;
 	}
 
@@ -672,6 +702,15 @@ void CRenderTarget::End()
 	{
 		phase_distortion();
 	}
+
+	// R1 thermal: the screen heat mask, drawn against the depth of the scene that was just rendered
+	const bool heat_drawn = (1 == heat_mode) && bPerform;
+	if (heat_drawn)
+		phase_heat();
+	else
+		heat_idle();
+	RImplementation.GMBase.RGraph.mapHeat.clear();
+	heat_mode = 0;
 
 	// combination/postprocess
 	RCache.set_RT(HW.pBaseRT);
@@ -712,7 +751,10 @@ void CRenderTarget::End()
 	// A pass that names a vertex shader (ps_3_0 + vs_3_0) gets the same quad in clip space, 4 vertices after the
 	// XYZRHW ones; with only vertex shader "null" passes (vanilla) the buffer holds the 4 XYZRHW vertices as before.
 	ShaderElement* E_cmap = bCMap ? (bDistort ? s_postprocess_D[1]->E[4]._get() : s_postprocess[1]->E[4]._get()) : nullptr;
-	ShaderElement* E_main = (bDistort ? s_postprocess_D[bCMap] : s_postprocess[bCMap])->E[0]._get();
+	// r1_thermal_demo: the engine's plain test look replaces the post-process shader while a heat mask is drawn
+	ShaderElement* E_demo = (heat_drawn && ps_r1_thermal_demo) ? s_heat[0]->E[SE_R1_HEAT_DEMO]._get() : nullptr;
+	if (E_demo && 0 == E_demo->passes.size()) E_demo = nullptr;
+	ShaderElement* E_main = E_demo ? E_demo : (bDistort ? s_postprocess_D[bCMap] : s_postprocess[bCMap])->E[0]._get();
 	const bool vs_cmap = element_has_vs(E_cmap);
 	const bool vs_main = element_has_vs(E_main);
 	const u32 n_verts = (vs_cmap || vs_main) ? 8 : 4;
@@ -756,7 +798,10 @@ void CRenderTarget::End()
 	//int iShaderElement	= bCMap ? 4 : 0;
 	//RCache.set_Element	(bDistort ? s_postprocess_D->E[iShaderElement] : s_postprocess->E[iShaderElement]);
 
-	RCache.set_Shader(bDistort ? s_postprocess_D[bCMap] : s_postprocess[bCMap]);
+	if (E_demo)
+		RCache.set_Element(E_demo);
+	else
+		RCache.set_Shader(bDistort ? s_postprocess_D[bCMap] : s_postprocess[bCMap]);
 
 	//RCache.set_Shader	(bDistort ? s_postprocess_D : s_postprocess);
 
@@ -766,6 +811,9 @@ void CRenderTarget::End()
 	RCache.set_c(s_brightness, p_brightness.x, p_brightness.y, p_brightness.z, 0);
 	RCache.set_c(s_colormap, param_color_map_influence, param_color_map_interpolate, 0, 0);
 	RCache.set_c(s_lum_info, lum_info.x, lum_info.y, lum_info.z, lum_info.w);
+	// x = 1 while $user$heat holds this frame's heat mask, y = 1 while r1_thermal_demo is on
+	static shared_str s_thermal_info = "r1_thermal_info";
+	RCache.set_c(s_thermal_info, heat_drawn ? 1.f : 0.f, ps_r1_thermal_demo ? 1.f : 0.f, 0.f, 0.f);
 	RCache.set_Geometry(vs_main ? g_postprocess_vs : g_postprocess);
 	RCache.Render(D3DPT_TRIANGLELIST, vs_main ? Offset + 4 : Offset, 0, 4, 0, 2);
 }
@@ -791,6 +839,190 @@ void CRenderTarget::phase_distortion()
 	}
 
 	if (g_pGamePersistent) g_pGamePersistent->OnRenderPPUI_PP(); // PP-UI
+}
+
+//////////////////////////////////////////////////////////////////////////
+// R1 thermal (r__heatvision). See docs/r1_thermal.md.
+// The scene is not drawn a second time. While thermal is on, the scene graph also queues the warm visuals (living
+// creatures, cooling corpses, the player's hands: r1_heat_insert); here they are drawn once more, flat, into a mask
+// target, against the depth buffer the scene just filled. Post-process shaders sample the mask as $user$heat, lens
+// shaders sample the SVP one as $user$heat_vp2. Off, nothing below runs past heat_wanted() and nothing is created.
+
+bool CRenderTarget::heat_wanted()
+{
+	bool on = ps_r2_heatvision != 0;
+	// bus lane "thermal": x > 0 on, x < 0 off, x == 0 (or no such lane) leaves it to r__heatvision
+	Fvector4 lane;
+	if (ShaderBus::get("thermal", lane))
+	{
+		if (lane.x > 0.f) on = true;
+		else if (lane.x < 0.f) on = false;
+	}
+	return on;
+}
+
+bool CRenderTarget::heat_begin_frame()
+{
+	heat_mode = 0;
+	if (heat_state < 0 || !Available() || !heat_wanted())
+		return false;
+	if (0 == heat_state)
+	{
+		heat_state = heat_create() ? 1 : -1;
+		if (heat_state < 0)
+			return false;
+	}
+
+	if (Device.m_SecondViewport.IsSVPFrame())
+	{
+		// the scope picture: only the small SVP target has a lens mask (r1_svp_size > 0)
+		if ((ps_r1_thermal_targets & 2) && SVPSmallFrame() && heat_create_svp())
+			heat_mode = 2;
+	}
+	else if (ps_r1_thermal_targets & 1)
+		heat_mode = 1;
+	return 0 != heat_mode;
+}
+
+bool CRenderTarget::heat_create()
+{
+	// Vanilla has none of these; the engine's game data ships them in gamedata\shaders\r1\. Without them thermal stays
+	// off instead of stopping the game on a missing shader file.
+	static const LPCSTR files[] = {"heat_mask.ps", "heat_mask_lq.vs", "thermal_demo.ps", "thermal_demo_paint.ps", "ui_icons.vs"};
+	for (u32 i = 0; i < sizeof(files) / sizeof(files[0]); ++i)
+	{
+		string_path fn;
+		strconcat(sizeof(fn), fn, ::Render->getShaderPath(), files[i]);
+		if (!FS.exist("$game_shaders$", fn))
+		{
+			Msg("! r__heatvision: shaders\\%s is missing, thermal stays off until vid_restart", fn);
+			return false;
+		}
+	}
+
+	// the size and format of the scene target, so it pairs with the scene's depth buffer
+	RT_heat.create(R1_RT_HEAT, rtWidth, rtHeight, HW.Caps.fTarget);
+	if (!RT_heat->valid())
+	{
+		Msg("! r__heatvision: can't create the %ux%u heat mask target, thermal stays off until vid_restart", rtWidth, rtHeight);
+		RT_heat.destroy();
+		return false;
+	}
+	// default-pool targets start undefined
+	HW.pDevice->ColorFill(RT_heat->pRT, nullptr, D3DCOLOR_XRGB(0, 0, 0));
+
+	b_heat = xr_new<CBlender_r1_heat>();
+	const s32 saved_skinning = Engine.External.GetSkinningMode();
+	for (s32 skinning = -1; skinning <= 4; ++skinning)
+	{
+		Engine.External.SetSkinningMode(skinning);
+		s_heat[skinning + 1].create(b_heat, "r1\\heat_mask");
+	}
+	Engine.External.SetSkinningMode(saved_skinning);
+
+	Msg("* r__heatvision: ready (heat mask %ux%u)", rtWidth, rtHeight);
+	return true;
+}
+
+bool CRenderTarget::heat_create_svp()
+{
+	if (rt_heat_svp._get())
+		return rt_heat_svp->valid() && rt_heat_svp_work._get() && rt_heat_svp_work->valid();
+
+	// the same sizes as the SVP picture: every copy of the lens picture has a matching copy of the lens mask
+	rt_heat_svp_work.create(R1_RT_HEAT_VP2_WORK, svp_w, svp_h, HW.Caps.fTarget);
+	rt_heat_svp.create(R1_RT_HEAT_VP2, svp_vp2_w, svp_vp2_h, HW.Caps.fTarget);
+	if (!rt_heat_svp_work->valid() || !rt_heat_svp->valid())
+	{
+		// rt_heat_svp stays set (and not valid), so this is tried and reported only once
+		Msg("! r__heatvision: can't create the SVP lens heat mask targets, the lens gets no heat mask until vid_restart");
+		return false;
+	}
+	HW.pDevice->ColorFill(rt_heat_svp_work->pRT, nullptr, D3DCOLOR_XRGB(0, 0, 0));
+	HW.pDevice->ColorFill(rt_heat_svp->pRT, nullptr, D3DCOLOR_XRGB(0, 0, 0));
+	Msg("* r__heatvision: SVP lens heat mask %ux%u (work %ux%u)", svp_vp2_w, svp_vp2_h, svp_w, svp_h);
+	return true;
+}
+
+void CRenderTarget::heat_destroy()
+{
+	for (u32 i = 0; i < 6; ++i)
+		s_heat[i].destroy();
+	xr_delete(b_heat);
+	rt_heat_svp.destroy();
+	rt_heat_svp_work.destroy();
+	RT_heat.destroy();
+	heat_screen_live = false;
+	heat_svp_live = false;
+	heat_svp_valid = false;
+	heat_mode = 0;
+}
+
+ShaderElement* CRenderTarget::heat_element(int skinning, bool lq, u32 element)
+{
+	if (heat_state <= 0 || skinning < -1 || skinning > 4)
+		return nullptr;
+	// only two-bone meshes have a different one-bone variant (skin_main.h)
+	if (lq && 2 == skinning)
+		element += 1;
+	ShaderElement* E = s_heat[skinning + 1]->E[element]._get();
+	return (E && E->passes.size()) ? E : nullptr;
+}
+
+void CRenderTarget::heat_idle()
+{
+	// The full-size scope frame of an SVP without the small target is not a "thermal off" frame.
+	if (!heat_screen_live || Device.m_SecondViewport.IsSVPFrame())
+		return;
+	// thermal went off (or r1_thermal_targets dropped the screen): blank $user$heat once, so shaders read "no heat"
+	HW.pDevice->ColorFill(RT_heat->pRT, nullptr, D3DCOLOR_XRGB(0, 0, 0));
+	heat_screen_live = false;
+}
+
+// a depth bias towards the camera, in steps of a 24-bit depth buffer: absorbs rounding between the scene's vertex
+// shaders and the flat one used here
+static void heat_depth_bias(bool on)
+{
+	const float bias = on ? -ps_r1_thermal_bias / 16777216.f : 0.f;
+	CHK_DX(HW.pDevice->SetRenderState(D3DRS_DEPTHBIAS, *(const DWORD*)&bias));
+}
+
+void CRenderTarget::phase_heat()
+{
+	RCache.set_RT(RT_heat->pRT);
+	RCache.set_ZB(ZB);
+	RCache.set_Z(TRUE);
+	RCache.set_CullMode(CULL_CCW);
+	RCache.set_ColorWriteEnable();
+	CHK_DX(HW.pDevice->Clear(0L, NULL, D3DCLEAR_TARGET, 0, 1.0f, 0L));
+
+	heat_depth_bias(true);
+	RImplementation.GMBase.r_dsgraph_render_heat(SE_R1_HEAT_MASK, true);
+	heat_depth_bias(false);
+	heat_screen_live = true;
+}
+
+void CRenderTarget::phase_heat_svp()
+{
+	RCache.set_RT(rt_heat_svp_work->pRT);
+	RCache.set_ZB(zb_svp);
+	RCache.set_Z(TRUE);
+	RCache.set_CullMode(CULL_CCW);
+	RCache.set_ColorWriteEnable();
+	CHK_DX(HW.pDevice->Clear(0L, NULL, D3DCLEAR_TARGET, 0, 1.0f, 0L));
+
+	heat_depth_bias(true);
+	RImplementation.GMBase.r_dsgraph_render_heat(SE_R1_HEAT_MASK, !ps_r1_thermal_demo);
+	if (ps_r1_thermal_demo)
+	{
+		// the test look for the lens, with no lens shader that knows about heat: warm bodies painted white straight
+		// into the lens picture
+		RCache.set_RT(rt_svp_work->pRT);
+		RImplementation.GMBase.r_dsgraph_render_heat(SE_R1_HEAT_PAINT, true);
+	}
+	heat_depth_bias(false);
+	heat_svp_valid = true;
+	heat_svp_live = true;
 }
 
 //////////////////////////////////////////////////////////////////////////

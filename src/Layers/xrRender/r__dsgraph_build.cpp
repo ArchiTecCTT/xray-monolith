@@ -8,6 +8,9 @@
 #include "flod.h"
 #include "particlegroup.h"
 #include "FTreeVisual.h"
+#if RENDER == R_R1
+#include "../../xrEngine/shader_bus.h" // obj_hotness, for the R1 heat mask
+#endif
 
 using namespace R_dsgraph;
 
@@ -58,6 +61,41 @@ ICF bool R4FullDetailRejectStatic(dxRender_Visual* pVisual, bool normalPhase)
 	return false;
 #endif
 }
+
+#if RENDER == R_R1
+// R1 thermal (r__heatvision): queue a warm visual for the heat mask pass (CRenderTarget::phase_heat).
+// Warm = the object has hotness (living entities 1, a corpse cooling down to 0, or its own obj_hotness bus value)
+// and the visual's texture is marked hot (bodies and HUD hands; gear, weapons and the world are not). The same two
+// tests DX10/DX11 make in apply_object / apply_lmaterial. Only called while a heat mask is wanted for this frame.
+void CDSGraphManager::r1_heat_insert(dxRender_Visual* pVisual, Fmatrix* xform, float ssa, ShaderElement* sh)
+{
+	// no owner (level geometry, particles), shadow-only draws (the first-person body), camera attachments and
+	// custom-FOV attachments are never warm
+	if (!val_pObject || i_mask[fl_invisible] || i_mask[fl_cam] || val_fCustomFOV != 0.f)
+		return;
+
+	float hotness = val_pObject->GetHotness();
+	const bool own = ShaderBus::object_hotness(val_pObject->renderable.bus_values, hotness);
+	if (!(hotness > 0.001f))
+		return;
+	if (!own)
+	{
+		CTexture* T = pVisual->GetTexture();
+		if (!T || !T->m_is_hot)
+			return;
+	}
+
+	HeatItem item;
+	item.pVisual = pVisual;
+	item.pMatrix = xform;
+	item.ssa = ssa;
+	item.hotness = hotness < 1.f ? hotness : 1.f;
+	item.hud = i_mask[fl_hud];
+	ShaderElement* lq = pVisual->shader->E[SE_R1_NORMAL_LQ]._get();
+	item.lq = (sh == lq) && (lq != pVisual->shader->E[SE_R1_NORMAL_HQ]._get());
+	RGraph.mapHeat.push_back(item);
+}
+#endif
 
 void CDSGraphManager::r_dsgraph_insert_dynamic(dxRender_Visual *pVisual, Fmatrix* xform)
 {
@@ -151,6 +189,12 @@ void CDSGraphManager::r_dsgraph_insert_dynamic(dxRender_Visual *pVisual, Fmatrix
 	u32 shader_priority = sh->flags.iPriority/2;
 	if (!i_mask[shader_priority])
 		return;
+
+#if RENDER == R_R1
+	// R1 thermal: only the main view's graph, only on frames that build a heat mask (false while r__heatvision is off)
+	if (RImplementation.r1_heat_collect && this == &RImplementation.GMBase)
+		r1_heat_insert(pVisual, xform, SSA, sh);
+#endif
 
 	// Create common node
 	// NOTE: Invisible elements exist only in R1

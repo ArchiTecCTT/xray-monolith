@@ -227,6 +227,20 @@ namespace R_dsgraph
         }
 	};
 
+#if RENDER == R_R1
+	// R1 thermal (r__heatvision): one warm visual the heat pass draws again, flat, into the heat mask.
+	// Queued by CDSGraphManager::r1_heat_insert, drawn and dropped by r_dsgraph_render_heat in the same frame.
+	struct HeatItem
+	{
+		dxRender_Visual* pVisual;
+		Fmatrix* pMatrix;
+		float ssa; // gives the same LOD as the scene pass, so the redraw lands on the depth that pass wrote
+		float hotness; // 0..1
+		bool hud; // drawn with the HUD projection and depth range (the player's hands)
+		bool lq; // the scene pass used its low-quality element (one-bone skinning for two-bone meshes)
+	};
+#endif
+
 	using RenderQueue = xr_vector<RenderPacket, render_allocator::helper<RenderPacket>::result>;
 	using RenderQueueArray = xr_array<xr_array<RenderQueue, SHADER_PASSES_MAX>, 2>;
 
@@ -262,6 +276,10 @@ namespace R_dsgraph
 		mapSorted<float, true, false, false, false> mapHUDSorted;
 
 		mapDSGraphItems<float, false> mapLOD;
+
+#if RENDER == R_R1
+		xr_vector<HeatItem> mapHeat; // R1 thermal, empty unless a heat mask is wanted for this frame
+#endif
 
 		// Anomaly
 		mapDSGraphItems<float, false> mapCamAttached;
@@ -411,6 +429,9 @@ namespace R_dsgraph
 				mapWater.clear_and_free();
 			else
 				mapWater.clear();
+#if RENDER == R_R1
+			mapHeat.clear();
+#endif
 		}
 	};
 };

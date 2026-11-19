@@ -79,6 +79,18 @@ private:
 	IDirect3DSurface9* lum_rb[LUM_RB_SLOTS]; // 1x1 D3DPOOL_SYSTEMMEM copies, same format as rt_lum_adapt
 	u32 lum_rb_frame[LUM_RB_SLOTS]; // Device.dwFrame the copy was queued on, 0 = empty / already read
 
+	// R1 thermal (r__heatvision / bus lane "thermal"): heat masks of the warm bodies, see docs/r1_thermal.md
+	int heat_state; // 0 = not created yet, 1 = ready, -1 = unavailable (files missing, no target) until vid_restart
+	u32 heat_mode; // what the frame being built gets: 0 = nothing, 1 = the screen mask, 2 = the SVP lens mask
+	ref_rt RT_heat; // $user$heat, the size of the scene target; r = hotness, g = 1 on the player's hands
+	ref_rt rt_heat_svp_work; // the mask of the last small SVP frame, the size of $user$viewport2_work
+	ref_rt rt_heat_svp; // $user$heat_vp2: its lens part, laid out exactly like $user$viewport2
+	bool heat_screen_live; // $user$heat holds a mask (cleared once when thermal goes off)
+	bool heat_svp_live; // $user$heat_vp2 holds a mask
+	bool heat_svp_valid; // the work mask belongs to the SVP image in $user$viewport2_work (copied along with it)
+	IBlender* b_heat;
+	ref_shader s_heat[6]; // per skinning mode, like s_ui_icons: SKIN_NONE, SKIN_0 ... SKIN_4
+
 	float im_noise_time;
 	u32 im_noise_shift_w;
 	u32 im_noise_shift_h;
@@ -122,6 +134,14 @@ private:
 	void lum_readback(bool queue); // read a finished copy (never waits), then optionally queue this frame's one
 	void lum_readback_clear(); // forget queued copies and publish 0 (adaptation off / restarting)
 
+	bool heat_wanted(); // r__heatvision or the bus lane "thermal"
+	bool heat_create();
+	bool heat_create_svp();
+	void heat_destroy();
+	void heat_idle(); // a normal frame without a screen mask: blank a mask left over from when thermal was on
+	void phase_heat(); // normal frame: warm bodies -> $user$heat
+	void phase_heat_svp(); // small SVP frame: warm bodies -> the lens work mask (and, as a demo, white into the lens)
+
 	void calc_tc_noise(Fvector2& p0, Fvector2& p1);
 	void calc_tc_duality_ss(Fvector2& r0, Fvector2& r1, Fvector2& l0, Fvector2& l1);
 	void phase_distortion();
@@ -131,6 +151,11 @@ public:
 
 	void Begin();
 	void End();
+
+	// R1 thermal. heat_begin_frame: called once per frame before the scene graph is built; true = queue warm visuals.
+	bool heat_begin_frame();
+	// the pass that draws a warm visual with this skinning mode (element: SE_R1_HEAT_MASK or SE_R1_HEAT_PAINT)
+	ShaderElement* heat_element(int skinning, bool lq, u32 element);
 
 	BOOL SVPSmallEnabled() { return svp_small; }
 	BOOL SVPSmallFrame(); // small SVP target is enabled and this frame is an SVP frame

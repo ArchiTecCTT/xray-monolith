@@ -114,6 +114,12 @@ public:
 	void r_dsgraph_render_emissive(bool clear = true, bool renderHUD = false);
 	void r_dsgraph_render_wmarks();
 	void r_dsgraph_render_distort();
+#if RENDER == R_R1
+	// R1 thermal (r__heatvision), see docs/r1_thermal.md
+	void r1_heat_insert(dxRender_Visual* pVisual, Fmatrix* xform, float ssa, ShaderElement* sh);
+	// draws RGraph.mapHeat with element 'element' of the heat shaders (world, then the HUD part), empties it if 'clear'
+	void r_dsgraph_render_heat(u32 element, bool clear);
+#endif
 
 	// Anomaly
 #if defined(USE_DX11)

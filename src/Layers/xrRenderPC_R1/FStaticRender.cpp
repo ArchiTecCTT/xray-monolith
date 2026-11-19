@@ -594,6 +594,11 @@ void CRender::Calculate()
 	if (L_DB)
 		L_DB->Update();
 
+	// R1 thermal: decided once per frame, before the graph is built. Nothing queued for a frame that was never
+	// drawn may survive into this one. With thermal off this is one flag test and an empty clear.
+	GMBase.RGraph.mapHeat.clear();
+	r1_heat_collect = Target->heat_begin_frame();
+
 	// Main process
 	GMBase.traverse(pLastSector, ViewBase, Device.vCameraPosition, Device.mFullTransform);
 	GMBase.r_dsgraph_capture(true, true);

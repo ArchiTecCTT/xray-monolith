@@ -86,6 +86,8 @@ public:
 		{ true,true,true,true,false,false,false });
 
 	CRenderTarget* Target; // Render-target
+	// R1 thermal: this frame builds a heat mask, so GMBase queues warm visuals (set in Calculate, see docs/r1_thermal.md)
+	bool r1_heat_collect = false;
 
 	// R1-specific global constants
 	Fmatrix r1_dlight_tcgen;

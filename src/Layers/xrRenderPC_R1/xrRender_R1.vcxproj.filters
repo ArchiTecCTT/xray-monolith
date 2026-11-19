@@ -249,6 +249,9 @@
     <ClInclude Include="Blender_Screen_GRAY.h">
       <Filter>Shading templates</Filter>
     </ClInclude>
+    <ClInclude Include="Blender_heat.h">
+      <Filter>Shading templates</Filter>
+    </ClInclude>
     <ClInclude Include="Blender_lum_adapt.h">
       <Filter>Shading templates</Filter>
     </ClInclude>
@@ -742,6 +745,9 @@
       <Filter>Shading templates</Filter>
     </ClCompile>
     <ClCompile Include="Blender_Screen_GRAY.cpp">
+      <Filter>Shading templates</Filter>
+    </ClCompile>
+    <ClCompile Include="Blender_heat.cpp">
       <Filter>Shading templates</Filter>
     </ClCompile>
     <ClCompile Include="Blender_lum_adapt.cpp">

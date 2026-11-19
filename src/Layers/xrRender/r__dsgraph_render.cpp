@@ -604,6 +604,55 @@ void CDSGraphManager::r_dsgraph_render_distort()
 	RImplementation.rmNormal();
 }
 
+#if RENDER == R_R1
+//////////////////////////////////////////////////////////////////////////
+// R1 thermal (r__heatvision): redraw the warm visuals queued by r1_heat_insert, flat, into the bound target.
+// The caller (CRenderTarget::phase_heat) has bound the target and the depth buffer of the scene that was just drawn;
+// the heat passes test depth and never write it, so only the visible part of a warm body lands in the mask.
+// Each visual is drawn with the vertex shader variant, world matrix and LOD the scene pass used, so its depth
+// matches what that pass wrote.
+void CDSGraphManager::r_dsgraph_render_heat(u32 element, bool clear)
+{
+	PROF_EVENT("r_dsgraph_render_heat");
+	xr_vector<HeatItem>& list = RGraph.mapHeat;
+	if (list.empty())
+		return;
+
+	static shared_str s_item = "r1_heat_item"; // x = hotness, y = 1 for a HUD item (the player's hands)
+	bool has_hud = false;
+	for (int pass = 0; pass < 2; ++pass)
+	{
+		const bool hud = (1 == pass);
+		if (hud && !has_hud)
+			break;
+		// the HUD part: HUD projection and the near depth range, exactly as the HUD itself was drawn
+		CHudInitializer initializer(hud);
+		if (hud) RImplementation.rmNear();
+		for (HeatItem& item : list)
+		{
+			if (item.hud != hud)
+			{
+				has_hud |= item.hud;
+				continue;
+			}
+			dxRender_Visual* V = item.pVisual;
+			ShaderElement* E = RImplementation.Target->heat_element(V->skinning, item.lq, element);
+			if (!E)
+				continue;
+			RCache.set_Element(E);
+			RCache.set_xform_world(*item.pMatrix);
+			RCache.set_c(s_item, item.hotness, hud ? 1.f : 0.f, 0.f, 0.f);
+			V->Render(calcLOD(item.ssa, V->vis.sphere.R));
+		}
+		if (hud) RImplementation.rmNormal();
+	}
+
+	if (clear)
+		list.clear();
+	RCache.set_xform_world(Fidentity);
+}
+#endif
+
 #include"LightTrack.h"
 void CDSGraphManager::r_dsgraph_capture_static()
 {
