@@ -145,11 +145,19 @@ void dxRender_Visual::SetShaderTexture(LPCSTR s_shader, LPCSTR s_texture)
 		dbg_texture = s_texture;
 	}
 
+	//--DSR-- HeatVision: the hot mark lives on the texture, so carry it over to the new one. Without this a creature
+	// whose textures a script swaps (set_shader after set_visual_name) has no heat on DX10/DX11.
+	CTexture* old_texture = GetTexture();
+	const bool was_hot = old_texture && old_texture->m_is_hot;
+
 	Engine.External.SetSkinningMode(skinning);
     	bool prev_hud = ::Render->hud_loading;
     	::Render->hud_loading = hud;
     	shader.create(*dbg_shader, *dbg_texture);
     	::Render->hud_loading = prev_hud;
+
+	if (was_hot)
+		dxRender_Visual::MarkAsHot(true);
 }
 
 void dxRender_Visual::ResetShaderTexture()
