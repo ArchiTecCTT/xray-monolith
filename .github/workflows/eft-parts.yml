@@ -73,16 +73,18 @@ jobs:
           Set-Location $work
 
           $failed = @()
+          $judged = 0
           function Compile([string]$file, [string]$target, [string]$skin) {
             $out = [IO.Path]::GetFileNameWithoutExtension($file) + '_' + $target + '_' + $skin
-            # /Zpr = D3DXSHADER_PACKMATRIX_ROWMAJOR, the flag the engine compiles with
-            $fxcArgs = @('/nologo', '/Zpr', '/T', $target, '/E', 'main', '/D', 'SHADER_BUS=7', '/Fo', "$out.o", '/Fc', "$out.asm")
+            # /Zpr = D3DXSHADER_PACKMATRIX_ROWMAJOR, the flag the engine compiles with. /Gec = accept what the game's
+            # older compiler accepts (the stock headers declare 'half' globals, which fxc otherwise refuses in vs_2_0)
+            $fxcArgs = @('/nologo', '/Zpr', '/Gec', '/T', $target, '/E', 'main', '/D', 'SHADER_BUS=7', '/Fo', "$out.o", '/Fc', "$out.asm")
             if ($skin -ne 'none') { $fxcArgs += @('/D', "$skin=1") }
             $fxcArgs += $file
             $text = (& $fxc.FullName @fxcArgs 2>&1 | Out-String)
             $ok = ($LASTEXITCODE -eq 0)
             Write-Host ("{0}  {1} {2} {3}" -f $(if ($ok) { 'ok    ' } else { 'FAILED' }), $file, $target, $skin)
-            if (-not $ok) { Write-Host $text }
+            if (-not $ok) { $text -split "`n" | Where-Object { $_ -notmatch 'warning X' -and $_.Trim() } | ForEach-Object { Write-Host $_ } }
             return $ok
           }
 
@@ -94,6 +96,7 @@ jobs:
             $control = (Compile 'model_def_hq.vs' 'vs_2_0' $skin) -and (Compile 'model_def_lq.vs' 'vs_2_0' $skin)
             foreach ($vs in 'ui_icons.vs', 'heat_mask_lq.vs') {
               $ok = Compile $vs 'vs_2_0' $skin
+              if ($control) { $judged++ }
               if (-not $ok -and $control) { $failed += "$vs $skin" }
               if (-not $ok -and -not $control) { Write-Host "::warning::$vs $skin not judged: the stock model shaders do not build with fxc for this mode either" }
             }
@@ -105,7 +108,9 @@ jobs:
           }
 
           if ($failed.Count) { throw ("shader compile failed: " + ($failed -join ', ')) }
-          Write-Host 'All R1 thermal shader files compile.'
+          if ($judged -ne 12) { throw "only $judged of 12 vertex shader builds could be judged" }
+          Write-Host 'All R1 thermal shader files compile (3 pixel shaders, 2 vertex shaders in 6 skinning modes).'
+          exit 0
 
   build:
     name: build ${{ matrix.buildconf }}
