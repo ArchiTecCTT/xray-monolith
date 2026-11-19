@@ -217,7 +217,13 @@ float CWeapon::thermal_heat()
 bool CWeapon::thermal_point(Fvector& point, float& far_heat, float& reach)
 {
 	if (!(ps_r1_thermal_barrel_len > 0.01f))
-		return false;
+	{
+		// r1_thermal_barrel_len 0: the whole gun at the barrel's heat, as in round 2
+		point.set(0.f, 0.f, 0.f);
+		far_heat = thermal_heat();
+		reach = 0.f;
+		return true;
+	}
 	point = get_LastFP();
 	if (!_valid(point))
 		return false;

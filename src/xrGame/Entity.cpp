@@ -419,14 +419,14 @@ static u32 clampU(u32 x, u32 a, u32 b)
 //   2. configs\r1_thermal.ltx [creature_sections]:    <section name> = <0..1>
 //   3. configs\r1_thermal.ltx [creature_communities]: <community> = <0..1>   (stalkers: zombied = the shooting zombies)
 //   4. configs\r1_thermal.ltx [creature_classes]:     <class of the section> = <0..1>   (SM_ZOMBI = the shambling ones)
-//   5. configs\r1_thermal.ltx [creatures] default, else 0.8.
+//   5. configs\r1_thermal.ltx [creatures] default, else 0.85.
 // A mod changes any of it with a DLTX file (mod_r1_thermal_<name>.ltx). Read once per game start.
 namespace
 {
 struct thermal_ladder_table
 {
 	bool loaded = false;
-	float living = 0.8f;
+	float living = 0.85f;
 	xr_map<shared_str, float> sections, communities, classes;
 
 	// names are compared without case (class names are upper case in the configs)

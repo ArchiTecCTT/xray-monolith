@@ -1566,14 +1566,14 @@ bool CRenderTarget::look_build(u32 view, u32 src_w, u32 src_h)
 
 	look_consts& c = look_c;
 	// The heat ladder: the mask's hotness is how far a thing goes from the world's grey to the top level. With the
-	// ladder on the top level is r1_thermal_top (pure white): only fire reaches it, a living body (0.8) stays a
+	// ladder on the top level is r1_thermal_top (pure white): only fire reaches it, a living body (0.85) stays a
 	// light grey-white under it. With the ladder off every creature is 1 and the top is r1_thermal_body, as before.
 	const float top = ps_r1_thermal_ladder ? ps_r1_thermal_top : ps_r1_thermal_body;
 	// a body is darker by 'round' of its level where it is seen edge-on. Without the edge term in the mask (no alpha
 	// channel) bodies are flat
 	c.body.set(heat_alpha ? top * ps_r1_thermal_round : 0.f, ps_r1_thermal_ring, ps_r1_thermal_glow, top);
 	// x = the bloom of the very hot (fire, a muzzle after a burst), y, z = where "very hot" starts and its slope
-	c.hot.set(ps_r1_thermal_ladder ? ps_r1_thermal_bloom : 0.f, .85f, 1.f / .12f, 0.f);
+	c.hot.set(ps_r1_thermal_ladder ? ps_r1_thermal_bloom : 0.f, .93f, 1.f / .06f, 0.f);
 	c.world.set(ps_r1_thermal_world_base, ps_r1_thermal_world * heat_cfg_contrast, ps_r1_thermal_world_gamma, 0.f);
 	// lightning: while a bolt is lit the sky flashes and the bolt itself shows
 	float flash = 0.f;
