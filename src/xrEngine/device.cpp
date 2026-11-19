@@ -481,7 +481,10 @@ void CRenderDevice::on_idle()
     // TODO: Try to move this upper
     secondary_tasks.run(&XRay::Engine::PreRenderPostTransformsThread);
 	if (mt_calc_bones)
+	{
+		bones_task_running.store(true);
 		secondary_tasks.run(&XRay::Engine::CalculateBonesThread);
+	}
 	else
 		XRay::Engine::CalculateBonesThread();
 

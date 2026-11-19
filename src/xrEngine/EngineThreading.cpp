@@ -54,6 +54,12 @@ void XRay::Engine::CalculateBonesThread()
 
 	PROF_EVENT("CalculateBones");
 
+	// whichever way this function is left, the frame's poses are final from then on (see Device.bones_task_running)
+	struct bones_done_mark
+	{
+		~bones_done_mark() { Device.bones_task_running.store(false); }
+	} done_mark;
+
 	if (!g_SpatialSpace) return;
 	if (Device.Paused()) return;
 	if (!psDeviceFlags.test(rsDrawDynamic)) return;

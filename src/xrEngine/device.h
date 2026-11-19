@@ -9,6 +9,7 @@
 
 #include "pure.h"
 #include "../xrCore/xrSyncronize.h"
+#include <atomic>
 //#include "hw.h"
 #include "../xrcore/ftimer.h"
 #include "stats.h"
@@ -489,6 +490,9 @@ public:
 
 	// Multi-threading
 	xr_task_group secondary_tasks;
+	// true from the moment this frame's skeleton poses are handed to a worker (mt_calc_bones) until it is done with
+	// them. The R1 thermal pass draws warm models twice in a frame and needs both draws to see the same pose.
+	std::atomic<bool> bones_task_running{false};
 
 	ICF void remove_from_seq_parallel(const xr_delegate<void()>& delegate)
 	{

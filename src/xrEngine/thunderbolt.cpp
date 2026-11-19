@@ -293,6 +293,7 @@ void CEffect_Thunderbolt::OnFrame(shared_str id, float period, float duration)
 	{
 		if (state == stIdle && !!(id.size())) Bolt(id, period, duration);
 	}
+	thermal_flash = 0.f;
 	if (state == stWorking)
 	{
 		if (current_time > life_time) state = stIdle;
@@ -308,6 +309,7 @@ void CEffect_Thunderbolt::OnFrame(shared_str id, float period, float duration)
 
 		lightning_phase = 1.5f * (current_time / life_time);
 		clamp(lightning_phase, 0.f, 1.f);
+		thermal_flash = _max(fClr.x, _max(fClr.y, fClr.z));
 
 		base_sky_color = environment.CurrentEnv->sky_color;
 		base_sun_color = environment.CurrentEnv->sun_color;

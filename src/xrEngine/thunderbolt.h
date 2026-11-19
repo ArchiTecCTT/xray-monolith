@@ -148,6 +148,9 @@ private:
 	Fvector3 flash_fog_color;
 	Fvector3 flash_sun_dir;
 	bool flash_applied;
+public:
+	// how bright the bolt of this frame is, 0 = none (the R1 thermal picture flashes with it)
+	float thermal_flash = 0.f;
 };
 
 #endif //ThunderboltH

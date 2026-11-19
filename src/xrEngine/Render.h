@@ -228,7 +228,22 @@ public:
 	// R1 thermal (docs/r1_thermal.md): hotness 0..1 the game gives to the visuals it adds from now on, whatever their
 	// owner or texture says (a gun's barrel heat). Set it around the add_Dynamic calls and put it back to 0.
 	float val_fItemHeat = 0.f;
-	void set_ItemHeat(float value) { val_fItemHeat = value; }
+	// ... or hottest at a point and falling off with distance from it (a gun: the muzzle and the barrel): val_fItemHeat
+	// at the point, val_fItemHeatFar at 'reach' metres from it and beyond. Point w = 1 / reach, 0 = no point.
+	float val_fItemHeatFar = 0.f;
+	Fvector4 val_vItemHeatPoint = {0.f, 0.f, 0.f, 0.f};
+	void set_ItemHeat(float value)
+	{
+		val_fItemHeat = value;
+		val_fItemHeatFar = value;
+		val_vItemHeatPoint.set(0.f, 0.f, 0.f, 0.f);
+	}
+	void set_ItemHeat(float at_point, float far_from_it, const Fvector& point, float reach)
+	{
+		val_fItemHeat = at_point;
+		val_fItemHeatFar = far_from_it;
+		val_vItemHeatPoint.set(point.x, point.y, point.z, reach > 0.01f ? 1.f / reach : 0.f);
+	}
 	float get_ItemHeat() const { return val_fItemHeat; }
 	bool i_mask[fl_max]{};//deffered,forward,wmarks,normal,shmap,val_invisible,val_hud,val_cam_attached
 
