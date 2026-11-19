@@ -1,5 +1,5 @@
 // R1 thermal look, step 3: the thermal picture as one grey value per sensor pixel.
-//   world : the scene's brightness squeezed into a narrow grey band; the sky near black
+//   world : the scene's brightness squeezed into a narrow grey band, with a gain in the dark; the sky near black
 //   bodies: hotness as brightness (the heat ladder: a living body stays under fire), darker towards their edges
 //           (the edge term), a thin dark ring right outside them and a faint glow around them; fire blooms
 //   sensor: moving grain, a fixed column pattern, faint lines
@@ -15,6 +15,8 @@ uniform float4 thermal_ring_b;   //            xy = along the other
 uniform float4 thermal_body;     // x = edge darkening, y = ring, z = glow, w = level of heat 1 where it faces the camera
 uniform float4 thermal_hot;      // x = bloom of the very hot (fire)
 uniform float4 thermal_world;    // x = base level, y = contrast, z = gamma
+uniform float4 thermal_night;    // the world in the dark: x = gain g, y = (g - 1) / the top a lit patch can reach,
+                                 // z = extra grain of the world under gain. (1, 0, 0) = none
 uniform float4 thermal_sky;      // x = sky level, y = how much of the clouds stays
 uniform float4 thermal_grain;    // x = grain, y = column pattern, z = lines, w = half the sensor height in pixels
 uniform float4 thermal_noise_a;  // xy = noise texels per picture
@@ -29,6 +31,12 @@ float4 main(float2 tc : TEXCOORD0) : COLOR0
     s += tex2D(s_scene, tc + thermal_tap_b.xy).rgb;
     s += tex2D(s_scene, tc - thermal_tap_b.xy).rgb;
     float lum = dot(s, float3(0.07475, 0.14675, 0.0285));
+    float4 n = tex2D(s_noise, tc * thermal_noise_a.xy + thermal_noise_b.xy);
+    // a thermal sight sees heat, not light: in the dark the world gets a gain (r1_thermal_night). Dark things get all
+    // of it, bright ones (a lamp's pool of light) are held under a top level. The grain hides the few steps a dark
+    // 8-bit frame is made of. With thermal_night = (1, 0, 0) lum stays exactly what it was.
+    lum = abs(lum + (n.r - n.g) * thermal_night.z);
+    lum = lum * thermal_night.x / (1.0 + thermal_night.y * lum);
 
     float4 m = tex2D(s_down, tc);
     float around = tex2D(s_down, tc + thermal_ring_a.xy).r;
@@ -46,7 +54,6 @@ float4 main(float2 tc : TEXCOORD0) : COLOR0
     v = lerp(v, thermal_body.w - thermal_body.x * m.a, m.r);
     v += thermal_hot.x * glow.g;
 
-    float4 n = tex2D(s_noise, tc * thermal_noise_a.xy + thermal_noise_b.xy);
     float column = tex2D(s_noise, tc * thermal_col_a.xy + thermal_col_b.xy).b;
     v += (n.r + n.g - 1.0) * thermal_grain.x;
     v += (column - 0.5) * thermal_grain.y;

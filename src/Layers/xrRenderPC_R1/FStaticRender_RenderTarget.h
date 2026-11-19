@@ -169,9 +169,15 @@ private:
 	bool look_screen_live; // $user$thermal holds this frame's picture
 	struct look_consts
 	{
-		Fvector4 tap_a, tap_b, ring_a, ring_b, body, world, sky, grain, noise_a, noise_b, col_a, col_b, palette, region, hot;
+		Fvector4 tap_a, tap_b, ring_a, ring_b, body, world, sky, grain, noise_a, noise_b, col_a, col_b, palette, region, hot,
+		         night;
 	};
 	look_consts look_c;
+	// the gain of the thermal world in the dark (r1_thermal_night): worked out once per frame, for both views
+	float look_gain; // 1 = none
+	float look_gain_light; // the light level it was worked out from, held while a lightning bolt is lit
+	u32 look_gain_frame;
+	float look_night_gain();
 	// the part of the picture the passes are limited to (a region is set): 0..1 of the target, x0 > x1 = all of it
 	Fvector4 look_clip;
 

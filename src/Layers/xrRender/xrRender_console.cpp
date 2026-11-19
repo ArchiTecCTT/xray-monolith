@@ -209,6 +209,14 @@ float ps_r1_thermal_sky = 0.035f; // grey level of the sky
 float ps_r1_thermal_sky_clouds = 0.1f; // how much of the sky's own brightness stays
 Fvector3 ps_r1_thermal_region = {0.5f, 0.5f, 0.f}; // the screen look only inside a circle: centre x, y (0..1 of the screen), radius in screen heights; radius 0 = whole screen
 float ps_r1_thermal_region_soft = 0.02f; // width of the circle's soft edge, in screen heights
+// The thermal world does not depend on how much light there is (docs/r1_thermal.md, "Thermal in the dark"): where the
+// light at the viewer is under r1_thermal_night_level the world's brightness gets a gain that brings it back to that level
+float ps_r1_thermal_night = 1.f; // how much of that gain is used; 0 = none, the world is as dark as the scene (round 4)
+float ps_r1_thermal_night_level = 0.35f; // the light level the thermal world never goes under: a dull day
+float ps_r1_thermal_night_max = 12.f; // the highest gain
+float ps_r1_thermal_night_rooms = 1.f; // how much the roof over the viewer counts (a dark room by day); 0 = the weather alone
+float ps_r1_thermal_night_lights = 0.6f; // how bright a lit patch (a lamp's pool, a flashlight beam) can get under full gain
+float ps_r1_thermal_night_grain = 1.f; // extra grain of the world under gain, in steps of the dark 8-bit frame
 int ps_r1_lum_adapt = 0; // r1-only: eye-like luminance adaptation for post-process shaders (s_lum_adapt), 0 = off
 float ps_r1_lum_adapt_speed = 4.f; // r1-only: rate (1/s) the adapted value follows a brighter scene
 float ps_r1_lum_adapt_speed_down = 2.f; // r1-only: rate (1/s) the adapted value follows a darker scene
@@ -1550,6 +1558,13 @@ void xrRender_initconsole()
 	CMD4(CCC_r1_Float, "r1_thermal_sky_clouds", &ps_r1_thermal_sky_clouds, 0.f, 1.f);
 	CMD4(CCC_r1_Vector3, "r1_thermal_region", &ps_r1_thermal_region, Fvector3().set(-1.f, -1.f, 0.f), Fvector3().set(2.f, 2.f, 4.f));
 	CMD4(CCC_r1_Float, "r1_thermal_region_soft", &ps_r1_thermal_region_soft, 0.f, 1.f);
+	// thermal in the dark
+	CMD4(CCC_r1_Float, "r1_thermal_night", &ps_r1_thermal_night, 0.f, 1.f);
+	CMD4(CCC_r1_Float, "r1_thermal_night_level", &ps_r1_thermal_night_level, 0.05f, 2.f);
+	CMD4(CCC_r1_Float, "r1_thermal_night_max", &ps_r1_thermal_night_max, 1.f, 32.f);
+	CMD4(CCC_r1_Float, "r1_thermal_night_rooms", &ps_r1_thermal_night_rooms, 0.f, 1.f);
+	CMD4(CCC_r1_Float, "r1_thermal_night_lights", &ps_r1_thermal_night_lights, 0.1f, 1.f);
+	CMD4(CCC_r1_Float, "r1_thermal_night_grain", &ps_r1_thermal_night_grain, 0.f, 4.f);
 
 	// Luminance adaptation for R1 post-process shaders (s_lum_adapt). Runs only while it is on AND the post-process
 	// pass draws; the bus lane "lum_adapt" (x > 0) turns it on too. See R1-PS3-LUM-ADAPT-NOTES.md.

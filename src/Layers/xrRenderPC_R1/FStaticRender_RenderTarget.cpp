@@ -9,6 +9,8 @@
 #include "../xrRender/dxRenderDeviceRender.h"
 #include "Blender_lum_adapt.h"
 #include "Blender_heat.h"
+#include "../xrRender/LightTrack.h" // the sky cover where the viewer stands, for the thermal world's gain
+#include "../../xrEngine/xr_object.h"
 
 
 static LPCSTR RTname = "$user$rendertarget";
@@ -110,6 +112,9 @@ CRenderTarget::CRenderTarget()
 	look_noise_shift.set(0.f, 0.f);
 	look_screen_live = false;
 	ZeroMemory(&look_c, sizeof(look_c));
+	look_gain = 1.f;
+	look_gain_light = -1.f;
+	look_gain_frame = u32(-1);
 	const s32 saved_skinning = Engine.External.GetSkinningMode();
 	for (s32 skinning = -1; skinning <= 4; ++skinning)
 	{
@@ -1591,6 +1596,58 @@ void CRenderTarget::phase_heat_svp()
 }
 
 //////////////////////////////////////////////////////////////////////////
+// The thermal world in the dark (r1_thermal_night). The world part of the thermal picture is made from the brightness
+// of the lit scene, so without help a night is a black picture. A thermal sight sees heat, not light: the world gets a
+// gain that makes up for the missing light. The gain comes from what the engine already knows, not from the picture,
+// so it does not pump when the view turns and a muzzle flash or a lamp does not move it:
+//   light = what the weather gives a surface under the open sky (ambient, sky light, half the sun: the terms of the
+//           level's own shaders), with the sky's part scaled by how open the sky is where the viewer stands (the share
+//           of the viewer's sky rays that get out, from its light tracker): a cellar by day is dark, a yard is not
+//   gain  = r1_thermal_night_level / light, from 1 (day: nothing changes) up to r1_thermal_night_max
+// Dynamic lights are not in it on purpose. A lightning bolt raises the weather's sun colour for a moment; the light
+// level from before the bolt is held while it is lit, or the gain would drop and the world blink dark.
+float CRenderTarget::look_night_gain()
+{
+	if (look_gain_frame == Device.dwFrame)
+		return look_gain;
+	look_gain_frame = Device.dwFrame;
+	look_gain = 1.f;
+	if (!(ps_r1_thermal_night > 0.f) || !g_pGamePersistent)
+		return look_gain;
+	CEnvironment& env = g_pGamePersistent->Environment();
+	const CEnvDescriptor* E = env.CurrentEnv;
+	if (!E)
+		return look_gain;
+
+	const bool bolt = env.eff_Thunderbolt && env.eff_Thunderbolt->thermal_flash > 0.f;
+	if (!bolt || look_gain_light < 0.f)
+	{
+		float open = 1.f;
+		if (ps_r1_thermal_night_rooms > 0.f && g_pGameLevel && ps_r2_dhemi_sky_scale > EPS)
+		{
+			CObject* V = g_pGameLevel->CurrentViewEntity();
+			CROS_impl* R = (V && V->renderable.visual) ? (CROS_impl*)V->renderable_ROS() : nullptr;
+			if (R)
+			{
+				// only read: the engine updates the tracker at its own rate (it also lights the viewer's hands with
+				// it), so the gain follows a change of place in a few seconds and the normal picture is not touched.
+				// Under 40 percent of open sky the place counts as covered, by that much
+				const float sky = clampr(R->get_hemi() / ps_r2_dhemi_sky_scale / .4f, 0.f, 1.f);
+				open = 1.f + (sky - 1.f) * ps_r1_thermal_night_rooms;
+			}
+		}
+		const float ambient = E->ambient.x * .299f + E->ambient.y * .587f + E->ambient.z * .114f;
+		const float hemi = E->hemi_color.x * .299f + E->hemi_color.y * .587f + E->hemi_color.z * .114f;
+		const float sun = E->sun_color.x * .299f + E->sun_color.y * .587f + E->sun_color.z * .114f;
+		look_gain_light = _max(0.f, 2.f * ambient + (hemi + .5f * sun) * open);
+	}
+	const float top = _max(1.f, ps_r1_thermal_night_max);
+	const float g = clampr(ps_r1_thermal_night_level / _max(look_gain_light, ps_r1_thermal_night_level / top), 1.f, top);
+	look_gain = 1.f + (g - 1.f) * ps_r1_thermal_night;
+	return look_gain;
+}
+
+//////////////////////////////////////////////////////////////////////////
 // The engine's thermal look (r1_thermal_look), see docs/r1_thermal.md. Per view four small targets:
 //   down   : the heat mask at sensor size (the view's size / r1_thermal_soft)
 //   glow_a, glow : its blur, at half that size (two passes)
@@ -1674,7 +1731,8 @@ void CRenderTarget::look_draw(ShaderElement* E, IDirect3DSurface9* target, const
 	                  n_ring_b = "thermal_ring_b", n_body = "thermal_body", n_world = "thermal_world",
 	                  n_sky = "thermal_sky", n_grain = "thermal_grain", n_noise_a = "thermal_noise_a",
 	                  n_noise_b = "thermal_noise_b", n_col_a = "thermal_col_a", n_col_b = "thermal_col_b",
-	                  n_palette = "thermal_palette", n_region = "thermal_region", n_hot = "thermal_hot";
+	                  n_palette = "thermal_palette", n_region = "thermal_region", n_hot = "thermal_hot",
+	                  n_night = "thermal_night";
 	const look_consts& c = look_c;
 	RCache.set_RT(target);
 	RCache.set_Element(E);
@@ -1694,6 +1752,7 @@ void CRenderTarget::look_draw(ShaderElement* E, IDirect3DSurface9* target, const
 	RCache.set_c(n_col_b, c.col_b);
 	RCache.set_c(n_palette, c.palette);
 	RCache.set_c(n_region, c.region);
+	RCache.set_c(n_night, c.night);
 	RCache.set_Geometry(g_postprocess);
 	RCache.Render(D3DPT_TRIANGLELIST, Offset, 0, 4, 0, 2);
 }
@@ -1754,6 +1813,16 @@ bool CRenderTarget::look_build(u32 view, u32 src_w, u32 src_h)
 	// x = the bloom of the very hot (fire, a muzzle after a burst), y, z = where "very hot" starts and its slope
 	c.hot.set(ps_r1_thermal_ladder ? ps_r1_thermal_bloom : 0.f, .93f, 1.f / .06f, 0.f);
 	c.world.set(ps_r1_thermal_world_base, ps_r1_thermal_world * heat_cfg_contrast, ps_r1_thermal_world_gamma, 0.f);
+	// The world in the dark: lum * g / (1 + (g - 1) * lum / top). Dark things get the whole gain g, and nothing goes
+	// over 'top' (r1_thermal_night_lights) however strong the gain: a lamp's pool of light or a flashlight beam ends
+	// up no brighter than sunlit ground by day. z = extra grain of the world, in the scene's own units: half an 8-bit
+	// step each way per unit of r1_thermal_night_grain, which hides the steps a dark 8-bit frame is made of once they
+	// are multiplied by g. With g = 1 all of it is exactly nothing.
+	{
+		const float g = look_night_gain();
+		c.night.set(g, (g - 1.f) / clampr(ps_r1_thermal_night_lights, .1f, 1.f),
+		            ps_r1_thermal_night_grain * (.5f / 255.f) * _min(g - 1.f, 1.f), 0.f);
+	}
 	// lightning: while a bolt is lit the sky flashes and the bolt itself shows
 	float flash = 0.f;
 	if (ps_r1_thermal_lightning > 0.f && g_pGamePersistent && g_pGamePersistent->Environment().eff_Thunderbolt)
