@@ -418,7 +418,8 @@ static u32 clampU(u32 x, u32 a, u32 b)
 //   1. thermal_heat = <0..1> in the creature's own section;
 //   2. configs\r1_thermal.ltx [creature_sections]:    <section name> = <0..1>
 //   3. configs\r1_thermal.ltx [creature_communities]: <community> = <0..1>   (stalkers: zombied = the shooting zombies)
-//   4. configs\r1_thermal.ltx [creature_classes]:     <class of the section> = <0..1>   (SM_ZOMBI = the shambling ones)
+//   4. configs\r1_thermal.ltx [creature_classes]:     <class of the section> = <0..1>   (SM_ZOMBI = the shambling ones,
+//      SM_POLTR = poltergeists, which are cold)
 //   5. configs\r1_thermal.ltx [creatures] default, else 0.85.
 // A mod changes any of it with a DLTX file (mod_r1_thermal_<name>.ltx). Read once per game start.
 namespace
@@ -457,6 +458,7 @@ struct thermal_ladder_table
 		// the engine's own ladder, for a game data folder without the file
 		communities["zombied"] = 0.65f;
 		classes["sm_zombi"] = 0.2f;
+		classes["sm_poltr"] = 0.f; // poltergeists have no body heat (a fire poltergeist's flames are particles)
 		string_path fn;
 		FS.update_path(fn, "$game_config$", "r1_thermal.ltx");
 		if (!FS.exist(fn))
