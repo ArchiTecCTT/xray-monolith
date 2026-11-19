@@ -1,6 +1,8 @@
 // R1 thermal look, step 1: the heat mask at sensor size (one sensor pixel = r1_thermal_soft screen pixels).
-// Four taps that cover the sensor pixel, all four channels kept.
+// Four taps that cover the sensor pixel. Red (hotness), blue (sky) and alpha (edge term) are kept; green becomes
+// "very hot": 0 up to the heat of a living body, 1 for fire. Blurred with the rest it is the bloom of a fire.
 uniform sampler2D s_heat;
+uniform float4 thermal_hot;   // y = where "very hot" starts, z = 1 / the width of the step
 uniform float4 thermal_tap_a; // xy = the tap step along one diagonal
 uniform float4 thermal_tap_b; // xy = along the other
 
@@ -10,5 +12,7 @@ float4 main(float2 tc : TEXCOORD0) : COLOR0
     m += tex2D(s_heat, tc - thermal_tap_a.xy);
     m += tex2D(s_heat, tc + thermal_tap_b.xy);
     m += tex2D(s_heat, tc - thermal_tap_b.xy);
-    return m * 0.25;
+    m *= 0.25;
+    m.g = saturate((m.r - thermal_hot.y) * thermal_hot.z);
+    return m;
 }

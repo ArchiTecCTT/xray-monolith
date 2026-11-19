@@ -1,7 +1,7 @@
 // R1 thermal look, step 3: the thermal picture as one grey value per sensor pixel.
 //   world : the scene's brightness squeezed into a narrow grey band; the sky near black
-//   bodies: hotness as brightness, darker towards their edges (the edge term), a thin dark ring right outside them
-//           and a faint glow around them
+//   bodies: hotness as brightness (the heat ladder: a living body stays under fire), darker towards their edges
+//           (the edge term), a thin dark ring right outside them and a faint glow around them; fire blooms
 //   sensor: moving grain, a fixed column pattern, faint lines
 // Every strength is a console var (r1_thermal_*), see docs/r1_thermal.md in the engine repo.
 uniform sampler2D s_scene; // the scene
@@ -12,7 +12,8 @@ uniform float4 thermal_tap_a;    // scene taps: xy = the step along one diagonal
 uniform float4 thermal_tap_b;    //             xy = along the other
 uniform float4 thermal_ring_a;   // ring taps: xy = one sensor pixel along one diagonal
 uniform float4 thermal_ring_b;   //            xy = along the other
-uniform float4 thermal_body;     // x = edge darkening, y = ring, z = glow, w = level of a body that faces the camera
+uniform float4 thermal_body;     // x = edge darkening, y = ring, z = glow, w = level of heat 1 where it faces the camera
+uniform float4 thermal_hot;      // x = bloom of the very hot (fire)
 uniform float4 thermal_world;    // x = base level, y = contrast, z = gamma
 uniform float4 thermal_sky;      // x = sky level, y = how much of the clouds stays
 uniform float4 thermal_grain;    // x = grain, y = column pattern, z = lines, w = half the sensor height in pixels
@@ -34,15 +35,16 @@ float4 main(float2 tc : TEXCOORD0) : COLOR0
     around += tex2D(s_down, tc - thermal_ring_a.xy).r;
     around += tex2D(s_down, tc + thermal_ring_b.xy).r;
     around += tex2D(s_down, tc - thermal_ring_b.xy).r;
-    float glow = tex2D(s_glow, tc).r;
+    float4 glow = tex2D(s_glow, tc); // r = heat around, g = the very hot around
 
     float world = thermal_world.x + thermal_world.y * pow(lum, thermal_world.z);
     float sky = thermal_sky.x + thermal_sky.y * lum;
     // squared: a thin thing against the sky (a cable, a pylon) covers part of the sensor pixel and still shows
     float v = lerp(world, sky, m.b * m.b);
     v *= 1.0 - thermal_body.y * max(around * 0.25 - m.r, 0.0);
-    v += thermal_body.z * glow * (1.0 - m.r);
+    v += thermal_body.z * glow.r * (1.0 - m.r);
     v = lerp(v, thermal_body.w - thermal_body.x * m.a, m.r);
+    v += thermal_hot.x * glow.g;
 
     float4 n = tex2D(s_noise, tc * thermal_noise_a.xy + thermal_noise_b.xy);
     float column = tex2D(s_noise, tc * thermal_col_a.xy + thermal_col_b.xy).b;

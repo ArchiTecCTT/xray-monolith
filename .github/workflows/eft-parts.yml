@@ -68,7 +68,7 @@ jobs:
           foreach ($f in 'common.h', 'skin.h', 'skin_main.h', 'shared/common.h', 'model_def_hq.vs', 'model_def_lq.vs') {
             Invoke-WebRequest -Uri "$stock/$f" -OutFile (Join-Path $work $f)
           }
-          $pixel = 'heat_mask.ps', 'heat_flat.ps', 'heat_particle.ps', 'thermal_noise.ps', 'thermal_down.ps', 'thermal_blur.ps',
+          $pixel = 'heat_mask.ps', 'heat_flat.ps', 'heat_particle.ps', 'heat_spot.ps', 'thermal_noise.ps', 'thermal_down.ps', 'thermal_blur.ps',
             'thermal_look.ps', 'thermal_palette.ps', 'thermal_show.ps', 'thermal_show_region.ps'
           $skinned = 'heat_mask.vs', 'heat_mask_lq.vs', 'ui_icons.vs'
           $plain = @('heat_particle.vs')
@@ -127,7 +127,7 @@ jobs:
 
           if ($failed.Count) { throw ("shader compile failed: " + ($failed -join ', ')) }
           if ($judged -ne 18) { throw "only $judged of 18 vertex shader builds could be judged" }
-          Write-Host 'All R1 thermal shader files compile (10 pixel shaders, 1 plain vertex shader, 3 vertex shaders in 6 skinning modes).'
+          Write-Host 'All R1 thermal shader files compile (11 pixel shaders, 1 plain vertex shader, 3 vertex shaders in 6 skinning modes).'
           exit 0
 
   build:
