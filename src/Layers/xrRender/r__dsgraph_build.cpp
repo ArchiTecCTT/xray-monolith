@@ -11,6 +11,9 @@
 #if RENDER == R_R1
 #include "../../xrEngine/shader_bus.h" // obj_hotness, for the R1 heat mask
 #include "ParticleEffect.h" // warm particle effects, for the R1 heat mask
+#include "LightTrack.h" // sun and sky on an object, for its surface state
+#include "../../xrEngine/IGame_Persistent.h"
+#include "../../xrEngine/Environment.h"
 #endif
 
 using namespace R_dsgraph;
@@ -64,15 +67,68 @@ ICF bool R4FullDetailRejectStatic(dxRender_Visual* pVisual, bool normalPhase)
 }
 
 #if RENDER == R_R1
+// R1 thermal, the surface state of one object (docs/r1_thermal.md, "Heat that follows physics"). Each object that is
+// drawn warm keeps two numbers on its light tracker: how wet its surface is and how much the sun has warmed it. Rain
+// only wets what it reaches (rain density x how much open sky the object has above it), the sun only warms what it
+// shines on (sun strength x the object's own sun visibility). Both follow their cause slowly and fade slowly.
+// The result shifts the object's hotness a little: wet = dimmer, sun-warmed = brighter. It never hides a body.
+static float r1_heat_surface(IRenderable* O, float hotness)
+{
+	if (!(ps_r1_thermal_wet > 0.f) && !(ps_r1_thermal_sun > 0.f))
+		return hotness;
+	CROS_impl* R = (CROS_impl*)O->renderable_ROS();
+	if (!R || !g_pGamePersistent)
+		return hotness;
+
+	const float now = Device.fTimeGlobal;
+	if (R->thermal_time != now)
+	{
+		// what reaches the object right now
+		CEnvDescriptor* E = g_pGamePersistent->Environment().CurrentEnv;
+		float rain = E ? clampr(E->rain_density, 0.f, 1.f) : 0.f;
+		// the sun's strength: its colour as the weather gives it, and nothing once it is under the horizon
+		float sun = 0.f;
+		if (E && E->sun_dir.y < -0.05f)
+			sun = clampr(_max(E->sun_color.x, _max(E->sun_color.y, E->sun_color.z)) * 2.f, 0.f, 1.f);
+		const bool forced = (ps_r1_thermal_force_rain >= 0.f) || (ps_r1_thermal_force_sun >= 0.f);
+		if (ps_r1_thermal_force_rain >= 0.f) rain = ps_r1_thermal_force_rain;
+		if (ps_r1_thermal_force_sun >= 0.f) sun = ps_r1_thermal_force_sun;
+		// open sky above it: under a roof about a third of the sky rays still pass, so that counts as cover
+		const float sky = clampr((R->get_hemi() - .3f) * 2.5f, 0.f, 1.f);
+		const float wet_to = rain * sky;
+		const float sun_to = sun * clampr(R->get_sun(), 0.f, 1.f) * (1.f - wet_to);
+
+		if (R->thermal_time < 0.f)
+		{
+			// first seen: what it would have settled at where it stands
+			R->thermal_wet = wet_to;
+			R->thermal_sun = sun_to;
+		}
+		else
+		{
+			// seconds to follow: soaked in 20, dry in 90; sun-warm in 45, cool in 60. Forced inputs (the test
+			// shortcuts) show within a second or two
+			const float dt = clampr(now - R->thermal_time, 0.f, 600.f) * (forced ? 20.f : 1.f);
+			const float k_wet = dt / (wet_to > R->thermal_wet ? 20.f : 90.f);
+			const float k_sun = dt / (sun_to > R->thermal_sun ? 45.f : 60.f);
+			R->thermal_wet += (wet_to - R->thermal_wet) * (k_wet < 1.f ? k_wet : 1.f);
+			R->thermal_sun += (sun_to - R->thermal_sun) * (k_sun < 1.f ? k_sun : 1.f);
+		}
+		R->thermal_time = now;
+	}
+	return hotness * (1.f - ps_r1_thermal_wet * R->thermal_wet) + ps_r1_thermal_sun * R->thermal_sun;
+}
+
 // R1 thermal (r__heatvision): queue a warm visual for the heat mask pass (CRenderTarget::phase_heat).
 // Only called while a heat mask is wanted for this frame. What is warm, and how warm (docs/r1_thermal.md):
-//  - the owner object's own model, at the owner's hotness, whatever its shaders and textures are (a living creature 1,
+//  - the owner object's own model, at the owner's hotness, whatever its shaders and textures are (a living creature,
 //    a corpse cooling down to 0, a lit lamp, a script attachment worn by a warm creature). Deciding by owner and not
 //    by the hot mark of the texture keeps a body warm after a script swapped its model or textures;
 //  - anything else the owner draws (the gun in its hands, carried items, the first-person hands and gun), only where
 //    the texture is marked hot: the first-person hands are, guns and devices are not;
-//  - whatever the game gave an item heat (set_ItemHeat: a fired gun), at that heat;
-//  - an object with its own obj_hotness bus value, on every surface.
+//  - whatever the game gave an item heat (set_ItemHeat: a fired gun, hottest at its muzzle);
+//  - an object with its own obj_hotness bus value, on every surface;
+//  - anything next to a fire, a little (the fire sources of the last frame).
 void CDSGraphManager::r1_heat_insert(dxRender_Visual* pVisual, Fmatrix* xform, bool own_model, float ssa, ShaderElement* sh)
 {
 	// shadow-only draws (the first-person body), camera attachments and custom-FOV attachments are never warm
@@ -80,11 +136,14 @@ void CDSGraphManager::r1_heat_insert(dxRender_Visual* pVisual, Fmatrix* xform, b
 		return;
 
 	float hotness = val_fItemHeat;
+	float hotness_far = val_fItemHeatFar;
+	Fvector4 point = val_vItemHeatPoint;
 	if (val_pObject)
 	{
 		float owner = val_pObject->GetHotness();
-		bool whole = ShaderBus::object_hotness(val_pObject->renderable.bus_values, owner) || own_model;
-		if (owner > hotness)
+		const bool by_script = ShaderBus::object_hotness(val_pObject->renderable.bus_values, owner);
+		bool whole = by_script || own_model;
+		if (owner > 0.001f)
 		{
 			if (!whole)
 			{
@@ -92,10 +151,33 @@ void CDSGraphManager::r1_heat_insert(dxRender_Visual* pVisual, Fmatrix* xform, b
 				whole = T && T->m_is_hot;
 			}
 			if (whole)
-				hotness = owner;
+			{
+				// the surface state belongs to the engine's own heat, not to a value a script set
+				if (!by_script)
+					owner = r1_heat_surface(val_pObject, owner);
+				if (owner > hotness)
+				{
+					hotness = owner;
+					point.w = 0.f;
+				}
+				if (owner > hotness_far)
+					hotness_far = owner;
+			}
 		}
 	}
-	if (!(hotness > 0.001f))
+	// next to a fire: cold things warm up to what the fire gives at that distance, warm things by part of it
+	if (!i_mask[fl_hud] && RImplementation.Target->heat_fires_near())
+	{
+		Fvector C;
+		xform->transform_tiny(C, pVisual->vis.sphere.P);
+		const float fire = RImplementation.Target->heat_fire_at(C);
+		if (fire > 0.001f)
+		{
+			hotness = _max(fire, hotness + fire * .35f);
+			hotness_far = _max(fire, hotness_far + fire * .35f);
+		}
+	}
+	if (!(hotness > 0.001f) && !(hotness_far > 0.001f))
 		return;
 
 	HeatItem item;
@@ -103,6 +185,8 @@ void CDSGraphManager::r1_heat_insert(dxRender_Visual* pVisual, Fmatrix* xform, b
 	item.pMatrix = xform;
 	item.ssa = ssa;
 	item.hotness = hotness < 1.f ? hotness : 1.f;
+	item.hotness_far = point.w > 0.f ? (hotness_far < 1.f ? hotness_far : 1.f) : item.hotness;
+	item.point = point;
 	item.gain = 1.f;
 	item.hud = i_mask[fl_hud];
 	ShaderElement* lq = pVisual->shader->E[SE_R1_NORMAL_LQ]._get();
@@ -123,11 +207,16 @@ void CDSGraphManager::r1_heat_insert_particle(dxRender_Visual* pVisual, float ss
 	if (!RImplementation.Target->heat_particle(effect->GetDefinition()->m_Name, hotness, gain))
 		return;
 
+	// an open fire also warms what is around it (docs/r1_thermal.md, "Heat spreads from fires")
+	RImplementation.Target->heat_add_fire(pVisual->vis.sphere.P, pVisual->vis.sphere.R, hotness);
+
 	HeatItem item;
 	item.pVisual = pVisual;
 	item.pMatrix = nullptr;
 	item.ssa = ssa;
 	item.hotness = hotness;
+	item.hotness_far = hotness;
+	item.point.set(0.f, 0.f, 0.f, 0.f);
 	item.gain = gain;
 	item.hud = false; // a HUD particle effect switches to the HUD projection by itself
 	item.lq = false;

@@ -8,6 +8,7 @@
 //   E[1] mask lq : the same for a visual the scene drew with one-bone skinning    heat_mask_lq.vs  + heat_mask.ps
 //   E[2] particle: a warm particle effect, blended into red                       heat_particle.vs + heat_particle.ps
 //   E[3] sky     : a screen quad at the far end of the depth range                heat_flat.ps
+//   E[4] spot    : a soft round spot (fire spread, a lamp's glow), blended into red  heat_particle.vs + heat_spot.ps
 // E[0] and E[1] depend on the skinning mode set while the shader is created (one shader per mode).
 //
 // CBlender_r1_thermal_look, the thermal look of one view (0 = the screen, 1 = the SVP lens); screen quads:
@@ -34,6 +35,7 @@ enum
 	SE_R1_HEAT_MASK_LQ = 1,
 	SE_R1_HEAT_PARTICLE = 2,
 	SE_R1_HEAT_SKY = 3,
+	SE_R1_HEAT_SPOT = 4,
 };
 
 enum

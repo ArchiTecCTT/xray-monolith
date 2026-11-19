@@ -34,6 +34,10 @@ void CBlender_r1_heat::Compile(CBlender_Compile& C)
 		C.r_Pass("null", "heat_flat", false, TRUE, FALSE);
 		C.r_End();
 		break;
+	case SE_R1_HEAT_SPOT: // ONE + ONE, switched to MAX by the pass that draws it; no texture, the disc is computed
+		C.r_Pass("heat_particle", "heat_spot", false, TRUE, FALSE, TRUE, D3DBLEND_ONE, D3DBLEND_ONE);
+		C.r_End();
+		break;
 	}
 }
 

@@ -655,6 +655,18 @@ void CRender::Render()
 	// SVP-lite: on (never presented) SVP frames skip the attachment/HUD UI passes. Grass is NOT skipped on the MT
 	// branch: the detail MT_CALC gating (m_frame_rendered) would then compute visibles from the scope frustum
 	const bool svp_lite = ps_r__svp_skip_extras && Device.m_SecondViewport.IsSVPFrame();
+	// R1 thermal: a warm model is drawn twice in a frame, here and again into the heat mask at the end, and the
+	// second draw only lands where it matches the depth of the first. A worker computes this frame's skeleton poses
+	// while the frame is drawn (mt_calc_bones); a model drawn before the worker reached it and redrawn after would be
+	// in two different poses and lose its heat wherever it moved away from the camera. So with a heat mask wanted,
+	// wait until the poses are final. The worker is normally done long before this point; the wait is bounded.
+	if (r1_heat_collect && ps_r1_thermal_sync && Device.bones_task_running.load())
+	{
+		CTimerBase wait;
+		wait.Start();
+		while (Device.bones_task_running.load() && wait.GetElapsed_ms() < 50)
+			Sleep(0);
+	}
 	// Begin
 	Target->Begin();
 	phase = PHASE_NORMAL;

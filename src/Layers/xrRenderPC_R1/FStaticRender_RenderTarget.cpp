@@ -1,6 +1,8 @@
 #include "stdafx.h"
 #include "fstaticrender_rendertarget.h"
 #include "../../xrEngine/IGame_Persistent.h"
+#include "../../xrEngine/Environment.h"
+#include "../../xrEngine/thunderbolt.h"
 #include "../../xrEngine/shader_bus.h"
 #include "../../xrEngine/svp_lens_zoom.h"
 #include "../xrRender/dxRenderDeviceRender.h"
@@ -89,6 +91,10 @@ CRenderTarget::CRenderTarget()
 	heat_cfg_look = 0;
 	heat_cfg_palette = 0;
 	heat_cfg_region.set(.5f, .5f, 0.f, 0.f);
+	heat_cfg_soft = 3.f;
+	heat_cfg_grain = heat_cfg_fpn = 0.f;
+	heat_cfg_contrast = 1.f;
+	look_clip.set(1.f, 1.f, 0.f, 0.f);
 	heat_lens_wait = 0;
 	for (u32 view = 0; view < 2; ++view)
 	{
@@ -902,14 +908,40 @@ bool CRenderTarget::heat_wanted()
 		if (lane.z >= .5f) heat_cfg_palette = clampr(iFloor(lane.z + .5f) - 1, 0, 2);
 		if (lane.w >= .5f) heat_cfg_targets = clampr(iFloor(lane.w + .5f), 1, 3);
 	}
+	// bus lane "thermal_sensor", the quality of the device (a mod sets it per device, see "Generations" in the doc):
+	// x > 0 = screen pixels per sensor pixel (1 = as sharp as the screen .. 8), y = grain, z = fixed pattern
+	// (y, z: > 0 the value, < 0 none), w > 0 = factor on the world's contrast. 0 = the console var
+	heat_cfg_soft = ps_r1_thermal_soft;
+	heat_cfg_grain = ps_r1_thermal_grain;
+	heat_cfg_fpn = ps_r1_thermal_fpn;
+	heat_cfg_contrast = 1.f;
+	if (ShaderBus::get("thermal_sensor", lane))
+	{
+		if (lane.x > 0.f) heat_cfg_soft = lane.x;
+		if (lane.y != 0.f) heat_cfg_grain = lane.y > 0.f ? lane.y : 0.f;
+		if (lane.z != 0.f) heat_cfg_fpn = lane.z > 0.f ? lane.z : 0.f;
+		if (lane.w > 0.f) heat_cfg_contrast = lane.w;
+	}
+	heat_cfg_soft = clampr(heat_cfg_soft, 1.f, 8.f);
+	heat_cfg_grain = clampr(heat_cfg_grain, 0.f, .3f);
+	heat_cfg_fpn = clampr(heat_cfg_fpn, 0.f, .1f);
+	heat_cfg_contrast = clampr(heat_cfg_contrast, 0.f, 4.f);
+	// never over the main menu or the pause menu: no mask, no picture, as if it were off
+	if (on && g_pGamePersistent && g_pGamePersistent->m_pMainMenu && g_pGamePersistent->m_pMainMenu->IsActive())
+		on = false;
 	return on;
 }
 
 bool CRenderTarget::heat_begin_frame()
 {
 	heat_mode = 0;
+	heat_spots.clear();
+	heat_fires.clear();
 	if (heat_state < 0 || !Available() || !heat_wanted())
+	{
+		heat_fires_prev.clear();
 		return false;
+	}
 	if (0 == heat_state)
 	{
 		heat_state = heat_create() ? 1 : -1;
@@ -953,6 +985,7 @@ bool CRenderTarget::heat_create()
 	static const LPCSTR files[] =
 	{
 		"heat_mask.vs", "heat_mask_lq.vs", "heat_mask.ps", "heat_flat.ps", "heat_particle.vs", "heat_particle.ps",
+		"heat_spot.ps",
 		"thermal_noise.ps", "thermal_down.ps", "thermal_blur.ps", "thermal_look.ps", "thermal_palette.ps",
 		"thermal_show.ps", "thermal_show_region.ps"
 	};
@@ -999,6 +1032,7 @@ bool CRenderTarget::heat_create()
 	Engine.External.SetSkinningMode(saved_skinning);
 
 	heat_load_patterns();
+	g_heat_spot.create(FVF::F_LIT, RCache.Vertex.Buffer(), RCache.QuadIB);
 
 	Msg("* r__heatvision: ready (heat mask %ux%u)", rtWidth, rtHeight);
 	if (!heat_alpha)
@@ -1054,6 +1088,10 @@ void CRenderTarget::heat_destroy()
 	RT_heat.destroy();
 	heat_patterns.clear();
 	heat_particle_cache.clear();
+	g_heat_spot.destroy();
+	heat_spots.clear();
+	heat_fires.clear();
+	heat_fires_prev.clear();
 	heat_screen_live = false;
 	heat_svp_live = false;
 	heat_svp_valid = false;
@@ -1153,6 +1191,133 @@ ShaderElement* CRenderTarget::heat_particle_element()
 	return (E && E->passes.size()) ? E : nullptr;
 }
 
+// Heat spreads from fires. Every open fire the frame draws (a warm particle effect of hotness 0.75 and up: flames,
+// explosions, an active fire anomaly) is a source: its sphere, a reach around it and a strength.
+//  - what is around it: one soft round spot per fire in the mask, strongest at the fire and gone at its reach,
+//    depth tested like everything else, so a wall in front of the fire hides it;
+//  - objects near it (the barrel it burns in, a crate, a stalker sitting at it) warm as a whole: heat_fire_at, asked
+//    by the scene graph with the fires of the frame before.
+// r1_thermal_fire_spread 0 switches all of it off.
+void CRenderTarget::heat_add_fire(const Fvector& centre, float radius, float hotness)
+{
+	if (!(ps_r1_thermal_fire_spread > 0.f) || hotness < .75f || heat_fires.size() >= 16)
+		return;
+	const float R = clampr(radius, .1f, 3.f);
+	heat_spot S;
+	// the flames' sphere sits above what burns: a little lower is where the heat is
+	S.pos.set(centre.x, centre.y - R * .3f, centre.z);
+	// a campfire's flames (about 0.6 m) reach the full r1_thermal_fire_reach, a muzzle flash a fraction of it
+	S.radius = R + ps_r1_thermal_fire_reach * clampr(R / .6f, .2f, 1.5f);
+	S.heat = ps_r1_thermal_fire_spread * hotness * clampr(R / .4f, .4f, 1.f);
+	S.hard = 0.f;
+	S.pull = S.radius;
+	// one fire is several effects (flames, sparks, the big and the small flame): keep the widest
+	for (heat_spot& F : heat_fires)
+	{
+		if (F.pos.distance_to_sqr(S.pos) < .75f * .75f)
+		{
+			if (S.radius > F.radius) F.radius = F.pull = S.radius;
+			if (S.heat > F.heat) F.heat = S.heat;
+			return;
+		}
+	}
+	heat_fires.push_back(S);
+}
+
+float CRenderTarget::heat_fire_at(const Fvector& pos)
+{
+	float best = 0.f;
+	for (const heat_spot& F : heat_fires_prev)
+	{
+		const float d2 = F.pos.distance_to_sqr(pos);
+		if (d2 >= F.radius * F.radius)
+			continue;
+		const float k = 1.f - _sqrt(d2) / F.radius;
+		const float heat = F.heat * k * (.5f + .5f * k); // the same fall-off as the spot (heat_spot.ps)
+		if (heat > best)
+			best = heat;
+	}
+	return best;
+}
+
+// A lit lamp that is only a glow: the lamps built into the level have no object to warm, the glow the level
+// designer put on them is what tells a lit one from a dead one. A small disc there, a quarter of the glow's size.
+void CRenderTarget::heat_add_glow(const Fvector& pos, float radius, float visible)
+{
+	if (!(ps_r1_thermal_lamp > 0.f) || !(ps_r1_thermal_lamp_size > 0.f) || visible < .02f || heat_spots.size() >= 64)
+		return;
+	heat_spot S;
+	S.pos = pos;
+	S.radius = _max(.06f, radius * ps_r1_thermal_lamp_size);
+	S.heat = ps_r1_thermal_lamp * (visible < .5f ? visible * 2.f : 1.f);
+	S.hard = 1.f;
+	S.pull = radius; // the lamp's own shade and fitting are inside the glow
+	heat_spots.push_back(S);
+}
+
+void CRenderTarget::heat_draw_spots()
+{
+	for (const heat_spot& F : heat_fires)
+		heat_spots.push_back(F);
+	if (heat_spots.empty())
+		return;
+	ShaderElement* E = s_heat[0]->E[SE_R1_HEAT_SPOT]._get();
+	if (!E || 0 == E->passes.size() || !g_heat_spot._get())
+		return;
+
+	u32 Offset;
+	const u32 count = u32(heat_spots.size());
+	FVF::LIT* pv = (FVF::LIT*)RCache.Vertex.Lock(count * 4, g_heat_spot->vb_stride, Offset);
+	u32 drawn = 0;
+	for (const heat_spot& S : heat_spots)
+	{
+		Fvector dir;
+		dir.sub(Device.vCameraPosition, S.pos);
+		const float dist = dir.magnitude();
+		if (dist < .05f)
+			continue;
+		dir.div(dist);
+		// drawn nearer to the camera by 'pull' and smaller by the same share, so it covers the same part of the view
+		const float pull = clampr(S.pull, 0.f, _max(0.f, dist - .3f));
+		const float r = S.radius * (dist - pull) / dist;
+		Fvector P, Vr, Vt;
+		P.mad(S.pos, dir, pull);
+		Vr.mul(Device.vCameraRight, r);
+		Vt.mul(Device.vCameraTop, r);
+		// red = hotness in the middle, green = how hard the disc is
+		const u32 clr = color_rgba(u32(clampr(S.heat, 0.f, 1.f) * 255.f + .5f), u32(clampr(S.hard, 0.f, 1.f) * 255.f + .5f), 0, 255);
+		pv->set(P.x - Vr.x - Vt.x, P.y - Vr.y - Vt.y, P.z - Vr.z - Vt.z, clr, 0.f, 1.f); pv++;
+		pv->set(P.x - Vr.x + Vt.x, P.y - Vr.y + Vt.y, P.z - Vr.z + Vt.z, clr, 0.f, 0.f); pv++;
+		pv->set(P.x + Vr.x - Vt.x, P.y + Vr.y - Vt.y, P.z + Vr.z - Vt.z, clr, 1.f, 1.f); pv++;
+		pv->set(P.x + Vr.x + Vt.x, P.y + Vr.y + Vt.y, P.z + Vr.z + Vt.z, clr, 1.f, 0.f); pv++;
+		++drawn;
+	}
+	RCache.Vertex.Unlock(drawn * 4, g_heat_spot->vb_stride);
+	if (!drawn)
+		return;
+
+	// red only, and with MAX (where the GPU has it) a spot never darkens or adds to what is already there
+	RCache.set_xform_world(Fidentity);
+	RCache.set_ColorWriteEnable(D3DCOLORWRITEENABLE_RED);
+	RCache.set_CullMode(CULL_NONE);
+	RCache.set_Element(E);
+	if (heat_max)
+		CHK_DX(HW.pDevice->SetRenderState(D3DRS_BLENDOP, D3DBLENDOP_MAX));
+	RCache.set_Geometry(g_heat_spot);
+	RCache.Render(D3DPT_TRIANGLELIST, Offset, 0, drawn * 4, 0, drawn * 2);
+	if (heat_max)
+		CHK_DX(HW.pDevice->SetRenderState(D3DRS_BLENDOP, D3DBLENDOP_ADD));
+	RCache.set_ColorWriteEnable();
+	RCache.set_CullMode(CULL_CCW);
+}
+
+void CRenderTarget::heat_end_frame()
+{
+	heat_fires_prev.swap(heat_fires);
+	heat_fires.clear();
+	heat_spots.clear();
+}
+
 void CRenderTarget::heat_idle()
 {
 	// The full-size scope frame of an SVP without the small target is not a "thermal off" frame.
@@ -1216,6 +1381,8 @@ void CRenderTarget::phase_heat()
 	heat_depth_bias(true);
 	RImplementation.GMBase.r_dsgraph_render_heat();
 	heat_depth_bias(false);
+	heat_draw_spots();
+	heat_end_frame();
 	heat_screen_live = true;
 }
 
@@ -1232,6 +1399,8 @@ void CRenderTarget::phase_heat_svp()
 	heat_depth_bias(true);
 	RImplementation.GMBase.r_dsgraph_render_heat();
 	heat_depth_bias(false);
+	heat_draw_spots();
+	heat_end_frame();
 	heat_svp_valid = true;
 	heat_svp_live = true;
 
@@ -1255,7 +1424,7 @@ bool CRenderTarget::look_prepare(u32 view, u32 src_w, u32 src_h)
 	if (u32(-1) == L.w)
 		return false; // could not be created, until vid_restart
 
-	const float soft = clampr(ps_r1_thermal_soft, 1.f, 8.f);
+	const float soft = heat_cfg_soft; // r1_thermal_soft, or the bus lane "thermal_sensor"
 	const u32 w = u32(_max(16, iFloor(float(src_w) / soft + .5f)));
 	const u32 h = u32(_max(16, iFloor(float(src_h) / soft + .5f)));
 
@@ -1279,7 +1448,7 @@ bool CRenderTarget::look_prepare(u32 view, u32 src_w, u32 src_h)
 	if (L.w == w && L.h == h)
 		return true;
 
-	// first use, or r1_thermal_soft changed: (re)create the targets at the new sensor size
+	// first use, or the sensor size changed: (re)create the targets at the new size
 	const r1_thermal_look_names& N = r1_thermal_look_names_of(view);
 	L.out.destroy();
 	L.grey.destroy();
@@ -1325,10 +1494,11 @@ void CRenderTarget::look_draw(ShaderElement* E, IDirect3DSurface9* target, const
 	                  n_ring_b = "thermal_ring_b", n_body = "thermal_body", n_world = "thermal_world",
 	                  n_sky = "thermal_sky", n_grain = "thermal_grain", n_noise_a = "thermal_noise_a",
 	                  n_noise_b = "thermal_noise_b", n_col_a = "thermal_col_a", n_col_b = "thermal_col_b",
-	                  n_palette = "thermal_palette", n_region = "thermal_region";
+	                  n_palette = "thermal_palette", n_region = "thermal_region", n_hot = "thermal_hot";
 	const look_consts& c = look_c;
 	RCache.set_RT(target);
 	RCache.set_Element(E);
+	RCache.set_c(n_hot, c.hot);
 	// a constant the pass does not have is skipped
 	RCache.set_c(n_tap_a, c.tap_a);
 	RCache.set_c(n_tap_b, c.tap_b);
@@ -1357,7 +1527,25 @@ void CRenderTarget::look_quad(ShaderElement* E, IDirect3DSurface9* target, float
 	quad[1].set(-.5f, -.5f, white, white, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f);
 	quad[2].set(w - .5f, h - .5f, white, white, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f);
 	quad[3].set(w - .5f, -.5f, white, white, 1.f, 0.f, 1.f, 0.f, 1.f, 0.f);
+	// with a region set only the box around its circle is worked on (look_clip, in parts of the target)
+	const bool clip = look_clip.x < look_clip.z;
+	if (clip)
+	{
+		RECT box;
+		box.left = LONG(_max(0, iFloor(look_clip.x * w)));
+		box.top = LONG(_max(0, iFloor(look_clip.y * h)));
+		box.right = LONG(_min(iFloor(w + .5f), iCeil(look_clip.z * w)));
+		box.bottom = LONG(_min(iFloor(h + .5f), iCeil(look_clip.w * h)));
+		if (box.right <= box.left || box.bottom <= box.top)
+			return;
+		// the target has to be bound before its scissor box is set
+		RCache.set_RT(target);
+		CHK_DX(HW.pDevice->SetScissorRect(&box));
+		CHK_DX(HW.pDevice->SetRenderState(D3DRS_SCISSORTESTENABLE, TRUE));
+	}
 	look_draw(E, target, quad);
+	if (clip)
+		CHK_DX(HW.pDevice->SetRenderState(D3DRS_SCISSORTESTENABLE, FALSE));
 }
 
 bool CRenderTarget::look_build(u32 view, u32 src_w, u32 src_h)
@@ -1376,14 +1564,23 @@ bool CRenderTarget::look_build(u32 view, u32 src_w, u32 src_h)
 	}
 
 	look_consts& c = look_c;
-	// a body: its level where it faces the camera, darker by 'round' of it where it is seen edge-on. Without the
-	// edge term in the mask (no alpha channel) bodies are flat
-	c.body.set(heat_alpha ? ps_r1_thermal_body * ps_r1_thermal_round : 0.f, ps_r1_thermal_ring, ps_r1_thermal_glow,
-	           ps_r1_thermal_body);
-	c.world.set(ps_r1_thermal_world_base, ps_r1_thermal_world, ps_r1_thermal_world_gamma, 0.f);
-	c.sky.set(ps_r1_thermal_sky, ps_r1_thermal_sky_clouds, 0.f, 0.f);
+	// The heat ladder: the mask's hotness is how far a thing goes from the world's grey to the top level. With the
+	// ladder on the top level is r1_thermal_top (pure white): only fire reaches it, a living body (0.8) stays a
+	// light grey-white under it. With the ladder off every creature is 1 and the top is r1_thermal_body, as before.
+	const float top = ps_r1_thermal_ladder ? ps_r1_thermal_top : ps_r1_thermal_body;
+	// a body is darker by 'round' of its level where it is seen edge-on. Without the edge term in the mask (no alpha
+	// channel) bodies are flat
+	c.body.set(heat_alpha ? top * ps_r1_thermal_round : 0.f, ps_r1_thermal_ring, ps_r1_thermal_glow, top);
+	// x = the bloom of the very hot (fire, a muzzle after a burst), y, z = where "very hot" starts and its slope
+	c.hot.set(ps_r1_thermal_ladder ? ps_r1_thermal_bloom : 0.f, .85f, 1.f / .12f, 0.f);
+	c.world.set(ps_r1_thermal_world_base, ps_r1_thermal_world * heat_cfg_contrast, ps_r1_thermal_world_gamma, 0.f);
+	// lightning: while a bolt is lit the sky flashes and the bolt itself shows
+	float flash = 0.f;
+	if (ps_r1_thermal_lightning > 0.f && g_pGamePersistent && g_pGamePersistent->Environment().eff_Thunderbolt)
+		flash = ps_r1_thermal_lightning * g_pGamePersistent->Environment().eff_Thunderbolt->thermal_flash;
+	c.sky.set(ps_r1_thermal_sky + .45f * flash, ps_r1_thermal_sky_clouds + flash, 0.f, 0.f);
 	// columns a little stronger than the lines; the line term is +-0.25 in the shader
-	c.grain.set(ps_r1_thermal_grain, ps_r1_thermal_fpn * 2.4f, ps_r1_thermal_fpn * 4.f, h * .5f);
+	c.grain.set(heat_cfg_grain, heat_cfg_fpn * 2.4f, heat_cfg_fpn * 4.f, h * .5f);
 	// one noise texel per sensor pixel (the noise texture is 128x128 and repeats)
 	c.noise_a.set(w / 128.f, h / 128.f, 0.f, 0.f);
 	c.noise_b.set(look_noise_shift.x, look_noise_shift.y, 0.f, 0.f);
@@ -1397,6 +1594,18 @@ bool CRenderTarget::look_build(u32 view, u32 src_w, u32 src_h)
 	RCache.set_ZB(NULL);
 	RCache.set_ColorWriteEnable();
 	RCache.set_CullMode(CULL_CCW);
+
+	// The screen picture shown inside a circle: only the box around the circle is worked on, plus what the blur
+	// reaches. Not when a mod shows the picture itself (r1_thermal_look 2): it may use any part of it.
+	look_clip.set(1.f, 1.f, 0.f, 0.f);
+	if (0 == view && 1 == heat_cfg_look && heat_cfg_region.z > 0.f)
+	{
+		const float aspect = h / w; // the radius is in screen heights
+		const float rx = heat_cfg_region.z * aspect + 10.f / w, ry = heat_cfg_region.z + 10.f / h;
+		look_clip.set(heat_cfg_region.x - rx, heat_cfg_region.y - ry, heat_cfg_region.x + rx, heat_cfg_region.y + ry);
+		if (look_clip.x <= 0.f && look_clip.y <= 0.f && look_clip.z >= 1.f && look_clip.w >= 1.f)
+			look_clip.set(1.f, 1.f, 0.f, 0.f); // the circle covers the screen
+	}
 
 	// four taps a quarter of a sensor pixel off its centre cover the sensor pixel in the full-size source
 	c.tap_a.set(.25f / w, .25f / h, 0.f, 0.f);
@@ -1414,6 +1623,7 @@ bool CRenderTarget::look_build(u32 view, u32 src_w, u32 src_h)
 	c.tap_b.set(.25f / w, -.25f / h, 0.f, 0.f);
 	look_quad(L.shader->E[SE_R1_LOOK_GREY]._get(), L.grey->pRT, w, h);
 	look_quad(L.shader->E[SE_R1_LOOK_PALETTE]._get(), L.out->pRT, w, h);
+	look_clip.set(1.f, 1.f, 0.f, 0.f);
 	return true;
 }
 

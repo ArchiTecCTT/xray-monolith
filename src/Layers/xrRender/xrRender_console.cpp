@@ -169,10 +169,28 @@ int ps_r1_SoftwareSkinning = 0; // r1-only
 // r1-only thermal (heat mask), see docs/r1_thermal.md. The switch itself is r__heatvision (or the bus lane "thermal")
 int ps_r1_thermal_targets = 3; // which views get a heat mask: 1 = the screen ($user$heat), 2 = the SVP lens ($user$heat_vp2), 3 = both
 float ps_r1_thermal_bias = 8.f; // depth bias of the heat redraw, in steps of a 24-bit depth buffer
+float ps_r1_thermal_depth = 2.f; // and in centimetres towards the camera (world models only, not the first-person hands)
+int ps_r1_thermal_sync = 1; // wait for the frame's skeleton poses before drawing, so the heat redraw matches the scene
 // what is warm besides bodies (0 = that kind of source stays cold)
-float ps_r1_thermal_gear = 0.8f; // script attachments worn by a warm creature, as a share of its hotness
-float ps_r1_thermal_lamp = 0.65f; // a lit lamp (hanging lamp objects)
-float ps_r1_thermal_barrel = 0.8f; // a gun at full barrel temperature (the sil_glow_* counter)
+float ps_r1_thermal_gear = 0.9f; // script attachments worn by a warm creature, as a share of its hotness
+float ps_r1_thermal_lamp = 0.5f; // a lit lamp: lamp objects, searchlights, and the glows of lamps built into the level
+float ps_r1_thermal_lamp_size = 0.25f; // the warm spot of a lamp that is only a glow, as a share of the glow's size; 0 = none
+float ps_r1_thermal_barrel = 0.9f; // a gun's muzzle at full barrel temperature (the sil_glow_* counter)
+float ps_r1_thermal_barrel_len = 0.45f; // metres from the muzzle over which the barrel's heat falls off
+float ps_r1_thermal_gun = 0.25f; // the rest of the gun at full barrel temperature (it warms late: by the square of the counter)
+// the heat ladder (docs/r1_thermal.md): 1 = creatures take their heat from configs\r1_thermal.ltx (people 0.8, fire 1)
+// and only heat 1 reaches the top level; 0 = every creature is 1 and the top is r1_thermal_body, as in round 2
+int ps_r1_thermal_ladder = 1;
+float ps_r1_thermal_top = 1.f; // grey level of heat 1 (fire) with the ladder on
+float ps_r1_thermal_bloom = 0.3f; // extra glow around the very hot (fire, a muzzle after a burst); 0 = none
+// heat that follows physics (docs/r1_thermal.md); every one is off at 0
+float ps_r1_thermal_fire_spread = 0.3f; // hotness an open fire gives to what is right at it
+float ps_r1_thermal_fire_reach = 1.5f; // metres beyond the flames at which that is gone
+float ps_r1_thermal_wet = 0.15f; // share of its heat a soaked creature loses
+float ps_r1_thermal_sun = 0.07f; // hotness direct sun adds to a creature's surface
+float ps_r1_thermal_force_rain = -1.f; // testing: rain density 0..1 instead of the weather's; < 0 = the weather
+float ps_r1_thermal_force_sun = -1.f; // testing: sun strength 0..1 instead of the weather's; < 0 = the weather
+float ps_r1_thermal_lightning = 0.6f; // how strongly the sky flashes with a lightning bolt
 int ps_r1_thermal_particles = 1; // fires, embers and heat haze: particle effects named in configs\r1_thermal.ltx
 // the engine's thermal look
 int ps_r1_thermal_look = 1; // 0 = masks only (a mod makes the look), 1 = shown on the screen and in the SVP lens, 2 = built into $user$thermal but not shown on the screen
@@ -1468,9 +1486,24 @@ void xrRender_initconsole()
 	// mask that post-process and lens shaders can sample. Off, nothing is created or drawn. See docs/r1_thermal.md.
 	CMD4(CCC_Integer, "r1_thermal_targets", &ps_r1_thermal_targets, 1, 3);
 	CMD4(CCC_Float, "r1_thermal_bias", &ps_r1_thermal_bias, 0.f, 4096.f);
+	CMD4(CCC_Float, "r1_thermal_depth", &ps_r1_thermal_depth, 0.f, 50.f);
+	CMD4(CCC_Integer, "r1_thermal_sync", &ps_r1_thermal_sync, 0, 1);
 	CMD4(CCC_Float, "r1_thermal_gear", &ps_r1_thermal_gear, 0.f, 1.f);
 	CMD4(CCC_Float, "r1_thermal_lamp", &ps_r1_thermal_lamp, 0.f, 1.f);
 	CMD4(CCC_Float, "r1_thermal_barrel", &ps_r1_thermal_barrel, 0.f, 1.f);
+	CMD4(CCC_Float, "r1_thermal_lamp_size", &ps_r1_thermal_lamp_size, 0.f, 1.f);
+	CMD4(CCC_Float, "r1_thermal_barrel_len", &ps_r1_thermal_barrel_len, 0.f, 3.f);
+	CMD4(CCC_Float, "r1_thermal_gun", &ps_r1_thermal_gun, 0.f, 1.f);
+	CMD4(CCC_Integer, "r1_thermal_ladder", &ps_r1_thermal_ladder, 0, 1);
+	CMD4(CCC_Float, "r1_thermal_top", &ps_r1_thermal_top, 0.f, 1.f);
+	CMD4(CCC_Float, "r1_thermal_bloom", &ps_r1_thermal_bloom, 0.f, 2.f);
+	CMD4(CCC_Float, "r1_thermal_fire_spread", &ps_r1_thermal_fire_spread, 0.f, 1.f);
+	CMD4(CCC_Float, "r1_thermal_fire_reach", &ps_r1_thermal_fire_reach, 0.f, 10.f);
+	CMD4(CCC_Float, "r1_thermal_wet", &ps_r1_thermal_wet, 0.f, 1.f);
+	CMD4(CCC_Float, "r1_thermal_sun", &ps_r1_thermal_sun, 0.f, 1.f);
+	CMD4(CCC_Float, "r1_thermal_force_rain", &ps_r1_thermal_force_rain, -1.f, 1.f);
+	CMD4(CCC_Float, "r1_thermal_force_sun", &ps_r1_thermal_force_sun, -1.f, 1.f);
+	CMD4(CCC_Float, "r1_thermal_lightning", &ps_r1_thermal_lightning, 0.f, 2.f);
 	CMD4(CCC_Integer, "r1_thermal_particles", &ps_r1_thermal_particles, 0, 1);
 	// the engine's thermal look (shown while thermal is on and r1_thermal_look is 1), every strength tunable
 	CMD4(CCC_Integer, "r1_thermal_look", &ps_r1_thermal_look, 0, 2);

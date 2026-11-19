@@ -641,6 +641,10 @@ void CDSGraphManager::r_dsgraph_render_heat()
 		return;
 
 	static shared_str s_item = "r1_heat_item"; // models: x = hotness, y = 1 for a HUD item (the player's hands)
+	static shared_str s_vs = "r1_heat_vs"; // x = hotness at the heat point, y = far from it, z = depth pull in metres
+	static shared_str s_point = "r1_heat_point"; // xyz = the heat point (world), w = 1 / reach
+	// the first-person hands and gun keep the plain depth test: nothing changes their pose between the two draws
+	const float depth_pull = ps_r1_thermal_depth * .01f;
 	bool has_hud = false, has_particles = false;
 	for (int pass = 0; pass < 2; ++pass)
 	{
@@ -669,6 +673,8 @@ void CDSGraphManager::r_dsgraph_render_heat()
 			RCache.set_Element(E);
 			RCache.set_xform_world(*item.pMatrix);
 			RCache.set_c(s_item, item.hotness, hud ? 1.f : 0.f, 0.f, 0.f);
+			RCache.set_c(s_vs, item.hotness, item.hotness_far, hud ? 0.f : depth_pull, 0.f);
+			RCache.set_c(s_point, item.point);
 			V->Render(calcLOD(item.ssa, V->vis.sphere.R));
 		}
 		if (hud) RImplementation.rmNormal();

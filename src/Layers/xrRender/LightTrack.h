@@ -80,6 +80,11 @@ private:
 	s32 ticks_to_update;
 	s32 sky_rays_uptodate;
 #endif	// RENDER!=R_R1
+
+	// R1 thermal: the surface state of this object (r__dsgraph_build.cpp, r1_heat_surface)
+	float thermal_wet = 0.f; // 0 dry .. 1 soaked
+	float thermal_sun = 0.f; // 0 .. 1 warmed by direct sun
+	float thermal_time = -1.f; // Device.fTimeGlobal of the last update, < 0 = never
 public:
 	virtual void force_mode(u32 mode) { MODE = mode; };
 

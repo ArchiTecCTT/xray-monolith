@@ -236,6 +236,8 @@ namespace R_dsgraph
 		Fmatrix* pMatrix; // null for a particle effect (its vertices are in world space)
 		float ssa; // gives the same LOD as the scene pass, so the redraw lands on the depth that pass wrote
 		float hotness; // 0..1
+		float hotness_far; // models with a heat point: the hotness far from it (else the same as hotness)
+		Fvector4 point; // the heat point in world space, w = 1 / reach in metres (0 = none)
 		float gain; // particle effects only: how fast the sprite's own brightness reaches the hotness
 		bool hud; // drawn with the HUD projection and depth range (the player's hands)
 		bool lq; // the scene pass used its low-quality element (one-bone skinning for two-bone meshes)

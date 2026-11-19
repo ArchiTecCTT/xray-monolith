@@ -120,9 +120,24 @@ extern ECORE_API float ps_r1_fog_luminance; //1.f r1-only
 extern ECORE_API int ps_r1_SoftwareSkinning; // r1-only
 extern ECORE_API int ps_r1_thermal_targets; // r1-only: 1 screen, 2 SVP lens, 3 both
 extern ECORE_API float ps_r1_thermal_bias; // r1-only
+extern ECORE_API float ps_r1_thermal_depth;
+extern ECORE_API int ps_r1_thermal_sync;
 extern ECORE_API float ps_r1_thermal_gear; // r1-only thermal, see xrRender_console.cpp and docs/r1_thermal.md
 extern ECORE_API float ps_r1_thermal_lamp;
 extern ECORE_API float ps_r1_thermal_barrel;
+extern ECORE_API float ps_r1_thermal_lamp_size;
+extern ECORE_API float ps_r1_thermal_barrel_len;
+extern ECORE_API float ps_r1_thermal_gun;
+extern ECORE_API int ps_r1_thermal_ladder;
+extern ECORE_API float ps_r1_thermal_top;
+extern ECORE_API float ps_r1_thermal_bloom;
+extern ECORE_API float ps_r1_thermal_fire_spread;
+extern ECORE_API float ps_r1_thermal_fire_reach;
+extern ECORE_API float ps_r1_thermal_wet;
+extern ECORE_API float ps_r1_thermal_sun;
+extern ECORE_API float ps_r1_thermal_force_rain;
+extern ECORE_API float ps_r1_thermal_force_sun;
+extern ECORE_API float ps_r1_thermal_lightning;
 extern ECORE_API int ps_r1_thermal_particles;
 extern ECORE_API int ps_r1_thermal_look;
 extern ECORE_API int ps_r1_thermal_palette;

@@ -329,6 +329,10 @@ void CGlowManager::render_selected()
 			Fvector gp;
 			gp.mad(G.position, dir, G.radius * scale);
 			FillSprite(pv, G.position, G.radius, clr);
+			// R1 thermal: a glow marks a lit lamp (the baked ones of the level and those of lamp objects); the heat
+			// mask gets a small warm spot there, as visible as the glow itself is
+			if (RImplementation.r1_heat_collect)
+				RImplementation.Target->heat_add_glow(G.position, G.radius, clampr(G.fade * scale / 255.f, 0.f, 1.f));
 		}
 		int vCount = int(pv - pvs);
 		RCache.Vertex.Unlock(vCount, hGeom->vb_stride);

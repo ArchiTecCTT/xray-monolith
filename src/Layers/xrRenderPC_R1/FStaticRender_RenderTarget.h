@@ -97,6 +97,23 @@ private:
 	int heat_cfg_look; // 0 masks only, 1 the engine's look is shown, 2 built ($user$thermal) but not shown on screen
 	int heat_cfg_palette; // 0 white hot, 1 black hot, 2 colour
 	Fvector4 heat_cfg_region; // screen look inside a circle: x, y, radius, soft edge; radius 0 = whole screen
+	// the sensor (bus lane "thermal_sensor" over the console vars): screen pixels per sensor pixel, grain, fixed
+	// pattern, and a factor on the world's contrast
+	float heat_cfg_soft, heat_cfg_grain, heat_cfg_fpn, heat_cfg_contrast;
+	// soft round spots drawn into the mask after the models: what a fire warms around it, and lit lamps that are
+	// only a glow (level geometry). Collected while the frame is built and drawn, dropped at its end
+	struct heat_spot
+	{
+		Fvector pos;
+		float radius; // metres
+		float heat; // hotness in its middle
+		float hard; // 0 = falls off from the middle, 1 = a disc with a soft rim
+		float pull; // metres it is drawn towards the camera, so the thing it sits in does not hide it
+	};
+	xr_vector<heat_spot> heat_spots;
+	// open fires: this frame's (they become spots) and the last frame's (they warm the objects near them)
+	xr_vector<heat_spot> heat_fires, heat_fires_prev;
+	ref_geom g_heat_spot;
 	u32 heat_lens_wait; // frames thermal has been on for the lens only without an SVP frame (logged once)
 	// warm particle effects: name patterns from configs\r1_thermal.ltx, and the answer per effect name
 	struct heat_pattern
@@ -129,9 +146,11 @@ private:
 	bool look_screen_live; // $user$thermal holds this frame's picture
 	struct look_consts
 	{
-		Fvector4 tap_a, tap_b, ring_a, ring_b, body, world, sky, grain, noise_a, noise_b, col_a, col_b, palette, region;
+		Fvector4 tap_a, tap_b, ring_a, ring_b, body, world, sky, grain, noise_a, noise_b, col_a, col_b, palette, region, hot;
 	};
 	look_consts look_c;
+	// the part of the picture the passes are limited to (a region is set): 0..1 of the target, x0 > x1 = all of it
+	Fvector4 look_clip;
 
 	float im_noise_time;
 	u32 im_noise_shift_w;
@@ -183,6 +202,8 @@ private:
 	void heat_load_patterns();
 	void heat_idle(); // a normal frame without a screen mask: blank a mask left over from when thermal was on
 	void heat_sky_flag(float w, float h); // blue = 1 where nothing in the scene wrote depth
+	void heat_draw_spots(); // fire spread and lamp glows -> red, never above what is there
+	void heat_end_frame(); // the spots and fires of this frame are done with
 	void phase_heat(); // normal frame: warm things -> $user$heat
 	void phase_heat_svp(); // small SVP frame: warm things -> the lens work mask, then the look into the lens picture
 
@@ -211,6 +232,12 @@ public:
 	bool heat_blend_max() { return heat_max; }
 	// is this particle effect warm (configs\r1_thermal.ltx)? hotness 0..1 and the gain on its sprites' brightness
 	bool heat_particle(const shared_str& name, float& hotness, float& gain);
+	// an open fire (a warm particle effect of hotness 0.75 and up) at this sphere: it warms what is around it
+	void heat_add_fire(const Fvector& centre, float radius, float hotness);
+	// a glow (a lit lamp) the scene drew, 'visible' 0..1 as the glow manager faded it
+	void heat_add_glow(const Fvector& pos, float radius, float visible);
+	bool heat_fires_near() { return !heat_fires_prev.empty(); }
+	float heat_fire_at(const Fvector& pos); // hotness a fire gives a thing at this place, 0 = none
 
 	BOOL SVPSmallEnabled() { return svp_small; }
 	BOOL SVPSmallFrame(); // small SVP target is enabled and this frame is an SVP frame
