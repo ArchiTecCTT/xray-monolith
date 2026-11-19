@@ -878,7 +878,29 @@ void CAI_Bloodsucker::manual_deactivate()
 extern int ps_r2_heatvision;
 void CAI_Bloodsucker::renderable_Render(IDSGraphManager* DM)
 {
-	if (m_visibility_state != no_visibility || ps_r2_heatvision > 0)
+	if (m_visibility_state != no_visibility)
+	{
+		inherited::renderable_Render(DM);
+		return;
+	}
+	// Fully cloaked: not drawn.
+	if (::Render->get_generation() == IRender_interface::GENERATION_R1)
+	{
+		// R1 thermal (docs/r1_thermal.md): still a warm body in the heat mask, and only there, so the normal picture
+		// around a thermal tube shows what it shows with thermal off: nothing. Not inherited::renderable_Render on
+		// purpose: that also marks the object as seen (MakeMeCrow, the visual's frame stamp), which makes the engine
+		// update it every frame; a cloaked bloodsucker must be updated exactly as often as with thermal off. Script
+		// attachments are left out too: drawing them has side effects in the scene (their 3D UI).
+		if (DM->get_HeatWanted() && Visual())
+		{
+			DM->set_HeatOnly(true);
+			DM->add_Dynamic(Visual(), &XFORM());
+			DM->set_HeatOnly(false);
+		}
+		return;
+	}
+	// DX10 / DX11: their heat shader draws the cloaked body itself (GetTransparency)
+	if (ps_r2_heatvision > 0)
 		inherited::renderable_Render(DM);
 	//--DSR-- HeatVision_end
 }

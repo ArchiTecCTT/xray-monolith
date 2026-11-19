@@ -245,6 +245,14 @@ public:
 		val_vItemHeatPoint.set(point.x, point.y, point.z, reach > 0.01f ? 1.f / reach : 0.f);
 	}
 	float get_ItemHeat() const { return val_fItemHeat; }
+	// R1 thermal: a thing that is warm but not to be seen (a fully cloaked bloodsucker). get_HeatWanted is true while
+	// this graph collects warm visuals for a heat mask (the R1 renderer sets it per frame, on the main view's graph
+	// only). Between set_HeatOnly(true) and set_HeatOnly(false) every visual added goes to the heat mask alone: the
+	// scene, its shadows and lights do not get it. Without a heat mask such a visual is dropped.
+	bool val_bHeatWanted = false;
+	bool val_bHeatOnly = false;
+	bool get_HeatWanted() const { return val_bHeatWanted; }
+	void set_HeatOnly(bool value) { val_bHeatOnly = value; }
 	bool i_mask[fl_max]{};//deffered,forward,wmarks,normal,shmap,val_invisible,val_hud,val_cam_attached
 
 	virtual void add_Static(IRenderVisual* pVisual, CFrustum& frustum, u32 planes) = 0;

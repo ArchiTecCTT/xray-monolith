@@ -598,6 +598,7 @@ void CRender::Calculate()
 	// drawn may survive into this one. With thermal off this is one flag test and an empty clear.
 	GMBase.RGraph.mapHeat.clear();
 	r1_heat_collect = Target->heat_begin_frame();
+	GMBase.val_bHeatWanted = r1_heat_collect;
 
 	// Main process
 	GMBase.traverse(pLastSector, ViewBase, Device.vCameraPosition, Device.mFullTransform);

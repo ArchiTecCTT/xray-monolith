@@ -306,6 +306,14 @@ void CDSGraphManager::r_dsgraph_insert_dynamic(dxRender_Visual *pVisual, Fmatrix
 	// leaves this function below
 	if (heat_collect && MT_PARTICLE_EFFECT == pVisual->Type)
 		r1_heat_insert_particle(pVisual, SSA);
+	// R1 thermal: warm but not to be seen (a fully cloaked bloodsucker, IDSGraphManager::set_HeatOnly). The heat mask
+	// gets it, tested against the depth of the scene around it; the scene itself does not.
+	if (val_bHeatOnly)
+	{
+		if (heat_collect && MT_PARTICLE_EFFECT != pVisual->Type)
+			r1_heat_insert(pVisual, xform, heat_own_model, SSA, RImplementation.rimp_select_sh_dynamic(pVisual, distSQ));
+		return;
+	}
 #endif
 
 	// Distortive geometry should be marked and R2 special-cases it
