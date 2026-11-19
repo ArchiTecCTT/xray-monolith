@@ -169,8 +169,8 @@ int ps_r1_SoftwareSkinning = 0; // r1-only
 // r1-only thermal (heat mask), see docs/r1_thermal.md. The switch itself is r__heatvision (or the bus lane "thermal")
 int ps_r1_thermal_targets = 3; // which views get a heat mask: 1 = the screen ($user$heat), 2 = the SVP lens ($user$heat_vp2), 3 = both
 float ps_r1_thermal_bias = 8.f; // depth bias of the heat redraw, in steps of a 24-bit depth buffer
-float ps_r1_thermal_depth = 2.f; // and in centimetres towards the camera (world models only, not the first-person hands)
-int ps_r1_thermal_sync = 1; // wait for the frame's skeleton poses before drawing, so the heat redraw matches the scene
+float ps_r1_thermal_depth = 2.f; // and in centimetres towards the camera, the same at any range (world models only, not the first-person hands)
+int ps_r1_thermal_sync = 1; // the frame's skeleton poses are final before drawing starts, so the heat redraw matches the scene
 // what is warm besides bodies (0 = that kind of source stays cold)
 float ps_r1_thermal_gear = 0.9f; // script attachments worn by a warm creature, as a share of its hotness
 float ps_r1_thermal_lamp = 0.45f; // a lit lamp: lamp objects, searchlights, and the glows of lamps built into the level

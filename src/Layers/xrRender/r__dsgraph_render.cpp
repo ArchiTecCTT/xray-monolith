@@ -641,7 +641,8 @@ void CDSGraphManager::r_dsgraph_render_heat()
 		return;
 
 	static shared_str s_item = "r1_heat_item"; // models: x = hotness, y = 1 for a HUD item (the player's hands)
-	static shared_str s_vs = "r1_heat_vs"; // x = hotness at the heat point, y = far from it, z = depth pull in metres
+	static shared_str s_vs = "r1_heat_vs"; // x = hotness at the heat point, y = far from it
+	static shared_str s_depth = "r1_heat_depth"; // x = pull towards the camera in metres, y = near plane, z = near * far / (far - near)
 	static shared_str s_point = "r1_heat_point"; // xyz = the heat point (world), w = 1 / reach
 	// the first-person hands and gun keep the plain depth test: nothing changes their pose between the two draws
 	const float depth_pull = ps_r1_thermal_depth * .01f;
@@ -654,6 +655,13 @@ void CDSGraphManager::r_dsgraph_render_heat()
 		// the HUD part: HUD projection and the near depth range, exactly as the HUD itself was drawn
 		CHudInitializer initializer(hud);
 		if (hud) RImplementation.rmNear();
+		// The depth pull is a distance in metres along the view axis, so the vertex shader needs the near plane of the
+		// projection the scene was drawn with: depth = Q - Q * near / distance, with Q = far / (far - near) = _33 and
+		// Q * near = -_43. Any other kind of projection, and the HUD part, gets no pull.
+		const Fmatrix& P = RCache.get_xform_project();
+		Fvector4 depth = {0.f, 1.f, 0.f, 0.f};
+		if (!hud && depth_pull > 0.f && fsimilar(P._34, 1.f) && fis_zero(P._44) && P._33 > EPS && P._43 < -EPS)
+			depth.set(depth_pull, -P._43 / P._33, -P._43, 0.f);
 		for (HeatItem& item : list)
 		{
 			if (item.particle)
@@ -673,7 +681,9 @@ void CDSGraphManager::r_dsgraph_render_heat()
 			RCache.set_Element(E);
 			RCache.set_xform_world(*item.pMatrix);
 			RCache.set_c(s_item, item.hotness, hud ? 1.f : 0.f, 0.f, 0.f);
-			RCache.set_c(s_vs, item.hotness, item.hotness_far, hud ? 0.f : depth_pull, 0.f);
+			// z stays 0: round 3's shader files took it as a pull in clip space, which was 9 percent of the distance
+			RCache.set_c(s_vs, item.hotness, item.hotness_far, 0.f, 0.f);
+			RCache.set_c(s_depth, depth);
 			RCache.set_c(s_point, item.point);
 			V->Render(calcLOD(item.ssa, V->vis.sphere.R));
 		}
