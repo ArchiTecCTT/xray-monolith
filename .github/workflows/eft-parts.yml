@@ -6,7 +6,7 @@ name: eft-parts
 
 on:
   push:
-    branches: [eft-parts-engine, svp-lite-mt-parts, svp-lite-mt-parts-canted, svp-lite-mt-parts-aimsettle, svp-lite-mt-parts-zero, svp-lite-mt-parts-zero-texfix, r1-ps3-lum-adapt, r1-sm3-detect, r1-svp-lens, r1-lum-readback, r1-svp-zoom, r1-unload-purge, sync-upstream-2026-11, headphones-audio, headphones-compressor, headphones-autogain, headphones-soundtypes, npc-reload-types, crash-diagnostics]
+    branches: [eft-parts-engine, svp-lite-mt-parts, svp-lite-mt-parts-canted, svp-lite-mt-parts-aimsettle, svp-lite-mt-parts-zero, svp-lite-mt-parts-zero-texfix, r1-ps3-lum-adapt, r1-sm3-detect, r1-svp-lens, r1-lum-readback, r1-svp-zoom, r1-unload-purge, sync-upstream-2026-11, headphones-audio, headphones-compressor, headphones-autogain, headphones-soundtypes, npc-reload-types, crash-diagnostics, r1-thermal]
   workflow_dispatch:
 
 permissions:
@@ -33,6 +33,79 @@ jobs:
             g++ -std=c++17 -g -Wall -fsanitize=address,undefined "tests/$t.cpp" -o "/tmp/$t"
             "/tmp/$t" .
           done
+
+  shaders:
+    # R1 compiles its shaders on the player's PC when they are first used, and a shader error there stops the game.
+    # This compiles the R1 thermal shader files (docs/r1_thermal.md) with the Windows SDK's fxc for every skinning
+    # mode, against the stock R1 headers they include (taken from a public copy of the vanilla game data at a fixed
+    # commit; the engine repo does not ship them). No engine build, about a minute. The game itself uses the older
+    # D3DX compiler, so this catches errors in the files, it is not the game's own compile.
+    name: r1 thermal shader compile
+    if: github.repository == 'ArchiTecCTT/xray-monolith'
+    runs-on: windows-2022
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        # actions/checkout v4.2.2
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      - name: Compile heat_mask, heat_mask_lq, thermal_demo and thermal_demo_paint
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $fxc = Get-ChildItem (Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\bin') -Recurse -Filter fxc.exe |
+            Where-Object { $_.FullName -match '\\x64\\' } | Sort-Object FullName | Select-Object -Last 1
+          if (-not $fxc) { throw 'fxc.exe not found in the Windows SDK' }
+          Write-Host "fxc: $($fxc.FullName)"
+
+          $work = Join-Path $env:RUNNER_TEMP 'r1'
+          New-Item -ItemType Directory -Path (Join-Path $work 'shared') -Force | Out-Null
+          $stock = 'https://raw.githubusercontent.com/Tosox/STALKER-Anomaly-gamedata/6187cf7131134ca196feb3e1ecde7cded17ffb0b/gamedata/shaders/r1'
+          foreach ($f in 'common.h', 'skin.h', 'skin_main.h', 'shared/common.h', 'model_def_hq.vs', 'model_def_lq.vs') {
+            Invoke-WebRequest -Uri "$stock/$f" -OutFile (Join-Path $work $f)
+          }
+          $ours = 'heat_mask.ps', 'heat_mask_lq.vs', 'thermal_demo.ps', 'thermal_demo_paint.ps', 'ui_icons.vs'
+          foreach ($f in $ours) { Copy-Item (Join-Path 'gamedata\shaders\r1' $f) $work }
+          Set-Location $work
+
+          $failed = @()
+          function Compile([string]$file, [string]$target, [string]$skin) {
+            $out = [IO.Path]::GetFileNameWithoutExtension($file) + '_' + $target + '_' + $skin
+            # /Zpr = D3DXSHADER_PACKMATRIX_ROWMAJOR, the flag the engine compiles with
+            $fxcArgs = @('/nologo', '/Zpr', '/T', $target, '/E', 'main', '/D', 'SHADER_BUS=7', '/Fo', "$out.o", '/Fc', "$out.asm")
+            if ($skin -ne 'none') { $fxcArgs += @('/D', "$skin=1") }
+            $fxcArgs += $file
+            $text = (& $fxc.FullName @fxcArgs 2>&1 | Out-String)
+            $ok = ($LASTEXITCODE -eq 0)
+            Write-Host ("{0}  {1} {2} {3}" -f $(if ($ok) { 'ok    ' } else { 'FAILED' }), $file, $target, $skin)
+            if (-not $ok) { Write-Host $text }
+            return $ok
+          }
+
+          foreach ($ps in 'heat_mask.ps', 'thermal_demo.ps', 'thermal_demo_paint.ps') {
+            if (-not (Compile $ps 'ps_2_0' 'none')) { $failed += $ps }
+          }
+          foreach ($skin in 'SKIN_NONE', 'SKIN_0', 'SKIN_1', 'SKIN_2', 'SKIN_3', 'SKIN_4') {
+            # the stock model shaders are the control: if fxc cannot build them for this mode, the mode is not judged
+            $control = (Compile 'model_def_hq.vs' 'vs_2_0' $skin) -and (Compile 'model_def_lq.vs' 'vs_2_0' $skin)
+            foreach ($vs in 'ui_icons.vs', 'heat_mask_lq.vs') {
+              $ok = Compile $vs 'vs_2_0' $skin
+              if (-not $ok -and $control) { $failed += "$vs $skin" }
+              if (-not $ok -and -not $control) { Write-Host "::warning::$vs $skin not judged: the stock model shaders do not build with fxc for this mode either" }
+            }
+          }
+
+          # for reading: the position code of the scene's vertex shaders next to the heat ones (two-bone meshes)
+          foreach ($f in 'model_def_hq_vs_2_0_SKIN_2.asm', 'ui_icons_vs_2_0_SKIN_2.asm', 'model_def_lq_vs_2_0_SKIN_2.asm', 'heat_mask_lq_vs_2_0_SKIN_2.asm', 'heat_mask_ps_2_0_none.asm', 'thermal_demo_ps_2_0_none.asm', 'thermal_demo_paint_ps_2_0_none.asm') {
+            if (Test-Path $f) { Write-Host "::group::$f"; Get-Content $f | Write-Host; Write-Host '::endgroup::' }
+          }
+
+          if ($failed.Count) { throw ("shader compile failed: " + ($failed -join ', ')) }
+          Write-Host 'All R1 thermal shader files compile.'
 
   build:
     name: build ${{ matrix.buildconf }}
