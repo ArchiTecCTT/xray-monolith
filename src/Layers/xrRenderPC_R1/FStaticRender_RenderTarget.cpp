@@ -1844,15 +1844,15 @@ bool CRenderTarget::look_build(u32 view, u32 src_w, u32 src_h)
 	// x = the bloom of the very hot (fire, a muzzle after a burst), y, z = where "very hot" starts and its slope
 	c.hot.set(ps_r1_thermal_ladder ? ps_r1_thermal_bloom : 0.f, .93f, 1.f / .06f, 0.f);
 	c.world.set(ps_r1_thermal_world_base, ps_r1_thermal_world * heat_cfg_contrast, ps_r1_thermal_world_gamma, 0.f);
-	// The world in the dark: lum * g / (1 + (g - 1) * lum / top). Dark things get the whole gain g, and nothing goes
-	// over 'top' (r1_thermal_night_lights) however strong the gain: a lamp's pool of light or a flashlight beam ends
-	// up no brighter than sunlit ground by day. z = extra grain of the world, in the scene's own units: half an 8-bit
-	// step each way per unit of r1_thermal_night_grain, which hides the steps a dark 8-bit frame is made of once they
-	// are multiplied by g. With g = 1 all of it is exactly nothing.
+	// The world in the dark: x = lum * g, then x / sqrt(1 + (1 - 1 / g) * (x / top)^2). Dark things get the whole
+	// gain g, and what a lamp or a flashlight lights bends over towards 'top' (r1_thermal_night_lights) however strong
+	// the gain: a pool of light ends up about as bright as sunlit ground by day, not white. z = extra grain of the
+	// world, in the scene's own units: one 8-bit step wide per unit of r1_thermal_night_grain, which hides the steps
+	// a dark 8-bit frame is made of once they are multiplied by g. With g = 1 all of it is exactly nothing.
 	{
 		const float g = look_night_gain();
-		c.night.set(g, (g - 1.f) / clampr(ps_r1_thermal_night_lights, .1f, 1.f),
-		            ps_r1_thermal_night_grain * (.5f / 255.f) * _min(g - 1.f, 1.f), 0.f);
+		const float top = clampr(ps_r1_thermal_night_lights, .1f, 1.f);
+		c.night.set(g, (1.f - 1.f / g) / (top * top), ps_r1_thermal_night_grain * (1.f / 255.f) * _min(g - 1.f, 1.f), 0.f);
 	}
 	// lightning: while a bolt is lit the sky flashes and the bolt itself shows
 	float flash = 0.f;

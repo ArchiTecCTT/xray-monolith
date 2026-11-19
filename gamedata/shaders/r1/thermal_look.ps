@@ -15,7 +15,7 @@ uniform float4 thermal_ring_b;   //            xy = along the other
 uniform float4 thermal_body;     // x = edge darkening, y = ring, z = glow, w = level of heat 1 where it faces the camera
 uniform float4 thermal_hot;      // x = bloom of the very hot (fire)
 uniform float4 thermal_world;    // x = base level, y = contrast, z = gamma
-uniform float4 thermal_night;    // the world in the dark: x = gain g, y = (g - 1) / the top a lit patch can reach,
+uniform float4 thermal_night;    // the world in the dark: x = gain g, y = (1 - 1 / g) / (the top a lit patch can reach)^2,
                                  // z = extra grain of the world under gain. (1, 0, 0) = none
 uniform float4 thermal_sky;      // x = sky level, y = how much of the clouds stays
 uniform float4 thermal_grain;    // x = grain, y = column pattern, z = lines, w = half the sensor height in pixels
@@ -33,10 +33,10 @@ float4 main(float2 tc : TEXCOORD0) : COLOR0
     float lum = dot(s, float3(0.07475, 0.14675, 0.0285));
     float4 n = tex2D(s_noise, tc * thermal_noise_a.xy + thermal_noise_b.xy);
     // a thermal sight sees heat, not light: in the dark the world gets a gain (r1_thermal_night). Dark things get all
-    // of it, bright ones (a lamp's pool of light) are held under a top level. The grain hides the few steps a dark
+    // of it, bright ones (a lamp's pool of light) bend over towards a top level. The grain hides the few steps a dark
     // 8-bit frame is made of. With thermal_night = (1, 0, 0) lum stays exactly what it was.
-    lum = abs(lum + (n.r - n.g) * thermal_night.z);
-    lum = lum * thermal_night.x / (1.0 + thermal_night.y * lum);
+    lum = (lum + n.r * thermal_night.z) * thermal_night.x;
+    lum *= rsqrt(1.0 + thermal_night.y * lum * lum);
 
     float4 m = tex2D(s_down, tc);
     float around = tex2D(s_down, tc + thermal_ring_a.xy).r;
