@@ -331,7 +331,7 @@ and would show as cold patches. They are not in the thermal picture:
 - thermal over the whole screen, and a thermal SVP lens frame: the shadow pass draws nothing;
 - thermal in a circle (`r1_thermal_region`): the pass leaves the shadows out of the circle. They are back
   in full where the thermal picture starts to fade out, so the frame around the circle keeps every
-  shadow exactly as with thermal off. Inside, they fade in over the last soft-edge width before that;
+  shadow at full strength. Inside, they fade in over the last soft-edge width before that;
 - `r1_thermal_look 0` and `2` (a mod shows the picture in its own shape): all shadows are drawn, as before.
 
 Baked shade of the level (lightmaps) stays. `r1_thermal_shadows` (`0..1`, default `0`): how much of the
@@ -533,7 +533,10 @@ objects). It is read when the object is queued, so it follows the object from th
   constants `thermal_shadow_pos`, `thermal_shadow`). They must be installed or thermal stays off.
 - With the engine's look shown (`r1_thermal_look 1`), `$user$rendertarget` has no moving shadows where the
   thermal picture is. Looks `0` and `2` get the scene with all its shadows, as before.
-- Round 4's picture: `r1_thermal_night 0` and `r1_thermal_shadows 1`.
+- Round 4's picture: `r1_thermal_night 0` and `r1_thermal_shadows 1` (`cfg_load thermal_r4`; `thermal_r5` puts
+  round 5 back). Test shortcuts in the exe zip's `appdata\`: `thermal_night_off` / `thermal_night_on`,
+  `thermal_night_bright` (level `0.6`, a brighter night that also lifts dull days), `thermal_shadows_on` /
+  `thermal_shadows_off`.
 
 ## Limits
 
