@@ -1656,25 +1656,43 @@ u32 CRenderTarget::heat_shadows(ShaderElement*& E, Fvector4& vs_c, Fvector4& ps_
 {
 	if (0 == heat_mode || heat_state <= 0 || !(ps_r1_thermal_shadows < 1.f))
 		return 0;
+	// how much of them stays in the thermal picture
+	const float keep = clampr(ps_r1_thermal_shadows, 0.f, 1.f);
+	bool whole;
 	if (2 == heat_mode)
+	{
 		// the SVP lens picture: thermal all over, if the look can be built
-		return (heat_cfg_look && ps_r1_thermal_shadows <= 0.f && u32(-1) != look[1].w) ? 1 : 0;
-	// the screen; a mod that shows the picture itself (look 2) or makes its own (look 0) may use any shape
-	if (1 != heat_cfg_look || u32(-1) == look[0].w)
-		return 0;
-	if (!(heat_cfg_region.z > 0.f))
-		return ps_r1_thermal_shadows <= 0.f ? 1 : 0;
+		if (!heat_cfg_look || u32(-1) == look[1].w)
+			return 0;
+		whole = true;
+	}
+	else
+	{
+		// the screen; a mod that shows the picture itself (look 2) or makes its own (look 0) may use any shape
+		if (1 != heat_cfg_look || u32(-1) == look[0].w)
+			return 0;
+		whole = !(heat_cfg_region.z > 0.f);
+	}
+	if (whole && keep <= 0.f)
+		return 1;
 
 	E = s_heat[0]->E[SE_R1_HEAT_SHADOW]._get();
 	if (!E || 0 == E->passes.size())
 		return 0;
+	if (whole)
+	{
+		// no circle: every pixel is "inside", where 'keep' of the shadow stays
+		vs_c.set(0.f, 0.f, 0.f, 0.f);
+		ps_c.set(1000000.f, 1.f, keep, 0.f);
+		return 2;
+	}
 	// vertex shader: the place on the screen relative to the circle's centre, in screen heights, times w
 	const float aspect = float(Device.dwWidth) / float(_max(1u, Device.dwHeight));
 	vs_c.set(.5f * aspect, (.5f - heat_cfg_region.x) * aspect, .5f - heat_cfg_region.y, 0.f);
 	// pixel shader: the thermal picture is whole up to the radius minus its soft edge; the shadows fade in over the
 	// same width just inside that. x = where they start, y = 1 / the width, z = how much of them stays inside
 	const float fade = _max(heat_cfg_region.w, .005f);
-	ps_c.set(heat_cfg_region.z - heat_cfg_region.w - fade, 1.f / fade, clampr(ps_r1_thermal_shadows, 0.f, 1.f), 0.f);
+	ps_c.set(heat_cfg_region.z - heat_cfg_region.w - fade, 1.f / fade, keep, 0.f);
 	return 2;
 }
 

@@ -267,8 +267,8 @@ public:
 	void heat_add_glow(const Fvector& pos, float radius, float visible);
 	bool heat_fires_near() { return !heat_fire_state.empty(); }
 	// what the projected shadow pass (CLightShadows) does on the frame being drawn: 0 = draws as always, 1 = draws
-	// nothing (the whole view is the thermal picture), 2 = draws with the pass 'E', which leaves the shadows out of the
-	// circle the thermal picture is shown in. vs_c and ps_c are that pass's constants thermal_shadow_pos, thermal_shadow
+	// nothing (the whole view is the thermal picture), 2 = draws with the pass 'E', which leaves the shadows out of
+	// where the thermal picture is shown. vs_c and ps_c are that pass's constants thermal_shadow_pos, thermal_shadow
 	u32 heat_shadows(ShaderElement*& E, Fvector4& vs_c, Fvector4& ps_c);
 	// hotness a fire gives a thing at this place, 0 = none. 'who' = the object it belongs to (may be null)
 	float heat_fire_at(const Fvector& pos, const void* who);
