@@ -1406,8 +1406,10 @@ static void heat_spot_quad(FVF::LIT*& pv, const Fvector& P, float r, float tc, f
 // warmth of its place in the ball. So a surface gets the warmth of its real distance from the fire: the ground
 // towards the camera fades out at the reach instead of being cut off where one big quad met it, and a wall between
 // the camera and the fire gets next to nothing. Whatever is behind the fire shows the middle slice, as in round 3.
-// The slices are spaced for equal steps of warmth along the view axis.
-static const u32 heat_fire_slices = 12;
+// The slices are spaced for equal steps of warmth along the view axis. A fire far away (small in the view, seen at a
+// flat angle, where the steps would show most) gets all 16; one that fills the view gets fewer, so that the slices
+// of a fire never add up to more than about three screens of pixels.
+static const u32 heat_fire_slices = 16;
 
 void CRenderTarget::heat_draw_spots()
 {
@@ -1449,12 +1451,15 @@ void CRenderTarget::heat_draw_spots()
 		if (dist < .05f)
 			continue;
 		dir.div(dist);
+		// the share of the view the patch covers (a quad of this half size, in the projection's units)
+		const float cover = _min(1.f, F.radius / dist * _abs(Device.mProject._11)) *
+			_min(1.f, F.radius / dist * _abs(Device.mProject._22));
 		// without MAX blending the slices would add up: then only the middle one
-		const u32 slices = heat_max ? heat_fire_slices : 1;
+		const u32 slices = heat_max ? u32(clampr(iFloor(3.f / _max(cover, .01f)), 5, int(heat_fire_slices))) : 1;
 		for (u32 k = 0; k < slices; ++k)
 		{
 			// the warmth on the view axis is (1 - depth)^2: slice k gets 1 - k / slices of it
-			const float depth = 1.f - _sqrt(1.f - float(k) / float(heat_fire_slices));
+			const float depth = 1.f - _sqrt(1.f - float(k) / float(slices));
 			if (k && depth * F.radius > dist - .3f)
 				break; // this slice and the rest are at the camera or behind it
 			const float across = _sqrt(1.f - depth * depth); // the ball's size at this depth
