@@ -5,6 +5,7 @@
 #include "../../xrEngine/thunderbolt.h"
 #include "../../xrEngine/shader_bus.h"
 #include "../../xrEngine/svp_lens_zoom.h"
+#include "../../xrEngine/IGame_Level.h" // level geometry, for the wall test of a fire's warmth
 #include "../xrRender/dxRenderDeviceRender.h"
 #include "Blender_lum_adapt.h"
 #include "Blender_heat.h"
@@ -96,6 +97,9 @@ CRenderTarget::CRenderTarget()
 	heat_cfg_contrast = 1.f;
 	look_clip.set(1.f, 1.f, 0.f, 0.f);
 	heat_lens_wait = 0;
+	heat_fire_who.who = nullptr;
+	heat_fire_who.frame = u32(-1);
+	heat_fire_who.tested = heat_fire_who.reached = 0;
 	for (u32 view = 0; view < 2; ++view)
 	{
 		look[view].w = look[view].h = 0;
@@ -939,7 +943,7 @@ bool CRenderTarget::heat_begin_frame()
 	heat_fires.clear();
 	if (heat_state < 0 || !Available() || !heat_wanted())
 	{
-		heat_fires_prev.clear();
+		heat_fire_state.clear();
 		return false;
 	}
 	if (0 == heat_state)
@@ -1091,7 +1095,7 @@ void CRenderTarget::heat_destroy()
 	g_heat_spot.destroy();
 	heat_spots.clear();
 	heat_fires.clear();
-	heat_fires_prev.clear();
+	heat_fire_state.clear();
 	heat_screen_live = false;
 	heat_svp_live = false;
 	heat_svp_valid = false;
@@ -1193,30 +1197,36 @@ ShaderElement* CRenderTarget::heat_particle_element()
 
 // Heat spreads from fires. Every open fire the frame draws (a warm particle effect of hotness 0.75 and up: flames,
 // explosions, an active fire anomaly) is a source: its sphere, a reach around it and a strength.
-//  - what is around it: one soft round spot per fire in the mask, strongest at the fire and gone at its reach,
-//    depth tested like everything else, so a wall in front of the fire hides it;
+//  - what is around it: a soft round patch in the mask, strongest at the fire and gone at its reach. It is depth
+//    tested like everything else, and it fades out while level geometry hides the flames from the camera, so a
+//    fire's warmth is not seen from behind a wall;
 //  - objects near it (the barrel it burns in, a crate, a stalker sitting at it) warm as a whole: heat_fire_at, asked
-//    by the scene graph with the fires of the frame before.
-// r1_thermal_fire_spread 0 switches all of it off.
+//    by the scene graph. Not through a wall either.
+// The flames' sphere is new every frame; what is drawn is a fire kept over time (heat_fire_state) that follows the
+// flames slowly, so the patch is steady. r1_thermal_fire_spread 0 switches all of it off.
 void CRenderTarget::heat_add_fire(const Fvector& centre, float radius, float hotness)
 {
 	if (!(ps_r1_thermal_fire_spread > 0.f) || hotness < .75f || heat_fires.size() >= 16)
 		return;
 	const float R = clampr(radius, .1f, 3.f);
 	heat_spot S;
-	// the flames' sphere sits above what burns: a little lower is where the heat is
-	S.pos.set(centre.x, centre.y - R * .3f, centre.z);
+	// 'pos' is the middle of the flames here; the patch sits a little lower (heat_fires_update)
+	S.pos = centre;
 	// a campfire's flames (about 0.6 m) reach the full r1_thermal_fire_reach, a muzzle flash a fraction of it
 	S.radius = R + ps_r1_thermal_fire_reach * clampr(R / .6f, .2f, 1.5f);
 	S.heat = ps_r1_thermal_fire_spread * hotness * clampr(R / .4f, .4f, 1.f);
 	S.hard = 0.f;
-	S.pull = S.radius;
+	S.pull = R; // the size of the flames
 	// one fire is several effects (flames, sparks, the big and the small flame): keep the widest
 	for (heat_spot& F : heat_fires)
 	{
 		if (F.pos.distance_to_sqr(S.pos) < .75f * .75f)
 		{
-			if (S.radius > F.radius) F.radius = F.pull = S.radius;
+			if (S.radius > F.radius)
+			{
+				F.radius = S.radius;
+				F.pull = S.pull;
+			}
 			if (S.heat > F.heat) F.heat = S.heat;
 			return;
 		}
@@ -1224,18 +1234,136 @@ void CRenderTarget::heat_add_fire(const Fvector& centre, float radius, float hot
 	heat_fires.push_back(S);
 }
 
-float CRenderTarget::heat_fire_at(const Fvector& pos)
+// is level geometry between these two points? 'short_by' metres at the far end are left out
+static bool heat_wall_between(const Fvector& from, const Fvector& to, float short_by, collide::ray_cache* cache)
 {
-	float best = 0.f;
-	for (const heat_spot& F : heat_fires_prev)
+	if (!g_pGameLevel)
+		return false;
+	Fvector dir;
+	dir.sub(to, from);
+	const float range = dir.magnitude() - short_by;
+	if (range < .05f)
+		return false;
+	dir.normalize();
+	return !!g_pGameLevel->ObjectSpace.RayTest(from, dir, range, collide::rqtStatic, cache, nullptr);
+}
+
+// the top of the flames: what a fire in a barrel or a pit still shows over the rim
+static Fvector heat_flames_top(const Fvector& flames, float flames_r)
+{
+	Fvector top;
+	top.set(flames.x, flames.y + flames_r * .6f, flames.z);
+	return top;
+}
+
+// Once per frame that builds a mask, before the patches are drawn: this frame's flame spheres feed the fires kept
+// over time. Place, size and strength follow them slowly (the flames' sphere jumps with every flicker); a fire that
+// really moves (a burning creature) is followed at once. A fire nothing feeds any more fades out and is dropped.
+void CRenderTarget::heat_fires_update()
+{
+	const float now = Device.fTimeGlobal;
+	for (const heat_spot& S : heat_fires)
 	{
+		heat_fire* F = nullptr;
+		float best = 1.f * 1.f;
+		for (heat_fire& I : heat_fire_state)
+		{
+			const float d2 = I.flames.distance_to_sqr(S.pos);
+			if (d2 < best)
+			{
+				best = d2;
+				F = &I;
+			}
+		}
+		if (!F)
+		{
+			if (heat_fire_state.size() >= 32)
+				continue;
+			heat_fire_state.push_back(heat_fire());
+			F = &heat_fire_state.back();
+			F->flames = S.pos;
+			F->flames_r = S.pull;
+			F->radius = S.radius;
+			F->heat = S.heat;
+			F->alive = 1.f;
+			F->vis = -1.f; // not tested yet: it takes the first test's answer at once
+			F->time_updated = now;
+		}
+		else if (F->time_fed != now)
+		{
+			const float dt = clampr(now - F->time_updated, 0.f, .25f);
+			// flicker moves the sphere by a hand's width: follow in about half a second. More is real movement
+			const float k_pos = (best > .4f * .4f) ? 1.f : clampr(dt / .5f, 0.f, 1.f);
+			const float k_size = clampr(dt / .5f, 0.f, 1.f);
+			F->flames.x += (S.pos.x - F->flames.x) * k_pos;
+			F->flames.y += (S.pos.y - F->flames.y) * k_pos;
+			F->flames.z += (S.pos.z - F->flames.z) * k_pos;
+			F->flames_r += (S.pull - F->flames_r) * k_size;
+			F->radius += (S.radius - F->radius) * k_size;
+			F->heat += (S.heat - F->heat) * k_size;
+		}
+		F->time_fed = now;
+	}
+
+	for (u32 i = 0; i < heat_fire_state.size();)
+	{
+		heat_fire& F = heat_fire_state[i];
+		const float dt = clampr(now - F.time_updated, 0.f, .25f);
+		F.time_updated = now;
+		// not fed for a quarter of a second (some frames only draw the scope's narrow view): fade out in 0.3 s
+		const bool fed = (now - F.time_fed) < .25f;
+		F.alive = clampr(F.alive + (fed ? dt / .1f : -dt / .3f), 0.f, 1.f);
+		if (!fed && F.alive <= 0.f)
+		{
+			heat_fire_state.erase(heat_fire_state.begin() + i);
+			continue;
+		}
+		// the flames sit above what burns: the patch is a little lower
+		F.pos.set(F.flames.x, F.flames.y - F.flames_r * .3f, F.flames.z);
+		// Hidden from the camera by level geometry? Two rays, to the middle and to the top of the flames, and both
+		// must be blocked: a fire in a barrel shows over the rim, a fire behind a wall does not.
+		const float short_by = clampr(F.flames_r * .5f, .1f, .3f);
+		const bool hidden = heat_wall_between(Device.vCameraPosition, F.flames, short_by, &F.ray[0]) &&
+			heat_wall_between(Device.vCameraPosition, heat_flames_top(F.flames, F.flames_r), short_by, &F.ray[1]);
+		if (F.vis < 0.f)
+			F.vis = hidden ? 0.f : 1.f;
+		else
+			F.vis = clampr(F.vis + (hidden ? -dt : dt) / .15f, 0.f, 1.f);
+		++i;
+	}
+}
+
+float CRenderTarget::heat_fire_at(const Fvector& pos, const void* who)
+{
+	if (!who || heat_fire_who.who != who || heat_fire_who.frame != Device.dwFrame)
+	{
+		heat_fire_who.who = who;
+		heat_fire_who.frame = Device.dwFrame;
+		heat_fire_who.tested = heat_fire_who.reached = 0;
+	}
+	float best = 0.f;
+	for (u32 i = 0; i < heat_fire_state.size(); ++i)
+	{
+		const heat_fire& F = heat_fire_state[i];
 		const float d2 = F.pos.distance_to_sqr(pos);
 		if (d2 >= F.radius * F.radius)
 			continue;
-		// a whole object takes the fire's heat in a straight line with distance (the spot around the fire falls off
+		// a whole object takes the fire's heat in a straight line with distance (the patch around the fire falls off
 		// by the square: bright at the fire, a faint tail)
-		const float heat = F.heat * (1.f - _sqrt(d2) / F.radius);
-		if (heat > best)
+		const float heat = F.heat * F.alive * (1.f - _sqrt(d2) / F.radius);
+		if (heat <= best)
+			continue;
+		// Not through a wall: level geometry between the flames (their middle and their top) and the object. Tested
+		// once per object and fire in a frame, with the first of the object's parts that asks.
+		const u32 bit = 1u << i;
+		if (!(heat_fire_who.tested & bit))
+		{
+			heat_fire_who.tested |= bit;
+			if (!heat_wall_between(F.flames, pos, .2f, nullptr) ||
+				!heat_wall_between(heat_flames_top(F.flames, F.flames_r), pos, .2f, nullptr))
+				heat_fire_who.reached |= bit;
+		}
+		if (heat_fire_who.reached & bit)
 			best = heat;
 	}
 	return best;
@@ -1256,20 +1384,45 @@ void CRenderTarget::heat_add_glow(const Fvector& pos, float radius, float visibl
 	heat_spots.push_back(S);
 }
 
+// One quad of a spot, facing the camera. 'r' = half its size in metres, 'tc' = half its size in texture space (0.5
+// = the whole spot), 'depth' = how far in front of the spot's middle the quad is, as a share of the spot's radius.
+static void heat_spot_quad(FVF::LIT*& pv, const Fvector& P, float r, float tc, float heat, float hard, float depth)
+{
+	Fvector Vr, Vt;
+	Vr.mul(Device.vCameraRight, r);
+	Vt.mul(Device.vCameraTop, r);
+	// red = hotness in the middle, green = how hard the disc is, blue = depth of the quad
+	const u32 clr = color_rgba(u32(clampr(heat, 0.f, 1.f) * 255.f + .5f), u32(clampr(hard, 0.f, 1.f) * 255.f + .5f),
+		u32(clampr(depth, 0.f, 1.f) * 255.f + .5f), 255);
+	const float t0 = .5f - tc, t1 = .5f + tc;
+	pv->set(P.x - Vr.x - Vt.x, P.y - Vr.y - Vt.y, P.z - Vr.z - Vt.z, clr, t0, t1); pv++;
+	pv->set(P.x - Vr.x + Vt.x, P.y - Vr.y + Vt.y, P.z - Vr.z + Vt.z, clr, t0, t0); pv++;
+	pv->set(P.x + Vr.x - Vt.x, P.y + Vr.y - Vt.y, P.z + Vr.z - Vt.z, clr, t1, t1); pv++;
+	pv->set(P.x + Vr.x + Vt.x, P.y + Vr.y + Vt.y, P.z + Vr.z + Vt.z, clr, t1, t0); pv++;
+}
+
+// A fire's patch is a ball of warmth around the fire, cut into slices that face the camera. Every slice is depth
+// tested; a surface shows the nearest slice in front of it (MAX blending), and the pixel shader gives a slice the
+// warmth of its place in the ball. So a surface gets the warmth of its real distance from the fire: the ground
+// towards the camera fades out at the reach instead of being cut off where one big quad met it, and a wall between
+// the camera and the fire gets next to nothing. Whatever is behind the fire shows the middle slice, as in round 3.
+// The slices are spaced for equal steps of warmth along the view axis.
+static const u32 heat_fire_slices = 12;
+
 void CRenderTarget::heat_draw_spots()
 {
-	for (const heat_spot& F : heat_fires)
-		heat_spots.push_back(F);
-	if (heat_spots.empty())
+	heat_fires_update();
+	if (heat_spots.empty() && heat_fire_state.empty())
 		return;
 	ShaderElement* E = s_heat[0]->E[SE_R1_HEAT_SPOT]._get();
 	if (!E || 0 == E->passes.size() || !g_heat_spot._get())
 		return;
 
 	u32 Offset;
-	const u32 count = u32(heat_spots.size());
+	const u32 count = u32(heat_spots.size()) + u32(heat_fire_state.size()) * heat_fire_slices;
 	FVF::LIT* pv = (FVF::LIT*)RCache.Vertex.Lock(count * 4, g_heat_spot->vb_stride, Offset);
-	u32 drawn = 0;
+	FVF::LIT* const pv_start = pv;
+	// lit lamps that are only a glow: one quad each
 	for (const heat_spot& S : heat_spots)
 	{
 		Fvector dir;
@@ -1280,19 +1433,37 @@ void CRenderTarget::heat_draw_spots()
 		dir.div(dist);
 		// drawn nearer to the camera by 'pull' and smaller by the same share, so it covers the same part of the view
 		const float pull = clampr(S.pull, 0.f, _max(0.f, dist - .3f));
-		const float r = S.radius * (dist - pull) / dist;
-		Fvector P, Vr, Vt;
+		Fvector P;
 		P.mad(S.pos, dir, pull);
-		Vr.mul(Device.vCameraRight, r);
-		Vt.mul(Device.vCameraTop, r);
-		// red = hotness in the middle, green = how hard the disc is
-		const u32 clr = color_rgba(u32(clampr(S.heat, 0.f, 1.f) * 255.f + .5f), u32(clampr(S.hard, 0.f, 1.f) * 255.f + .5f), 0, 255);
-		pv->set(P.x - Vr.x - Vt.x, P.y - Vr.y - Vt.y, P.z - Vr.z - Vt.z, clr, 0.f, 1.f); pv++;
-		pv->set(P.x - Vr.x + Vt.x, P.y - Vr.y + Vt.y, P.z - Vr.z + Vt.z, clr, 0.f, 0.f); pv++;
-		pv->set(P.x + Vr.x - Vt.x, P.y + Vr.y - Vt.y, P.z + Vr.z - Vt.z, clr, 1.f, 1.f); pv++;
-		pv->set(P.x + Vr.x + Vt.x, P.y + Vr.y + Vt.y, P.z + Vr.z + Vt.z, clr, 1.f, 0.f); pv++;
-		++drawn;
+		heat_spot_quad(pv, P, S.radius * (dist - pull) / dist, .5f, S.heat, S.hard, 0.f);
 	}
+	// fires
+	for (const heat_fire& F : heat_fire_state)
+	{
+		const float heat = F.heat * F.alive * F.vis;
+		if (heat < .004f)
+			continue;
+		Fvector dir;
+		dir.sub(Device.vCameraPosition, F.pos);
+		const float dist = dir.magnitude();
+		if (dist < .05f)
+			continue;
+		dir.div(dist);
+		// without MAX blending the slices would add up: then only the middle one
+		const u32 slices = heat_max ? heat_fire_slices : 1;
+		for (u32 k = 0; k < slices; ++k)
+		{
+			// the warmth on the view axis is (1 - depth)^2: slice k gets 1 - k / slices of it
+			const float depth = 1.f - _sqrt(1.f - float(k) / float(heat_fire_slices));
+			if (k && depth * F.radius > dist - .3f)
+				break; // this slice and the rest are at the camera or behind it
+			const float across = _sqrt(1.f - depth * depth); // the ball's size at this depth
+			Fvector P;
+			P.mad(F.pos, dir, depth * F.radius);
+			heat_spot_quad(pv, P, F.radius * across, .5f * across, heat, 0.f, depth);
+		}
+	}
+	const u32 drawn = u32(pv - pv_start) / 4;
 	RCache.Vertex.Unlock(drawn * 4, g_heat_spot->vb_stride);
 	if (!drawn)
 		return;
@@ -1314,7 +1485,6 @@ void CRenderTarget::heat_draw_spots()
 
 void CRenderTarget::heat_end_frame()
 {
-	heat_fires_prev.swap(heat_fires);
 	heat_fires.clear();
 	heat_spots.clear();
 }

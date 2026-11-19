@@ -170,7 +170,7 @@ void CDSGraphManager::r1_heat_insert(dxRender_Visual* pVisual, Fmatrix* xform, b
 	{
 		Fvector C;
 		xform->transform_tiny(C, pVisual->vis.sphere.P);
-		const float fire = RImplementation.Target->heat_fire_at(C);
+		const float fire = RImplementation.Target->heat_fire_at(C, val_pObject);
 		if (fire > 0.001f)
 		{
 			hotness = _max(fire, hotness + fire * .35f);

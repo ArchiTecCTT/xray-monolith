@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../xrRender/ColorMapManager.h"
+#include "../../xrcdb/xr_collide_defs.h"
 
 
 class CRenderTarget : public IRender_Target
@@ -111,8 +112,30 @@ private:
 		float pull; // metres it is drawn towards the camera, so the thing it sits in does not hide it
 	};
 	xr_vector<heat_spot> heat_spots;
-	// open fires: this frame's (they become spots) and the last frame's (they warm the objects near them)
-	xr_vector<heat_spot> heat_fires, heat_fires_prev;
+	// open fires. heat_fires: what this frame's flame effects say (a new sphere every frame, as the flames move).
+	// heat_fire_state: the fires as they are kept over time, which is what gets drawn and what warms objects:
+	// place and size follow the flames slowly (a steady patch), and the patch fades out when a wall hides the fire
+	// from the camera or the fire is gone.
+	struct heat_fire
+	{
+		Fvector pos; // middle of the warm patch
+		Fvector flames; // middle of the flames
+		float flames_r; // their size
+		float radius, heat; // of the patch
+		float alive; // 0..1: fades out once no flame effect feeds it any more
+		float vis; // 0..1: fades out while level geometry hides the flames from the camera
+		float time_fed, time_updated; // Device.fTimeGlobal
+		collide::ray_cache ray[2];
+	};
+	xr_vector<heat_spot> heat_fires;
+	xr_vector<heat_fire> heat_fire_state;
+	// the wall test between a fire and an object next to it, once per object and fire in a frame
+	struct
+	{
+		const void* who;
+		u32 frame, tested, reached;
+	} heat_fire_who;
+	void heat_fires_update();
 	ref_geom g_heat_spot;
 	u32 heat_lens_wait; // frames thermal has been on for the lens only without an SVP frame (logged once)
 	// warm particle effects: name patterns from configs\r1_thermal.ltx, and the answer per effect name
@@ -236,8 +259,9 @@ public:
 	void heat_add_fire(const Fvector& centre, float radius, float hotness);
 	// a glow (a lit lamp) the scene drew, 'visible' 0..1 as the glow manager faded it
 	void heat_add_glow(const Fvector& pos, float radius, float visible);
-	bool heat_fires_near() { return !heat_fires_prev.empty(); }
-	float heat_fire_at(const Fvector& pos); // hotness a fire gives a thing at this place, 0 = none
+	bool heat_fires_near() { return !heat_fire_state.empty(); }
+	// hotness a fire gives a thing at this place, 0 = none. 'who' = the object it belongs to (may be null)
+	float heat_fire_at(const Fvector& pos, const void* who);
 
 	BOOL SVPSmallEnabled() { return svp_small; }
 	BOOL SVPSmallFrame(); // small SVP target is enabled and this frame is an SVP frame

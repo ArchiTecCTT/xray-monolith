@@ -1,9 +1,11 @@
 // R1 thermal (r__heatvision): a soft round spot in the heat mask: what a fire warms around it, and a lit lamp that
 // is only a glow. The vertex colour carries it: red = hotness in the middle, green = how hard the disc is (0 = falls
-// off from the middle to the rim, by the square; 1 = a disc with a soft rim). Blended with MAX into the red channel.
+// off from the middle to the rim, by the square; 1 = a disc with a soft rim), blue = how far in front of the spot's
+// middle this quad is, as a share of the spot's radius (a fire's patch is a ball cut into slices that face the camera;
+// 0 for a single quad through the middle). Blended with MAX into the red channel.
 float4 main(float2 tc : TEXCOORD0, float4 c : COLOR0) : COLOR0
 {
     float2 d = tc * 2.0 - 1.0;
-    float k = saturate((1.0 - length(d)) * (1.0 + 15.0 * c.g));
+    float k = saturate((1.0 - sqrt(dot(d, d) + c.b * c.b)) * (1.0 + 15.0 * c.g));
     return float4(c.r * k * k, 0.0, 0.0, 0.0);
 }
