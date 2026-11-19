@@ -1217,7 +1217,8 @@ void CRenderTarget::heat_add_fire(const Fvector& centre, float radius, float hot
 	S.heat = ps_r1_thermal_fire_spread * hotness * clampr(R / .4f, .4f, 1.f);
 	S.hard = 0.f;
 	S.pull = R; // the size of the flames
-	// one fire is several effects (flames, sparks, the big and the small flame): keep the widest
+	// one fire is several effects (flames, sparks, the big and the small flame): keep the widest, with its place,
+	// whatever order they come in
 	for (heat_spot& F : heat_fires)
 	{
 		if (F.pos.distance_to_sqr(S.pos) < .75f * .75f)
@@ -1226,6 +1227,7 @@ void CRenderTarget::heat_add_fire(const Fvector& centre, float radius, float hot
 			{
 				F.radius = S.radius;
 				F.pull = S.pull;
+				F.pos = S.pos;
 			}
 			if (S.heat > F.heat) F.heat = S.heat;
 			return;
@@ -1258,7 +1260,8 @@ static Fvector heat_flames_top(const Fvector& flames, float flames_r)
 
 // Once per frame that builds a mask, before the patches are drawn: this frame's flame spheres feed the fires kept
 // over time. Place, size and strength follow them slowly (the flames' sphere jumps with every flicker); a fire that
-// really moves (a burning creature) is followed at once. A fire nothing feeds any more fades out and is dropped.
+// really moves (a burning creature) pulls its patch along, never more than 0.3 m behind. A fire nothing feeds any
+// more fades out and is dropped.
 void CRenderTarget::heat_fires_update()
 {
 	const float now = Device.fTimeGlobal;
@@ -1292,9 +1295,10 @@ void CRenderTarget::heat_fires_update()
 		else if (F->time_fed != now)
 		{
 			const float dt = clampr(now - F->time_updated, 0.f, .25f);
-			// flicker moves the sphere by a hand's width: follow in about half a second. More is real movement
-			const float k_pos = (best > .4f * .4f) ? 1.f : clampr(dt / .5f, 0.f, 1.f);
+			// flicker moves the sphere by a hand's width: follow in about half a second, but stay within 0.3 m
 			const float k_size = clampr(dt / .5f, 0.f, 1.f);
+			const float behind = _sqrt(best) * (1.f - k_size);
+			const float k_pos = (behind > .3f) ? 1.f - .3f / _sqrt(best) : k_size;
 			F->flames.x += (S.pos.x - F->flames.x) * k_pos;
 			F->flames.y += (S.pos.y - F->flames.y) * k_pos;
 			F->flames.z += (S.pos.z - F->flames.z) * k_pos;
