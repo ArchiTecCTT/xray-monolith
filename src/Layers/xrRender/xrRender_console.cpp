@@ -1395,6 +1395,34 @@ public:
 	virtual void Save(IWriter* F) {}
 };
 
+
+#if RENDER == R_R1
+// R1 thermal: its console vars are for the running session only. They are not written to the config file (user.ltx)
+// and a value that comes from the config file is ignored, so a game always starts with thermal off and with the
+// engine's own numbers, whatever a test session left behind. cfg_load of any other file (the thermal_* shortcuts) and
+// the console itself set them as before. In real play a mod drives thermal through the shader bus lanes.
+template <class Base>
+class CCC_r1_session : public Base
+{
+public:
+	using Base::Base;
+
+	virtual void Execute(LPCSTR args)
+	{
+		if (Console->cfg_user_loading)
+			return;
+		Base::Execute(args);
+	}
+
+	virtual void Save(IWriter*)
+	{
+	}
+};
+
+typedef CCC_r1_session<CCC_Integer> CCC_r1_Integer;
+typedef CCC_r1_session<CCC_Float> CCC_r1_Float;
+typedef CCC_r1_session<CCC_Vector3> CCC_r1_Vector3;
+#endif
 //-----------------------------------------------------------------------
 void xrRender_initconsole()
 {
@@ -1484,44 +1512,44 @@ void xrRender_initconsole()
 
 	// R1 thermal: r__heatvision 1 (or the bus lane "thermal", x > 0) makes the R1 renderer redraw warm bodies into a heat
 	// mask that post-process and lens shaders can sample. Off, nothing is created or drawn. See docs/r1_thermal.md.
-	CMD4(CCC_Integer, "r1_thermal_targets", &ps_r1_thermal_targets, 1, 3);
-	CMD4(CCC_Float, "r1_thermal_bias", &ps_r1_thermal_bias, 0.f, 4096.f);
-	CMD4(CCC_Float, "r1_thermal_depth", &ps_r1_thermal_depth, 0.f, 50.f);
-	CMD4(CCC_Integer, "r1_thermal_sync", &ps_r1_thermal_sync, 0, 1);
-	CMD4(CCC_Float, "r1_thermal_gear", &ps_r1_thermal_gear, 0.f, 1.f);
-	CMD4(CCC_Float, "r1_thermal_lamp", &ps_r1_thermal_lamp, 0.f, 1.f);
-	CMD4(CCC_Float, "r1_thermal_barrel", &ps_r1_thermal_barrel, 0.f, 1.f);
-	CMD4(CCC_Float, "r1_thermal_lamp_size", &ps_r1_thermal_lamp_size, 0.f, 1.f);
-	CMD4(CCC_Float, "r1_thermal_barrel_len", &ps_r1_thermal_barrel_len, 0.f, 3.f);
-	CMD4(CCC_Float, "r1_thermal_gun", &ps_r1_thermal_gun, 0.f, 1.f);
-	CMD4(CCC_Integer, "r1_thermal_ladder", &ps_r1_thermal_ladder, 0, 1);
-	CMD4(CCC_Float, "r1_thermal_top", &ps_r1_thermal_top, 0.f, 1.f);
-	CMD4(CCC_Float, "r1_thermal_bloom", &ps_r1_thermal_bloom, 0.f, 2.f);
-	CMD4(CCC_Float, "r1_thermal_fire_spread", &ps_r1_thermal_fire_spread, 0.f, 1.f);
-	CMD4(CCC_Float, "r1_thermal_fire_reach", &ps_r1_thermal_fire_reach, 0.f, 10.f);
-	CMD4(CCC_Float, "r1_thermal_wet", &ps_r1_thermal_wet, 0.f, 1.f);
-	CMD4(CCC_Float, "r1_thermal_sun", &ps_r1_thermal_sun, 0.f, 1.f);
-	CMD4(CCC_Float, "r1_thermal_force_rain", &ps_r1_thermal_force_rain, -1.f, 1.f);
-	CMD4(CCC_Float, "r1_thermal_force_sun", &ps_r1_thermal_force_sun, -1.f, 1.f);
-	CMD4(CCC_Float, "r1_thermal_lightning", &ps_r1_thermal_lightning, 0.f, 2.f);
-	CMD4(CCC_Integer, "r1_thermal_particles", &ps_r1_thermal_particles, 0, 1);
+	CMD4(CCC_r1_Integer, "r1_thermal_targets", &ps_r1_thermal_targets, 1, 3);
+	CMD4(CCC_r1_Float, "r1_thermal_bias", &ps_r1_thermal_bias, 0.f, 4096.f);
+	CMD4(CCC_r1_Float, "r1_thermal_depth", &ps_r1_thermal_depth, 0.f, 50.f);
+	CMD4(CCC_r1_Integer, "r1_thermal_sync", &ps_r1_thermal_sync, 0, 1);
+	CMD4(CCC_r1_Float, "r1_thermal_gear", &ps_r1_thermal_gear, 0.f, 1.f);
+	CMD4(CCC_r1_Float, "r1_thermal_lamp", &ps_r1_thermal_lamp, 0.f, 1.f);
+	CMD4(CCC_r1_Float, "r1_thermal_barrel", &ps_r1_thermal_barrel, 0.f, 1.f);
+	CMD4(CCC_r1_Float, "r1_thermal_lamp_size", &ps_r1_thermal_lamp_size, 0.f, 1.f);
+	CMD4(CCC_r1_Float, "r1_thermal_barrel_len", &ps_r1_thermal_barrel_len, 0.f, 3.f);
+	CMD4(CCC_r1_Float, "r1_thermal_gun", &ps_r1_thermal_gun, 0.f, 1.f);
+	CMD4(CCC_r1_Integer, "r1_thermal_ladder", &ps_r1_thermal_ladder, 0, 1);
+	CMD4(CCC_r1_Float, "r1_thermal_top", &ps_r1_thermal_top, 0.f, 1.f);
+	CMD4(CCC_r1_Float, "r1_thermal_bloom", &ps_r1_thermal_bloom, 0.f, 2.f);
+	CMD4(CCC_r1_Float, "r1_thermal_fire_spread", &ps_r1_thermal_fire_spread, 0.f, 1.f);
+	CMD4(CCC_r1_Float, "r1_thermal_fire_reach", &ps_r1_thermal_fire_reach, 0.f, 10.f);
+	CMD4(CCC_r1_Float, "r1_thermal_wet", &ps_r1_thermal_wet, 0.f, 1.f);
+	CMD4(CCC_r1_Float, "r1_thermal_sun", &ps_r1_thermal_sun, 0.f, 1.f);
+	CMD4(CCC_r1_Float, "r1_thermal_force_rain", &ps_r1_thermal_force_rain, -1.f, 1.f);
+	CMD4(CCC_r1_Float, "r1_thermal_force_sun", &ps_r1_thermal_force_sun, -1.f, 1.f);
+	CMD4(CCC_r1_Float, "r1_thermal_lightning", &ps_r1_thermal_lightning, 0.f, 2.f);
+	CMD4(CCC_r1_Integer, "r1_thermal_particles", &ps_r1_thermal_particles, 0, 1);
 	// the engine's thermal look (shown while thermal is on and r1_thermal_look is 1), every strength tunable
-	CMD4(CCC_Integer, "r1_thermal_look", &ps_r1_thermal_look, 0, 2);
-	CMD4(CCC_Integer, "r1_thermal_palette", &ps_r1_thermal_palette, 0, 2);
-	CMD4(CCC_Float, "r1_thermal_soft", &ps_r1_thermal_soft, 1.f, 8.f);
-	CMD4(CCC_Float, "r1_thermal_body", &ps_r1_thermal_body, 0.f, 1.f);
-	CMD4(CCC_Float, "r1_thermal_round", &ps_r1_thermal_round, 0.f, 1.f);
-	CMD4(CCC_Float, "r1_thermal_ring", &ps_r1_thermal_ring, 0.f, 2.f);
-	CMD4(CCC_Float, "r1_thermal_glow", &ps_r1_thermal_glow, 0.f, 1.f);
-	CMD4(CCC_Float, "r1_thermal_grain", &ps_r1_thermal_grain, 0.f, 0.3f);
-	CMD4(CCC_Float, "r1_thermal_fpn", &ps_r1_thermal_fpn, 0.f, 0.1f);
-	CMD4(CCC_Float, "r1_thermal_world", &ps_r1_thermal_world, 0.f, 2.f);
-	CMD4(CCC_Float, "r1_thermal_world_base", &ps_r1_thermal_world_base, 0.f, 1.f);
-	CMD4(CCC_Float, "r1_thermal_world_gamma", &ps_r1_thermal_world_gamma, 0.2f, 3.f);
-	CMD4(CCC_Float, "r1_thermal_sky", &ps_r1_thermal_sky, 0.f, 1.f);
-	CMD4(CCC_Float, "r1_thermal_sky_clouds", &ps_r1_thermal_sky_clouds, 0.f, 1.f);
-	CMD4(CCC_Vector3, "r1_thermal_region", &ps_r1_thermal_region, Fvector3().set(-1.f, -1.f, 0.f), Fvector3().set(2.f, 2.f, 4.f));
-	CMD4(CCC_Float, "r1_thermal_region_soft", &ps_r1_thermal_region_soft, 0.f, 1.f);
+	CMD4(CCC_r1_Integer, "r1_thermal_look", &ps_r1_thermal_look, 0, 2);
+	CMD4(CCC_r1_Integer, "r1_thermal_palette", &ps_r1_thermal_palette, 0, 2);
+	CMD4(CCC_r1_Float, "r1_thermal_soft", &ps_r1_thermal_soft, 1.f, 8.f);
+	CMD4(CCC_r1_Float, "r1_thermal_body", &ps_r1_thermal_body, 0.f, 1.f);
+	CMD4(CCC_r1_Float, "r1_thermal_round", &ps_r1_thermal_round, 0.f, 1.f);
+	CMD4(CCC_r1_Float, "r1_thermal_ring", &ps_r1_thermal_ring, 0.f, 2.f);
+	CMD4(CCC_r1_Float, "r1_thermal_glow", &ps_r1_thermal_glow, 0.f, 1.f);
+	CMD4(CCC_r1_Float, "r1_thermal_grain", &ps_r1_thermal_grain, 0.f, 0.3f);
+	CMD4(CCC_r1_Float, "r1_thermal_fpn", &ps_r1_thermal_fpn, 0.f, 0.1f);
+	CMD4(CCC_r1_Float, "r1_thermal_world", &ps_r1_thermal_world, 0.f, 2.f);
+	CMD4(CCC_r1_Float, "r1_thermal_world_base", &ps_r1_thermal_world_base, 0.f, 1.f);
+	CMD4(CCC_r1_Float, "r1_thermal_world_gamma", &ps_r1_thermal_world_gamma, 0.2f, 3.f);
+	CMD4(CCC_r1_Float, "r1_thermal_sky", &ps_r1_thermal_sky, 0.f, 1.f);
+	CMD4(CCC_r1_Float, "r1_thermal_sky_clouds", &ps_r1_thermal_sky_clouds, 0.f, 1.f);
+	CMD4(CCC_r1_Vector3, "r1_thermal_region", &ps_r1_thermal_region, Fvector3().set(-1.f, -1.f, 0.f), Fvector3().set(2.f, 2.f, 4.f));
+	CMD4(CCC_r1_Float, "r1_thermal_region_soft", &ps_r1_thermal_region_soft, 0.f, 1.f);
 
 	// Luminance adaptation for R1 post-process shaders (s_lum_adapt). Runs only while it is on AND the post-process
 	// pass draws; the bus lane "lum_adapt" (x > 0) turns it on too. See R1-PS3-LUM-ADAPT-NOTES.md.
@@ -1697,7 +1725,12 @@ void xrRender_initconsole()
 	CMD4(CCC_Integer, "r__fakescope", &scope_fake_enabled, 0, 1); //crookr for fake scope
 	CMD4(CCC_Integer, "r__3Dfakescope", &scope_3D_fake_enabled, 0, 1); // Redotix99: for 3D Shader Based Scopes
 
+#if RENDER == R_R1
+	// on R1 the switch is for the session only (see CCC_r1_session): a game never starts with thermal on
+	CMD4(CCC_r1_Integer, "r__heatvision", &ps_r2_heatvision, 0, 1);
+#else
 	CMD4(CCC_Integer, "r__heatvision", &ps_r2_heatvision, 0, 1); //--DSR-- HeatVision
+#endif
 	CMD3(CCC_Mask, "r2_terrain_z_prepass", &ps_r2_ls_flags, R2FLAG_TERRAIN_PREPASS); //Terrain Z Prepass @Zagolski
 
 	//////////other

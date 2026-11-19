@@ -160,6 +160,9 @@ public:
 	virtual void _BCL OnFrame();
 	virtual void OnScreenResolutionChanged();
 	string64 ConfigFile;
+	// true while cfg_load runs the config file itself (ConfigFile, user.ltx). A command whose value belongs to the
+	// running session only (R1 thermal) ignores what comes from there
+	bool cfg_user_loading = false;
 	bool bVisible;
 	vecCMD Commands;
 

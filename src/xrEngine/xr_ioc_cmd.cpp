@@ -378,6 +378,15 @@ void CCC_LoadCFG::Execute(LPCSTR args)
 
 	IReader* F = FS.r_open(cfg_full_name);
 
+	// is this the config file itself (user.ltx)? Session-only commands do not take values from it
+	string_path user_name;
+	xr_strcpy(user_name, Console->ConfigFile);
+	if (strext(user_name)) *strext(user_name) = 0;
+	xr_strcat(user_name, ".ltx");
+	const bool was_user = Console->cfg_user_loading;
+	if (0 == _stricmp(cfg_name, user_name))
+		Console->cfg_user_loading = true;
+
 	string1024 str;
 	if (F != NULL)
 	{
@@ -394,6 +403,7 @@ void CCC_LoadCFG::Execute(LPCSTR args)
 	{
 		Msg("! Cannot open script file [%s]", cfg_full_name);
 	}
+	Console->cfg_user_loading = was_user;
 }
 
 CCC_LoadCFG_custom::CCC_LoadCFG_custom(LPCSTR cmd)
