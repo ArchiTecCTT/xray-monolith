@@ -261,6 +261,11 @@ public:
 	virtual bool need_renderable() { return true; };
 	// R1 thermal: hotness 0..1 of the item's own model while it is drawn (a gun's barrel heat), see docs/r1_thermal.md
 	virtual float thermal_heat() { return 0.f; }
+	// ... and where that heat sits: the point (world space of the mode the item is drawn in), the hotness far from it
+	// and the reach in metres. false = the item has no such point
+	virtual bool thermal_point(Fvector& point, float& far_heat, float& reach) { return false; }
+	// gives the item's heat to the visuals added next (set_ItemHeat); the caller puts it back afterwards
+	void thermal_set(IDSGraphManager* DM);
 
 	virtual void render_item_3d_ui();
 

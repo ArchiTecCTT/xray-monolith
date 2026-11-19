@@ -211,6 +211,22 @@ float CWeapon::thermal_heat()
 	return ps_r1_thermal_barrel * _sqrt(t);
 }
 
+// That heat sits at the muzzle (the fire point, of the HUD model or of the world model, whichever is drawn) and
+// falls off along the barrel. The rest of the gun warms late and little: by the square of the counter, so a few
+// shots leave it cold and a long burst brings it to r1_thermal_gun.
+bool CWeapon::thermal_point(Fvector& point, float& far_heat, float& reach)
+{
+	if (!(ps_r1_thermal_barrel_len > 0.01f))
+		return false;
+	point = get_LastFP();
+	if (!_valid(point))
+		return false;
+	const float t = temperature < sil_glow_max_temp ? temperature / sil_glow_max_temp : 1.f;
+	far_heat = ps_r1_thermal_gun * t * t;
+	reach = ps_r1_thermal_barrel_len;
+	return true;
+}
+
 void CWeapon::StartFlameParticles2()
 {
 	CShootingObject::StartParticles(m_pFlameParticles2, *m_sFlameParticles2, get_LastFP2());

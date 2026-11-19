@@ -5,6 +5,7 @@
 #include "xrServer_Objects_ALife.h"
 #include "../Include/xrRender/Kinematics.h"
 #include "game_object_space.h"
+#include "../Layers/xrRender/xrRender_console.h"
 
 #ifdef PROJECTOR_NEW
 #include "../xrphysics/PhysicsShell.h"
@@ -295,6 +296,12 @@ void CProjector::UpdateCL()
 void CProjector::renderable_Render(IDSGraphManager* DM)
 {
 	inherited::renderable_Render(DM);
+}
+
+// R1 thermal: a searchlight that is on is as warm as any lit lamp
+float CProjector::GetHotness()
+{
+	return (light_render && light_render->get_active()) ? ps_r1_thermal_lamp : 0.f;
 }
 
 BOOL CProjector::UsedAI_Locations()

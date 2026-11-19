@@ -95,6 +95,8 @@ public:
 
 	virtual float GetGlowing();			//--DSR-- SilencerOverheat
 	virtual float GetHotness();			//--DSR-- HeatVision
+	// R1 thermal, the heat ladder: how warm this creature is while it lives (configs\r1_thermal.ltx), see Entity.cpp
+	float thermal_living();
 	virtual void  OnChangeVisual();		//--DSR-- HeatVision
 
 	/*virtual*/
@@ -135,6 +137,9 @@ public:
 	//time of entity death
 	u32 m_level_death_time;
 	ALife::_TIME_ID m_game_death_time;
+	// R1 thermal: the creature's place on the heat ladder, looked up again every few seconds (< 0 = not yet)
+	float m_thermal_living = -1.f;
+	u32 m_thermal_living_time = 0;
 
 	void set_death_time();
 	virtual void set_ready_to_save();

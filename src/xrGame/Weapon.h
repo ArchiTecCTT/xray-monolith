@@ -138,6 +138,7 @@ public:
 	//--DSR-- SilencerOverheat_end
 	// R1 thermal: barrel heat from the same counter, 0 for a gun that has not been fired
 	virtual float thermal_heat();
+	virtual bool thermal_point(Fvector& point, float& far_heat, float& reach);
 
 	virtual void HUD_VisualBulletUpdate(bool force = false, int force_idx = -1);
 

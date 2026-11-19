@@ -209,8 +209,7 @@ void CHudItem::renderable_Render(IDSGraphManager* DM)
 	UpdateXForm();
 	BOOL _hud_render = DM->get_HUD() && GetHUDmode();
 	// R1 thermal: the item's own heat (a fired gun) goes with everything it adds here
-	const float heat_before = DM->get_ItemHeat();
-	DM->set_ItemHeat(thermal_heat());
+	thermal_set(DM);
 
 	if (_hud_render && !IsHidden())
 	{
@@ -233,7 +232,25 @@ void CHudItem::renderable_Render(IDSGraphManager* DM)
             }			
 		}
 	}
-	DM->set_ItemHeat(heat_before);
+	DM->set_ItemHeat(0.f);
+}
+
+// R1 thermal: a gun is hottest at its muzzle and along the barrel; without a usable muzzle point the whole item
+// shows at half its heat
+void CHudItem::thermal_set(IDSGraphManager* DM)
+{
+	const float heat = thermal_heat();
+	if (!(heat > 0.f))
+	{
+		DM->set_ItemHeat(0.f);
+		return;
+	}
+	Fvector point;
+	float far_heat = 0.f, reach = 0.f;
+	if (thermal_point(point, far_heat, reach))
+		DM->set_ItemHeat(heat, far_heat, point, reach);
+	else
+		DM->set_ItemHeat(heat * .5f);
 }
 
 void CHudItem::SwitchState(u32 S)

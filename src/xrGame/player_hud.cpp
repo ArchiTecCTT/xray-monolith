@@ -361,7 +361,7 @@ void attachable_hud_item::render(IDSGraphManager* DM)
 	m_parent_hud_item->render_hud_mode();
 	if (m_parent_hud_item->m_instance_holder_hud && !m_parent_hud_item->m_instance_holder_hud->ModelInstanceMultirender()) return;
 	// R1 thermal: the first-person gun carries its barrel heat (0 for everything that is not a fired gun)
-	DM->set_ItemHeat(m_parent_hud_item->thermal_heat());
+	m_parent_hud_item->thermal_set(DM);
 	DM->add_Dynamic(m_model->dcast_RenderVisual(), &m_item_transform);
 	DM->set_ItemHeat(0.f);
 	if (!m_parent_hud_item->has_object()) return;

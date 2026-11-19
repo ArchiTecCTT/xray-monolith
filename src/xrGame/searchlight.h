@@ -63,6 +63,7 @@ public:
 	virtual void shedule_Update(u32 dt); // Called by sheduler
 	virtual void UpdateCL(); // Called each frame, so no need for dt
 	virtual void renderable_Render(IDSGraphManager* DM);
+	virtual float GetHotness(); // R1 thermal: warm while its light is on
 
 	virtual BOOL UsedAI_Locations();
 

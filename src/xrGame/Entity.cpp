@@ -413,10 +413,121 @@ static u32 clampU(u32 x, u32 a, u32 b)
 	return x < a ? a : (x > b ? b : x);
 }
 
+// R1 thermal, the heat ladder (docs/r1_thermal.md): not every warm creature is equally warm. The value of a living
+// creature comes from, first match wins:
+//   1. thermal_heat = <0..1> in the creature's own section;
+//   2. configs\r1_thermal.ltx [creature_sections]:    <section name> = <0..1>
+//   3. configs\r1_thermal.ltx [creature_communities]: <community> = <0..1>   (stalkers: zombied = the shooting zombies)
+//   4. configs\r1_thermal.ltx [creature_classes]:     <class of the section> = <0..1>   (SM_ZOMBI = the shambling ones)
+//   5. configs\r1_thermal.ltx [creatures] default, else 0.8.
+// A mod changes any of it with a DLTX file (mod_r1_thermal_<name>.ltx). Read once per game start.
+namespace
+{
+struct thermal_ladder_table
+{
+	bool loaded = false;
+	float living = 0.8f;
+	xr_map<shared_str, float> sections, communities, classes;
+
+	// names are compared without case (class names are upper case in the configs)
+	static shared_str lower(const shared_str& name)
+	{
+		xr_string low = name.size() ? *name : "";
+		for (char& c : low)
+			c = char(tolower(u8(c)));
+		return shared_str(low.c_str());
+	}
+
+	static void read(CInifile& ini, LPCSTR name, xr_map<shared_str, float>& to)
+	{
+		if (!ini.section_exist(name))
+			return;
+		CInifile::Sect& S = ini.r_section(name);
+		for (CInifile::SectCIt I = S.Data.begin(); I != S.Data.end(); ++I)
+		{
+			if (!I->first.size() || !I->second.size())
+				continue;
+			to[lower(I->first)] = clampr(float(atof(*I->second)), 0.f, 1.f);
+		}
+	}
+
+	void load()
+	{
+		loaded = true;
+		// the engine's own ladder, for a game data folder without the file
+		communities["zombied"] = 0.65f;
+		classes["sm_zombi"] = 0.2f;
+		string_path fn;
+		FS.update_path(fn, "$game_config$", "r1_thermal.ltx");
+		if (!FS.exist(fn))
+			return;
+		CInifile ini(fn, TRUE, TRUE, FALSE);
+		if (ini.section_exist("creatures") && ini.line_exist("creatures", "default"))
+			living = clampr(ini.r_float("creatures", "default"), 0.f, 1.f);
+		read(ini, "creature_sections", sections);
+		read(ini, "creature_communities", communities);
+		read(ini, "creature_classes", classes);
+	}
+
+	bool find(const xr_map<shared_str, float>& in, const shared_str& key, float& value) const
+	{
+		if (!key.size())
+			return false;
+		xr_map<shared_str, float>::const_iterator it = in.find(lower(key));
+		if (it == in.end())
+			return false;
+		value = it->second;
+		return true;
+	}
+};
+thermal_ladder_table g_thermal_ladder;
+}
+
+float CEntity::thermal_living()
+{
+	// a creature's community can change while it lives (a script turns a stalker): look again every few seconds
+	if (m_thermal_living >= 0.f && Device.dwTimeGlobal - m_thermal_living_time < 3000)
+		return m_thermal_living;
+	thermal_ladder_table& T = g_thermal_ladder;
+	if (!T.loaded)
+		T.load();
+
+	float value = T.living;
+	const shared_str& section = cNameSect();
+	bool found = false;
+	if (section.size() && pSettings->section_exist(section))
+	{
+		if (pSettings->line_exist(section, "thermal_heat"))
+		{
+			value = clampr(pSettings->r_float(section, "thermal_heat"), 0.f, 1.f);
+			found = true;
+		}
+		else
+			found = T.find(T.sections, section, value);
+	}
+	if (!found)
+	{
+		if (CInventoryOwner* owner = smart_cast<CInventoryOwner*>(this))
+			found = T.find(T.communities, owner->CharacterInfo().Community().id(), value);
+	}
+	if (!found && section.size() && pSettings->section_exist(section) && pSettings->line_exist(section, "class"))
+		T.find(T.classes, pSettings->r_string(section, "class"), value);
+
+	m_thermal_living = value;
+	m_thermal_living_time = Device.dwTimeGlobal;
+	return value;
+}
+
 float CEntity::GetHotness() {
-	if (heat_vision_cooldown && (AlreadyDie() || !g_Alive())) 
-		return 1.0f - (float)clampU(Device.dwTimeGlobal - m_level_death_time, 0, heat_vision_cooldown_time) / heat_vision_cooldown_time;
-	return 1.0f;
+	// the ladder is the R1 thermal picture's; the DX10/DX11 heat shader keeps its 1
+	const float living = (ps_r1_thermal_ladder && ::Render->get_generation() == IRender_interface::GENERATION_R1)
+		? thermal_living() : 1.0f;
+	// Health can reach zero before the death itself is processed (the death time is still 0 then). Without the
+	// AlreadyDie() test such a body counted as dead since time 0, fully cooled, and went cold until Die() ran.
+	// A corpse fades from the value it had alive.
+	if (heat_vision_cooldown && AlreadyDie())
+		return living * (1.0f - (float)clampU(Device.dwTimeGlobal - m_level_death_time, 0, heat_vision_cooldown_time) / heat_vision_cooldown_time);
+	return living;
 }
 
 void CEntity::OnChangeVisual()
