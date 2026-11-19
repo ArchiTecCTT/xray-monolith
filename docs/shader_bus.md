@@ -295,7 +295,8 @@ if token then shader_bus.set_object(token, obj, 0.8, 0, 0, 0) end
 ```
 
 Limits:
-- DX10 and DX11 only. The DX9 renderers never write `L_hotness`.
+- DX10 and DX11 only. The DX9 renderers never write `L_hotness`. On R1 (DX8) the lane feeds the heat
+  mask instead, with the same rules: see `r1_thermal.md`. R2 (DX9) ignores it.
 - Only object draws read it. Level geometry has no object and keeps the stock value.
 - An object with its own value draws every surface with it, whatever its textures, so a stove a
   script heats reads hot all over and a creature given a value heats its gear along with its skin.
