@@ -136,6 +136,8 @@ public:
 
 	virtual float GetGlowing();
 	//--DSR-- SilencerOverheat_end
+	// R1 thermal: barrel heat from the same counter, 0 for a gun that has not been fired
+	virtual float thermal_heat();
 
 	virtual void HUD_VisualBulletUpdate(bool force = false, int force_idx = -1);
 

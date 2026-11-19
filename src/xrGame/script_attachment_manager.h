@@ -165,6 +165,8 @@ public:
 	virtual ICollidable* dcast_Collidable() { return this; }
 
 	virtual void renderable_Render(IDSGraphManager* DM);
+	// R1 thermal: gear worn by a warm creature is warm too (r1_thermal_gear), see docs/r1_thermal.md
+	virtual float GetHotness() override;
 	void Render(IKinematics* model, const Fmatrix& parent_transform, IDSGraphManager* DM);
 	void RenderAt(IDSGraphManager* DM, const Fmatrix& transform);
 	void RenderUI(bool defer_r1 = true);

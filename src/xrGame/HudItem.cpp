@@ -208,6 +208,9 @@ void CHudItem::renderable_Render(IDSGraphManager* DM)
 {
 	UpdateXForm();
 	BOOL _hud_render = DM->get_HUD() && GetHUDmode();
+	// R1 thermal: the item's own heat (a fired gun) goes with everything it adds here
+	const float heat_before = DM->get_ItemHeat();
+	DM->set_ItemHeat(thermal_heat());
 
 	if (_hud_render && !IsHidden())
 	{
@@ -230,6 +233,7 @@ void CHudItem::renderable_Render(IDSGraphManager* DM)
             }			
 		}
 	}
+	DM->set_ItemHeat(heat_before);
 }
 
 void CHudItem::SwitchState(u32 S)

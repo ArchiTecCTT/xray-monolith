@@ -12,6 +12,13 @@
 #include "game_object_space.h"
 #include "script_callback_ex.h"
 #include "script_game_object.h"
+#include "../Layers/xrRender/xrRender_console.h"
+
+// R1 thermal: the lamp's model shows warm while its light is on
+float CHangingLamp::GetHotness()
+{
+	return (light_render && light_render->get_active()) ? ps_r1_thermal_lamp : 0.f;
+}
 //////////////////////////////////////////////////////////////////////
 // Construction/Destruction
 //////////////////////////////////////////////////////////////////////

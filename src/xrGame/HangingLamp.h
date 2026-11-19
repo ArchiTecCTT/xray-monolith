@@ -73,6 +73,8 @@ public:
 	virtual void load(IReader& input_packet);
 
 	virtual BOOL renderable_ShadowGenerate() { return TRUE; }
+	// R1 thermal: a lit lamp is warm (r1_thermal_lamp), see docs/r1_thermal.md
+	virtual float GetHotness();
 	virtual BOOL renderable_ShadowReceive() { return TRUE; }
 
 	virtual void Hit(SHit* pHDS);

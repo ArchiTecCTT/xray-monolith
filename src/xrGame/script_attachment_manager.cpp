@@ -11,6 +11,7 @@
 #include "physics_shell_scripted.h"
 #include "debug_renderer.h"
 #include "../Layers/xrRender/LightTrack.h"
+#include "../Layers/xrRender/xrRender_console.h"
 
 static void update_visbox_attachment(IKinematics* k)
 {
@@ -408,6 +409,15 @@ bool script_attachment::spatial_GetObstacle()
 void script_attachment::renderable_Render(IDSGraphManager* DM)
 {
 	RenderAt(DM, XFORM());
+}
+
+// R1 thermal: a world attachment (helmet, headset, backpack) takes the hotness of the object that wears it, times
+// r1_thermal_gear. HUD and camera attachments stay cold, and so does gear on anything that is not warm itself.
+float script_attachment::GetHotness()
+{
+	if (m_type != eSA_World || !m_toplevel_parent)
+		return 0.f;
+	return m_toplevel_parent->GetHotness() * ps_r1_thermal_gear;
 }
 
 void script_attachment::Render(IKinematics* model, const Fmatrix& parent_transform, IDSGraphManager* DM)

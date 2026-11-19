@@ -200,6 +200,17 @@ float CWeapon::GetGlowing()
 }
 //--DSR-- SilencerOverheat_end
 
+// R1 thermal (docs/r1_thermal.md): how warm the gun shows in the heat mask. The silencer-overheat counter rises with
+// every shot (sil_glow_shot_temp, up to sil_glow_max_temp) and falls with time (sil_glow_cool_temp_rate). The square
+// root makes the first shots count: a full counter reads r1_thermal_barrel, a tenth of it about a third of that.
+float CWeapon::thermal_heat()
+{
+	if (temperature <= 0.f || sil_glow_max_temp <= 0.f)
+		return 0.f;
+	const float t = temperature < sil_glow_max_temp ? temperature / sil_glow_max_temp : 1.f;
+	return ps_r1_thermal_barrel * _sqrt(t);
+}
+
 void CWeapon::StartFlameParticles2()
 {
 	CShootingObject::StartParticles(m_pFlameParticles2, *m_sFlameParticles2, get_LastFP2());

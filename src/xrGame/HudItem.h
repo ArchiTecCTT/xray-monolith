@@ -259,6 +259,8 @@ public:
 	{
 	};
 	virtual bool need_renderable() { return true; };
+	// R1 thermal: hotness 0..1 of the item's own model while it is drawn (a gun's barrel heat), see docs/r1_thermal.md
+	virtual float thermal_heat() { return 0.f; }
 
 	virtual void render_item_3d_ui();
 
