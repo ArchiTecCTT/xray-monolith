@@ -1232,8 +1232,9 @@ float CRenderTarget::heat_fire_at(const Fvector& pos)
 		const float d2 = F.pos.distance_to_sqr(pos);
 		if (d2 >= F.radius * F.radius)
 			continue;
-		const float k = 1.f - _sqrt(d2) / F.radius;
-		const float heat = F.heat * k * (.5f + .5f * k); // the same fall-off as the spot (heat_spot.ps)
+		// a whole object takes the fire's heat in a straight line with distance (the spot around the fire falls off
+		// by the square: bright at the fire, a faint tail)
+		const float heat = F.heat * (1.f - _sqrt(d2) / F.radius);
 		if (heat > best)
 			best = heat;
 	}

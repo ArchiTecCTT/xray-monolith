@@ -81,6 +81,7 @@ private:
 	s32 sky_rays_uptodate;
 #endif	// RENDER!=R_R1
 
+public:
 	// R1 thermal: the surface state of this object (r__dsgraph_build.cpp, r1_heat_surface)
 	float thermal_wet = 0.f; // 0 dry .. 1 soaked
 	float thermal_sun = 0.f; // 0 .. 1 warmed by direct sun

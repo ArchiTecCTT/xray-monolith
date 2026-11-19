@@ -184,8 +184,8 @@ int ps_r1_thermal_ladder = 1;
 float ps_r1_thermal_top = 1.f; // grey level of heat 1 (fire) with the ladder on
 float ps_r1_thermal_bloom = 0.3f; // extra glow around the very hot (fire, a muzzle after a burst); 0 = none
 // heat that follows physics (docs/r1_thermal.md); every one is off at 0
-float ps_r1_thermal_fire_spread = 0.3f; // hotness an open fire gives to what is right at it
-float ps_r1_thermal_fire_reach = 1.5f; // metres beyond the flames at which that is gone
+float ps_r1_thermal_fire_spread = 0.45f; // hotness an open fire gives to what is right at it
+float ps_r1_thermal_fire_reach = 0.9f; // metres beyond the flames at which that is gone
 float ps_r1_thermal_wet = 0.15f; // share of its heat a soaked creature loses
 float ps_r1_thermal_sun = 0.07f; // hotness direct sun adds to a creature's surface
 float ps_r1_thermal_force_rain = -1.f; // testing: rain density 0..1 instead of the weather's; < 0 = the weather

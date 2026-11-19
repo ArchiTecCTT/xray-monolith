@@ -301,7 +301,16 @@ void CProjector::renderable_Render(IDSGraphManager* DM)
 // R1 thermal: a searchlight that is on is as warm as any lit lamp
 float CProjector::GetHotness()
 {
+#ifdef PROJECTOR_NEW
+	for (auto& I : m_lights)
+	{
+		if (I.m_light && I.m_light->get_active())
+			return ps_r1_thermal_lamp;
+	}
+	return 0.f;
+#else
 	return (light_render && light_render->get_active()) ? ps_r1_thermal_lamp : 0.f;
+#endif
 }
 
 BOOL CProjector::UsedAI_Locations()
