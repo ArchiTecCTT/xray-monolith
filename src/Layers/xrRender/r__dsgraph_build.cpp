@@ -10,6 +10,7 @@
 #include "FTreeVisual.h"
 #if RENDER == R_R1
 #include "../../xrEngine/shader_bus.h" // obj_hotness, for the R1 heat mask
+#include "ParticleEffect.h" // warm particle effects, for the R1 heat mask
 #endif
 
 using namespace R_dsgraph;
@@ -64,35 +65,73 @@ ICF bool R4FullDetailRejectStatic(dxRender_Visual* pVisual, bool normalPhase)
 
 #if RENDER == R_R1
 // R1 thermal (r__heatvision): queue a warm visual for the heat mask pass (CRenderTarget::phase_heat).
-// Warm = the object has hotness (living entities 1, a corpse cooling down to 0, or its own obj_hotness bus value)
-// and the visual's texture is marked hot (bodies and HUD hands; gear, weapons and the world are not). The same two
-// tests DX10/DX11 make in apply_object / apply_lmaterial. Only called while a heat mask is wanted for this frame.
-void CDSGraphManager::r1_heat_insert(dxRender_Visual* pVisual, Fmatrix* xform, float ssa, ShaderElement* sh)
+// Only called while a heat mask is wanted for this frame. What is warm, and how warm (docs/r1_thermal.md):
+//  - the owner object's own model, at the owner's hotness, whatever its shaders and textures are (a living creature 1,
+//    a corpse cooling down to 0, a lit lamp, a script attachment worn by a warm creature). Deciding by owner and not
+//    by the hot mark of the texture keeps a body warm after a script swapped its model or textures;
+//  - anything else the owner draws (the gun in its hands, carried items, the first-person hands and gun), only where
+//    the texture is marked hot: the first-person hands are, guns and devices are not;
+//  - whatever the game gave an item heat (set_ItemHeat: a fired gun), at that heat;
+//  - an object with its own obj_hotness bus value, on every surface.
+void CDSGraphManager::r1_heat_insert(dxRender_Visual* pVisual, Fmatrix* xform, bool own_model, float ssa, ShaderElement* sh)
 {
-	// no owner (level geometry, particles), shadow-only draws (the first-person body), camera attachments and
-	// custom-FOV attachments are never warm
-	if (!val_pObject || i_mask[fl_invisible] || i_mask[fl_cam] || val_fCustomFOV != 0.f)
+	// shadow-only draws (the first-person body), camera attachments and custom-FOV attachments are never warm
+	if (i_mask[fl_invisible] || i_mask[fl_cam] || val_fCustomFOV != 0.f)
 		return;
 
-	float hotness = val_pObject->GetHotness();
-	const bool own = ShaderBus::object_hotness(val_pObject->renderable.bus_values, hotness);
+	float hotness = val_fItemHeat;
+	if (val_pObject)
+	{
+		float owner = val_pObject->GetHotness();
+		bool whole = ShaderBus::object_hotness(val_pObject->renderable.bus_values, owner) || own_model;
+		if (owner > hotness)
+		{
+			if (!whole)
+			{
+				CTexture* T = pVisual->GetTexture();
+				whole = T && T->m_is_hot;
+			}
+			if (whole)
+				hotness = owner;
+		}
+	}
 	if (!(hotness > 0.001f))
 		return;
-	if (!own)
-	{
-		CTexture* T = pVisual->GetTexture();
-		if (!T || !T->m_is_hot)
-			return;
-	}
 
 	HeatItem item;
 	item.pVisual = pVisual;
 	item.pMatrix = xform;
 	item.ssa = ssa;
 	item.hotness = hotness < 1.f ? hotness : 1.f;
+	item.gain = 1.f;
 	item.hud = i_mask[fl_hud];
 	ShaderElement* lq = pVisual->shader->E[SE_R1_NORMAL_LQ]._get();
 	item.lq = (sh == lq) && (lq != pVisual->shader->E[SE_R1_NORMAL_HQ]._get());
+	item.particle = false;
+	RGraph.mapHeat.push_back(item);
+}
+
+// A particle effect whose name configs\r1_thermal.ltx lists (fire, embers, heat haze) is drawn once more into the mask.
+void CDSGraphManager::r1_heat_insert_particle(dxRender_Visual* pVisual, float ssa)
+{
+	if (i_mask[fl_invisible])
+		return;
+	PS::CParticleEffect* effect = (PS::CParticleEffect*)pVisual->dcast_ParticleCustom();
+	if (!effect || !effect->GetDefinition())
+		return;
+	float hotness, gain;
+	if (!RImplementation.Target->heat_particle(effect->GetDefinition()->m_Name, hotness, gain))
+		return;
+
+	HeatItem item;
+	item.pVisual = pVisual;
+	item.pMatrix = nullptr;
+	item.ssa = ssa;
+	item.hotness = hotness;
+	item.gain = gain;
+	item.hud = false; // a HUD particle effect switches to the HUD projection by itself
+	item.lq = false;
+	item.particle = true;
 	RGraph.mapHeat.push_back(item);
 }
 #endif
@@ -101,6 +140,13 @@ void CDSGraphManager::r_dsgraph_insert_dynamic(dxRender_Visual *pVisual, Fmatrix
 {
 	Fvector Center;
 	xform->transform_tiny(Center, pVisual->vis.sphere.P);
+#if RENDER == R_R1
+	// R1 thermal: the body of an object is added with the object's own matrix, the things it carries (a gun, a held
+	// item) with theirs; a script attachment is its own owner. Read before the matrix is replaced by a copy below.
+	const bool heat_collect = RImplementation.r1_heat_collect && this == &RImplementation.GMBase && !get_UI3D();
+	const bool heat_own_model = heat_collect && val_pObject &&
+		(!val_pObject->dcast_CObject() || xform == &val_pObject->renderable.xform);
+#endif
     // Attachments can submit the same visual at several instance transforms in one pass.
     if (!get_UI3D() && val_pObject && !val_pObject->dcast_CObject())
     {
@@ -166,6 +212,13 @@ void CDSGraphManager::r_dsgraph_insert_dynamic(dxRender_Visual *pVisual, Fmatrix
         }
     }
 
+#if RENDER == R_R1
+	// R1 thermal: warm particle effects. Here, because one that only distorts (heat haze) has no normal element and
+	// leaves this function below
+	if (heat_collect && MT_PARTICLE_EFFECT == pVisual->Type)
+		r1_heat_insert_particle(pVisual, SSA);
+#endif
+
 	// Distortive geometry should be marked and R2 special-cases it
 	// a) Allow to optimize RT order
 	// b) Should be rendered to special distort buffer in another pass
@@ -192,8 +245,8 @@ void CDSGraphManager::r_dsgraph_insert_dynamic(dxRender_Visual *pVisual, Fmatrix
 
 #if RENDER == R_R1
 	// R1 thermal: only the main view's graph, only on frames that build a heat mask (false while r__heatvision is off)
-	if (RImplementation.r1_heat_collect && this == &RImplementation.GMBase)
-		r1_heat_insert(pVisual, xform, SSA, sh);
+	if (heat_collect && MT_PARTICLE_EFFECT != pVisual->Type)
+		r1_heat_insert(pVisual, xform, heat_own_model, SSA, sh);
 #endif
 
 	// Create common node

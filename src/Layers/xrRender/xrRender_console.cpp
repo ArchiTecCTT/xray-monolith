@@ -168,8 +168,28 @@ float ps_r1_fog_luminance = 1.1f; // r1-only
 int ps_r1_SoftwareSkinning = 0; // r1-only
 // r1-only thermal (heat mask), see docs/r1_thermal.md. The switch itself is r__heatvision (or the bus lane "thermal")
 int ps_r1_thermal_targets = 3; // which views get a heat mask: 1 = the screen ($user$heat), 2 = the SVP lens ($user$heat_vp2), 3 = both
-int ps_r1_thermal_demo = 0; // plain test look drawn by the engine: grey world, warm bodies white
 float ps_r1_thermal_bias = 8.f; // depth bias of the heat redraw, in steps of a 24-bit depth buffer
+// what is warm besides bodies (0 = that kind of source stays cold)
+float ps_r1_thermal_gear = 0.8f; // script attachments worn by a warm creature, as a share of its hotness
+float ps_r1_thermal_lamp = 0.65f; // a lit lamp (hanging lamp objects)
+float ps_r1_thermal_barrel = 0.8f; // a gun at full barrel temperature (the sil_glow_* counter)
+int ps_r1_thermal_particles = 1; // fires, embers and heat haze: particle effects named in configs\r1_thermal.ltx
+// the engine's thermal look
+int ps_r1_thermal_look = 1; // 0 = masks only (a mod makes the look), 1 = shown on the screen and in the SVP lens, 2 = built into $user$thermal but not shown on the screen
+int ps_r1_thermal_palette = 0; // 0 = white hot, 1 = black hot, 2 = colour
+float ps_r1_thermal_soft = 3.f; // screen pixels per sensor pixel
+float ps_r1_thermal_round = 0.3f; // how much darker a body is where its surface turns away from the camera
+float ps_r1_thermal_ring = 0.7f; // the thin dark ring right outside a hot thing
+float ps_r1_thermal_glow = 0.12f; // the glow around a hot thing
+float ps_r1_thermal_grain = 0.027f; // moving sensor grain
+float ps_r1_thermal_fpn = 0.006f; // fixed pattern: columns and lines
+float ps_r1_thermal_world = 0.5f; // contrast of the world
+float ps_r1_thermal_world_base = 0.07f; // grey level of a black world pixel
+float ps_r1_thermal_world_gamma = 0.85f;
+float ps_r1_thermal_sky = 0.035f; // grey level of the sky
+float ps_r1_thermal_sky_clouds = 0.1f; // how much of the sky's own brightness stays
+Fvector3 ps_r1_thermal_region = {0.5f, 0.5f, 0.f}; // the screen look only inside a circle: centre x, y (0..1 of the screen), radius in screen heights; radius 0 = whole screen
+float ps_r1_thermal_region_soft = 0.02f; // width of the circle's soft edge, in screen heights
 int ps_r1_lum_adapt = 0; // r1-only: eye-like luminance adaptation for post-process shaders (s_lum_adapt), 0 = off
 float ps_r1_lum_adapt_speed = 4.f; // r1-only: rate (1/s) the adapted value follows a brighter scene
 float ps_r1_lum_adapt_speed_down = 2.f; // r1-only: rate (1/s) the adapted value follows a darker scene
@@ -1446,8 +1466,27 @@ void xrRender_initconsole()
 	// R1 thermal: r__heatvision 1 (or the bus lane "thermal", x > 0) makes the R1 renderer redraw warm bodies into a heat
 	// mask that post-process and lens shaders can sample. Off, nothing is created or drawn. See docs/r1_thermal.md.
 	CMD4(CCC_Integer, "r1_thermal_targets", &ps_r1_thermal_targets, 1, 3);
-	CMD4(CCC_Integer, "r1_thermal_demo", &ps_r1_thermal_demo, 0, 1);
 	CMD4(CCC_Float, "r1_thermal_bias", &ps_r1_thermal_bias, 0.f, 4096.f);
+	CMD4(CCC_Float, "r1_thermal_gear", &ps_r1_thermal_gear, 0.f, 1.f);
+	CMD4(CCC_Float, "r1_thermal_lamp", &ps_r1_thermal_lamp, 0.f, 1.f);
+	CMD4(CCC_Float, "r1_thermal_barrel", &ps_r1_thermal_barrel, 0.f, 1.f);
+	CMD4(CCC_Integer, "r1_thermal_particles", &ps_r1_thermal_particles, 0, 1);
+	// the engine's thermal look (shown while thermal is on and r1_thermal_look is 1), every strength tunable
+	CMD4(CCC_Integer, "r1_thermal_look", &ps_r1_thermal_look, 0, 2);
+	CMD4(CCC_Integer, "r1_thermal_palette", &ps_r1_thermal_palette, 0, 2);
+	CMD4(CCC_Float, "r1_thermal_soft", &ps_r1_thermal_soft, 1.f, 8.f);
+	CMD4(CCC_Float, "r1_thermal_round", &ps_r1_thermal_round, 0.f, 1.f);
+	CMD4(CCC_Float, "r1_thermal_ring", &ps_r1_thermal_ring, 0.f, 2.f);
+	CMD4(CCC_Float, "r1_thermal_glow", &ps_r1_thermal_glow, 0.f, 1.f);
+	CMD4(CCC_Float, "r1_thermal_grain", &ps_r1_thermal_grain, 0.f, 0.3f);
+	CMD4(CCC_Float, "r1_thermal_fpn", &ps_r1_thermal_fpn, 0.f, 0.1f);
+	CMD4(CCC_Float, "r1_thermal_world", &ps_r1_thermal_world, 0.f, 2.f);
+	CMD4(CCC_Float, "r1_thermal_world_base", &ps_r1_thermal_world_base, 0.f, 1.f);
+	CMD4(CCC_Float, "r1_thermal_world_gamma", &ps_r1_thermal_world_gamma, 0.2f, 3.f);
+	CMD4(CCC_Float, "r1_thermal_sky", &ps_r1_thermal_sky, 0.f, 1.f);
+	CMD4(CCC_Float, "r1_thermal_sky_clouds", &ps_r1_thermal_sky_clouds, 0.f, 1.f);
+	CMD4(CCC_Vector3, "r1_thermal_region", &ps_r1_thermal_region, Fvector3().set(-1.f, -1.f, 0.f), Fvector3().set(2.f, 2.f, 4.f));
+	CMD4(CCC_Float, "r1_thermal_region_soft", &ps_r1_thermal_region_soft, 0.f, 1.f);
 
 	// Luminance adaptation for R1 post-process shaders (s_lum_adapt). Runs only while it is on AND the post-process
 	// pass draws; the bus lane "lum_adapt" (x > 0) turns it on too. See R1-PS3-LUM-ADAPT-NOTES.md.

@@ -116,9 +116,12 @@ public:
 	void r_dsgraph_render_distort();
 #if RENDER == R_R1
 	// R1 thermal (r__heatvision), see docs/r1_thermal.md
-	void r1_heat_insert(dxRender_Visual* pVisual, Fmatrix* xform, float ssa, ShaderElement* sh);
-	// draws RGraph.mapHeat with element 'element' of the heat shaders (world, then the HUD part), empties it if 'clear'
-	void r_dsgraph_render_heat(u32 element, bool clear);
+	// own_model: the visual is part of the owner object's own model (not an item it carries)
+	void r1_heat_insert(dxRender_Visual* pVisual, Fmatrix* xform, bool own_model, float ssa, ShaderElement* sh);
+	void r1_heat_insert_particle(dxRender_Visual* pVisual, float ssa);
+	// draws RGraph.mapHeat into the bound heat mask (models: world, then the HUD part; then the warm particle
+	// effects) and empties it
+	void r_dsgraph_render_heat();
 #endif
 
 	// Anomaly

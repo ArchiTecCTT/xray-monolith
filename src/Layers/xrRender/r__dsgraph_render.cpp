@@ -606,20 +606,42 @@ void CDSGraphManager::r_dsgraph_render_distort()
 
 #if RENDER == R_R1
 //////////////////////////////////////////////////////////////////////////
-// R1 thermal (r__heatvision): redraw the warm visuals queued by r1_heat_insert, flat, into the bound target.
+// R1 thermal (r__heatvision): redraw the warm visuals queued by r1_heat_insert into the bound heat mask.
 // The caller (CRenderTarget::phase_heat) has bound the target and the depth buffer of the scene that was just drawn;
-// the heat passes test depth and never write it, so only the visible part of a warm body lands in the mask.
-// Each visual is drawn with the vertex shader variant, world matrix and LOD the scene pass used, so its depth
-// matches what that pass wrote.
-void CDSGraphManager::r_dsgraph_render_heat(u32 element, bool clear)
+// the heat passes test depth and never write it, so only the visible part of a warm thing lands in the mask.
+// A model is drawn with the vertex shader variant, world matrix and LOD the scene pass used, so its depth matches
+// what that pass wrote. It writes hotness (red), the hands flag (green) and the edge term (alpha).
+// A warm particle effect is drawn with its own sprites and texture, MAX-blended into red only: a soft patch that
+// never goes above the hotness of the effect and never darkens what is already there.
+
+// the texture list of the first pass a particle effect has (its normal one, or the distortion one of a heat haze)
+static STextureList* heat_particle_textures(dxRender_Visual* V)
+{
+	Shader* S = V->shader._get();
+	if (!S)
+		return nullptr;
+	for (u32 e = 0; e < SHADER_ELEMENTS_MAX; ++e)
+	{
+		ShaderElement* E = S->E[e]._get();
+		if (!E || E->passes.empty())
+			continue;
+		STextureList* T = E->passes[0]->T._get();
+		// the sprite's picture is what its pixel shader reads from stage 0
+		if (T && !T->empty() && 0 == T->front().first && T->front().second._get())
+			return T;
+	}
+	return nullptr;
+}
+
+void CDSGraphManager::r_dsgraph_render_heat()
 {
 	PROF_EVENT("r_dsgraph_render_heat");
 	xr_vector<HeatItem>& list = RGraph.mapHeat;
 	if (list.empty())
 		return;
 
-	static shared_str s_item = "r1_heat_item"; // x = hotness, y = 1 for a HUD item (the player's hands)
-	bool has_hud = false;
+	static shared_str s_item = "r1_heat_item"; // models: x = hotness, y = 1 for a HUD item (the player's hands)
+	bool has_hud = false, has_particles = false;
 	for (int pass = 0; pass < 2; ++pass)
 	{
 		const bool hud = (1 == pass);
@@ -630,13 +652,18 @@ void CDSGraphManager::r_dsgraph_render_heat(u32 element, bool clear)
 		if (hud) RImplementation.rmNear();
 		for (HeatItem& item : list)
 		{
+			if (item.particle)
+			{
+				has_particles = true;
+				continue;
+			}
 			if (item.hud != hud)
 			{
 				has_hud |= item.hud;
 				continue;
 			}
 			dxRender_Visual* V = item.pVisual;
-			ShaderElement* E = RImplementation.Target->heat_element(V->skinning, item.lq, element);
+			ShaderElement* E = RImplementation.Target->heat_element(V->skinning, item.lq);
 			if (!E)
 				continue;
 			RCache.set_Element(E);
@@ -647,8 +674,34 @@ void CDSGraphManager::r_dsgraph_render_heat(u32 element, bool clear)
 		if (hud) RImplementation.rmNormal();
 	}
 
-	if (clear)
-		list.clear();
+	ShaderElement* E_particle = has_particles ? RImplementation.Target->heat_particle_element() : nullptr;
+	if (E_particle)
+	{
+		RCache.set_ColorWriteEnable(D3DCOLORWRITEENABLE_RED);
+		RCache.set_Element(E_particle);
+		// the pass blends ONE + ONE; with MAX (where the GPU has it) sprites on top of each other do not add up
+		const bool blend_max = RImplementation.Target->heat_blend_max();
+		if (blend_max)
+			CHK_DX(HW.pDevice->SetRenderState(D3DRS_BLENDOP, D3DBLENDOP_MAX));
+		for (HeatItem& item : list)
+		{
+			if (!item.particle)
+				continue;
+			STextureList* T = heat_particle_textures(item.pVisual);
+			if (!T)
+				continue;
+			RCache.set_Textures(T);
+			// x = hotness of the effect, y = gain on the sprite's own brightness
+			RCache.set_c(s_item, item.hotness, item.gain, 0.f, 0.f);
+			item.pVisual->Render(calcLOD(item.ssa, item.pVisual->vis.sphere.R)); // sets its own world matrix and culling
+		}
+		if (blend_max)
+			CHK_DX(HW.pDevice->SetRenderState(D3DRS_BLENDOP, D3DBLENDOP_ADD));
+		RCache.set_ColorWriteEnable();
+		RCache.set_CullMode(CULL_CCW);
+	}
+
+	list.clear();
 	RCache.set_xform_world(Fidentity);
 }
 #endif

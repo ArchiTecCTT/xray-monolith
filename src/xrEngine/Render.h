@@ -225,6 +225,11 @@ public:
 	bool get_UI3D() const { return val_bUI3D; }
 	void set_CustomFOV(float value) { val_fCustomFOV = value; }
 	float get_CustomFOV() const { return val_fCustomFOV; }
+	// R1 thermal (docs/r1_thermal.md): hotness 0..1 the game gives to the visuals it adds from now on, whatever their
+	// owner or texture says (a gun's barrel heat). Set it around the add_Dynamic calls and put it back to 0.
+	float val_fItemHeat = 0.f;
+	void set_ItemHeat(float value) { val_fItemHeat = value; }
+	float get_ItemHeat() const { return val_fItemHeat; }
 	bool i_mask[fl_max]{};//deffered,forward,wmarks,normal,shmap,val_invisible,val_hud,val_cam_attached
 
 	virtual void add_Static(IRenderVisual* pVisual, CFrustum& frustum, u32 planes) = 0;

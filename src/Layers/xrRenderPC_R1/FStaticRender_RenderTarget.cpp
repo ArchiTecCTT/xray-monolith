@@ -82,7 +82,24 @@ CRenderTarget::CRenderTarget()
 	heat_screen_live = false;
 	heat_svp_live = false;
 	heat_svp_valid = false;
+	heat_alpha = false;
+	heat_max = false;
 	b_heat = nullptr;
+	heat_cfg_targets = 3;
+	heat_cfg_look = 0;
+	heat_cfg_palette = 0;
+	heat_cfg_region.set(.5f, .5f, 0.f, 0.f);
+	heat_lens_wait = 0;
+	for (u32 view = 0; view < 2; ++view)
+	{
+		look[view].w = look[view].h = 0;
+		look[view].blender = nullptr;
+	}
+	b_look_extra = nullptr;
+	look_noise_time = -1.f;
+	look_noise_shift.set(0.f, 0.f);
+	look_screen_live = false;
+	ZeroMemory(&look_c, sizeof(look_c));
 	const s32 saved_skinning = Engine.External.GetSkinningMode();
 	for (s32 skinning = -1; skinning <= 4; ++skinning)
 	{
@@ -703,14 +720,23 @@ void CRenderTarget::End()
 		phase_distortion();
 	}
 
-	// R1 thermal: the screen heat mask, drawn against the depth of the scene that was just rendered
+	// R1 thermal: the screen heat mask, drawn against the depth of the scene that was just rendered, and from it and
+	// the scene the engine's thermal picture ($user$thermal)
 	const bool heat_drawn = (1 == heat_mode) && bPerform;
+	look_screen_live = false;
 	if (heat_drawn)
+	{
 		phase_heat();
+		if (heat_cfg_look)
+			look_screen_live = look_build(0, rtWidth, rtHeight);
+	}
 	else
 		heat_idle();
 	RImplementation.GMBase.RGraph.mapHeat.clear();
 	heat_mode = 0;
+	// shown by the engine: over the whole screen in place of the post-process pass, or inside a circle over it
+	const bool look_show = look_screen_live && (1 == heat_cfg_look);
+	const bool look_whole = look_show && !(heat_cfg_region.z > 0.f);
 
 	// combination/postprocess
 	RCache.set_RT(HW.pBaseRT);
@@ -728,6 +754,13 @@ void CRenderTarget::End()
 
 	// R1 luminance adaptation: does nothing (not even create its targets) unless r1_lum_adapt or the bus turns it on
 	lum_update();
+
+	if (look_whole)
+	{
+		// the thermal picture is the frame: nothing of the post-process pass would show under it
+		look_quad(look[0].shader->E[SE_R1_LOOK_SHOW]._get(), HW.pBaseRT, float(Device.dwWidth), float(Device.dwHeight));
+		return;
+	}
 
 	int gblend = clampr(iFloor((1 - param_gray) * 255.f), 0, 255);
 	int nblend = clampr(iFloor((1 - param_noise) * 255.f), 0, 255);
@@ -751,10 +784,7 @@ void CRenderTarget::End()
 	// A pass that names a vertex shader (ps_3_0 + vs_3_0) gets the same quad in clip space, 4 vertices after the
 	// XYZRHW ones; with only vertex shader "null" passes (vanilla) the buffer holds the 4 XYZRHW vertices as before.
 	ShaderElement* E_cmap = bCMap ? (bDistort ? s_postprocess_D[1]->E[4]._get() : s_postprocess[1]->E[4]._get()) : nullptr;
-	// r1_thermal_demo: the engine's plain test look replaces the post-process shader while a heat mask is drawn
-	ShaderElement* E_demo = (heat_drawn && ps_r1_thermal_demo) ? s_heat[0]->E[SE_R1_HEAT_DEMO]._get() : nullptr;
-	if (E_demo && 0 == E_demo->passes.size()) E_demo = nullptr;
-	ShaderElement* E_main = E_demo ? E_demo : (bDistort ? s_postprocess_D[bCMap] : s_postprocess[bCMap])->E[0]._get();
+	ShaderElement* E_main = (bDistort ? s_postprocess_D[bCMap] : s_postprocess[bCMap])->E[0]._get();
 	const bool vs_cmap = element_has_vs(E_cmap);
 	const bool vs_main = element_has_vs(E_main);
 	const u32 n_verts = (vs_cmap || vs_main) ? 8 : 4;
@@ -798,10 +828,7 @@ void CRenderTarget::End()
 	//int iShaderElement	= bCMap ? 4 : 0;
 	//RCache.set_Element	(bDistort ? s_postprocess_D->E[iShaderElement] : s_postprocess->E[iShaderElement]);
 
-	if (E_demo)
-		RCache.set_Element(E_demo);
-	else
-		RCache.set_Shader(bDistort ? s_postprocess_D[bCMap] : s_postprocess[bCMap]);
+	RCache.set_Shader(bDistort ? s_postprocess_D[bCMap] : s_postprocess[bCMap]);
 
 	//RCache.set_Shader	(bDistort ? s_postprocess_D : s_postprocess);
 
@@ -811,11 +838,16 @@ void CRenderTarget::End()
 	RCache.set_c(s_brightness, p_brightness.x, p_brightness.y, p_brightness.z, 0);
 	RCache.set_c(s_colormap, param_color_map_influence, param_color_map_interpolate, 0, 0);
 	RCache.set_c(s_lum_info, lum_info.x, lum_info.y, lum_info.z, lum_info.w);
-	// x = 1 while $user$heat holds this frame's heat mask, y = 1 while r1_thermal_demo is on
+	// x = 1 while $user$heat holds this frame's heat mask, y = 1 while the engine shows its thermal look on this frame
+	// (inside r1_thermal_region), z = 1 while $user$thermal holds this frame's thermal picture
 	static shared_str s_thermal_info = "r1_thermal_info";
-	RCache.set_c(s_thermal_info, heat_drawn ? 1.f : 0.f, ps_r1_thermal_demo ? 1.f : 0.f, 0.f, 0.f);
+	RCache.set_c(s_thermal_info, heat_drawn ? 1.f : 0.f, look_show ? 1.f : 0.f, look_screen_live ? 1.f : 0.f, 0.f);
 	RCache.set_Geometry(vs_main ? g_postprocess_vs : g_postprocess);
 	RCache.Render(D3DPT_TRIANGLELIST, vs_main ? Offset + 4 : Offset, 0, 4, 0, 2);
+
+	// R1 thermal: the thermal picture inside its circle, over the frame that was just drawn
+	if (look_show)
+		look_show_region();
 }
 
 void CRenderTarget::phase_distortion()
@@ -843,20 +875,32 @@ void CRenderTarget::phase_distortion()
 
 //////////////////////////////////////////////////////////////////////////
 // R1 thermal (r__heatvision). See docs/r1_thermal.md.
-// The scene is not drawn a second time. While thermal is on, the scene graph also queues the warm visuals (living
-// creatures, cooling corpses, the player's hands: r1_heat_insert); here they are drawn once more, flat, into a mask
-// target, against the depth buffer the scene just filled. Post-process shaders sample the mask as $user$heat, lens
-// shaders sample the SVP one as $user$heat_vp2. Off, nothing below runs past heat_wanted() and nothing is created.
+// The scene is not drawn a second time. While thermal is on, the scene graph also queues the warm things (living
+// creatures, cooling corpses, worn gear, the player's hands, fired guns, lit lamps, fire particles: r1_heat_insert);
+// here they are drawn once more into a mask target, against the depth buffer the scene just filled. Post-process
+// shaders sample the mask as $user$heat, lens shaders sample the SVP one as $user$heat_vp2. The engine's own thermal
+// look (r1_thermal_look) is built from the scene and the mask in a few small passes and shown in place of the
+// post-process pass, or inside a circle over it (r1_thermal_region), and inside the SVP lens picture.
+// Off, nothing below runs past heat_wanted() and nothing is created.
 
 bool CRenderTarget::heat_wanted()
 {
 	bool on = ps_r2_heatvision != 0;
-	// bus lane "thermal": x > 0 on, x < 0 off, x == 0 (or no such lane) leaves it to r__heatvision
+	heat_cfg_targets = ps_r1_thermal_targets;
+	heat_cfg_look = ps_r1_thermal_look;
+	heat_cfg_palette = ps_r1_thermal_palette;
+	// bus lane "thermal": x > 0 on, x < 0 off, x == 0 (or no such lane) leaves it to r__heatvision;
+	// y: 1 = show the engine's look, 2 = build it but do not show it on screen, < 0 = masks only, 0 = r1_thermal_look;
+	// z: 1 white hot, 2 black hot, 3 colour, 0 = r1_thermal_palette; w: 1 screen, 2 lens, 3 both, 0 = r1_thermal_targets
 	Fvector4 lane;
 	if (ShaderBus::get("thermal", lane))
 	{
 		if (lane.x > 0.f) on = true;
 		else if (lane.x < 0.f) on = false;
+		if (lane.y < 0.f) heat_cfg_look = 0;
+		else if (lane.y >= .5f) heat_cfg_look = (lane.y >= 1.5f) ? 2 : 1;
+		if (lane.z >= .5f) heat_cfg_palette = clampr(iFloor(lane.z + .5f) - 1, 0, 2);
+		if (lane.w >= .5f) heat_cfg_targets = clampr(iFloor(lane.w + .5f), 1, 3);
 	}
 	return on;
 }
@@ -873,14 +917,32 @@ bool CRenderTarget::heat_begin_frame()
 			return false;
 	}
 
+	// the circle the screen look is limited to. Bus lane "thermal_region": x, y = centre (0..1 of the screen),
+	// z = radius in screen heights (z < 0 = whole screen, z == 0 or no such lane = r1_thermal_region), w = soft edge
+	heat_cfg_region.set(ps_r1_thermal_region.x, ps_r1_thermal_region.y, ps_r1_thermal_region.z, ps_r1_thermal_region_soft);
+	Fvector4 lane;
+	if (ShaderBus::get("thermal_region", lane))
+	{
+		if (lane.z > 0.f) heat_cfg_region.set(lane.x, lane.y, lane.z, lane.w > 0.f ? lane.w : 0.f);
+		else if (lane.z < 0.f) heat_cfg_region.z = 0.f;
+	}
+
 	if (Device.m_SecondViewport.IsSVPFrame())
 	{
+		if (heat_lens_wait != u32(-1))
+			heat_lens_wait = 0;
 		// the scope picture: only the small SVP target has a lens mask (r1_svp_size > 0)
-		if ((ps_r1_thermal_targets & 2) && SVPSmallFrame() && heat_create_svp())
+		if ((heat_cfg_targets & 2) && SVPSmallFrame() && heat_create_svp())
 			heat_mode = 2;
 	}
-	else if (ps_r1_thermal_targets & 1)
+	else if (heat_cfg_targets & 1)
 		heat_mode = 1;
+	else if (heat_lens_wait != u32(-1) && ++heat_lens_wait >= 600)
+	{
+		// lens only, and no lens picture: say once why nothing shows
+		Msg("~ r__heatvision: r1_thermal_targets 2 is the SVP scope lens only, and no scope lens picture was drawn in 600 frames. Only guns with scope_lense_fov have that lens; for the screen (and plain 2D scopes) use r1_thermal_targets 1 or 3");
+		heat_lens_wait = u32(-1);
+	}
 	return 0 != heat_mode;
 }
 
@@ -888,7 +950,12 @@ bool CRenderTarget::heat_create()
 {
 	// Vanilla has none of these; the engine's game data ships them in gamedata\shaders\r1\. Without them thermal stays
 	// off instead of stopping the game on a missing shader file.
-	static const LPCSTR files[] = {"heat_mask.ps", "heat_mask_lq.vs", "thermal_demo.ps", "thermal_demo_paint.ps", "ui_icons.vs"};
+	static const LPCSTR files[] =
+	{
+		"heat_mask.vs", "heat_mask_lq.vs", "heat_mask.ps", "heat_flat.ps", "heat_particle.vs", "heat_particle.ps",
+		"thermal_noise.ps", "thermal_down.ps", "thermal_blur.ps", "thermal_look.ps", "thermal_palette.ps",
+		"thermal_show.ps", "thermal_show_region.ps"
+	};
 	for (u32 i = 0; i < sizeof(files) / sizeof(files[0]); ++i)
 	{
 		string_path fn;
@@ -900,8 +967,16 @@ bool CRenderTarget::heat_create()
 		}
 	}
 
-	// the size and format of the scene target, so it pairs with the scene's depth buffer
-	RT_heat.create(R1_RT_HEAT, rtWidth, rtHeight, HW.Caps.fTarget);
+	// the size of the scene target, so it pairs with the scene's depth buffer. With an alpha channel for the edge
+	// term; if the GPU refuses that, the scene's own format (then bodies are flat, the rest works)
+	heat_alpha = true;
+	RT_heat.create(R1_RT_HEAT, rtWidth, rtHeight, D3DFMT_A8R8G8B8);
+	if (!RT_heat->valid())
+	{
+		heat_alpha = false;
+		RT_heat.destroy();
+		RT_heat.create(R1_RT_HEAT, rtWidth, rtHeight, HW.Caps.fTarget);
+	}
 	if (!RT_heat->valid())
 	{
 		Msg("! r__heatvision: can't create the %ux%u heat mask target, thermal stays off until vid_restart", rtWidth, rtHeight);
@@ -909,7 +984,10 @@ bool CRenderTarget::heat_create()
 		return false;
 	}
 	// default-pool targets start undefined
-	HW.pDevice->ColorFill(RT_heat->pRT, nullptr, D3DCOLOR_XRGB(0, 0, 0));
+	HW.pDevice->ColorFill(RT_heat->pRT, nullptr, D3DCOLOR_ARGB(0, 0, 0, 0));
+
+	D3DCAPS9 caps;
+	heat_max = SUCCEEDED(HW.pDevice->GetDeviceCaps(&caps)) && 0 != (caps.PrimitiveMiscCaps & D3DPMISCCAPS_BLENDOP);
 
 	b_heat = xr_new<CBlender_r1_heat>();
 	const s32 saved_skinning = Engine.External.GetSkinningMode();
@@ -920,7 +998,11 @@ bool CRenderTarget::heat_create()
 	}
 	Engine.External.SetSkinningMode(saved_skinning);
 
+	heat_load_patterns();
+
 	Msg("* r__heatvision: ready (heat mask %ux%u)", rtWidth, rtHeight);
+	if (!heat_alpha)
+		Msg("~ r__heatvision: no A8R8G8B8 target, the heat mask has no edge term (bodies show flat)");
 	return true;
 }
 
@@ -930,42 +1012,144 @@ bool CRenderTarget::heat_create_svp()
 		return rt_heat_svp->valid() && rt_heat_svp_work._get() && rt_heat_svp_work->valid();
 
 	// the same sizes as the SVP picture: every copy of the lens picture has a matching copy of the lens mask
-	rt_heat_svp_work.create(R1_RT_HEAT_VP2_WORK, svp_w, svp_h, HW.Caps.fTarget);
-	rt_heat_svp.create(R1_RT_HEAT_VP2, svp_vp2_w, svp_vp2_h, HW.Caps.fTarget);
+	const D3DFORMAT fmt = heat_alpha ? D3DFMT_A8R8G8B8 : HW.Caps.fTarget;
+	rt_heat_svp_work.create(R1_RT_HEAT_VP2_WORK, svp_w, svp_h, fmt);
+	rt_heat_svp.create(R1_RT_HEAT_VP2, svp_vp2_w, svp_vp2_h, fmt);
 	if (!rt_heat_svp_work->valid() || !rt_heat_svp->valid())
 	{
 		// rt_heat_svp stays set (and not valid), so this is tried and reported only once
 		Msg("! r__heatvision: can't create the SVP lens heat mask targets, the lens gets no heat mask until vid_restart");
 		return false;
 	}
-	HW.pDevice->ColorFill(rt_heat_svp_work->pRT, nullptr, D3DCOLOR_XRGB(0, 0, 0));
-	HW.pDevice->ColorFill(rt_heat_svp->pRT, nullptr, D3DCOLOR_XRGB(0, 0, 0));
+	HW.pDevice->ColorFill(rt_heat_svp_work->pRT, nullptr, D3DCOLOR_ARGB(0, 0, 0, 0));
+	HW.pDevice->ColorFill(rt_heat_svp->pRT, nullptr, D3DCOLOR_ARGB(0, 0, 0, 0));
 	Msg("* r__heatvision: SVP lens heat mask %ux%u (work %ux%u)", svp_vp2_w, svp_vp2_h, svp_w, svp_h);
 	return true;
 }
 
 void CRenderTarget::heat_destroy()
 {
+	for (u32 view = 0; view < 2; ++view)
+	{
+		look_chain& L = look[view];
+		L.shader.destroy();
+		xr_delete(L.blender);
+		L.out.destroy();
+		L.grey.destroy();
+		L.glow.destroy();
+		L.glow_a.destroy();
+		L.down.destroy();
+		L.w = L.h = 0;
+	}
+	s_look_extra.destroy();
+	xr_delete(b_look_extra);
+	rt_look_noise.destroy();
+	look_screen_live = false;
+
 	for (u32 i = 0; i < 6; ++i)
 		s_heat[i].destroy();
 	xr_delete(b_heat);
 	rt_heat_svp.destroy();
 	rt_heat_svp_work.destroy();
 	RT_heat.destroy();
+	heat_patterns.clear();
+	heat_particle_cache.clear();
 	heat_screen_live = false;
 	heat_svp_live = false;
 	heat_svp_valid = false;
 	heat_mode = 0;
 }
 
-ShaderElement* CRenderTarget::heat_element(int skinning, bool lq, u32 element)
+// Which particle effects are warm: configs\r1_thermal.ltx, section [particles], one line per name pattern:
+//   <part of the effect's name> = <hotness 0..1>[, <gain>]
+// A mod adds its own with a DLTX file (mod_r1_thermal_<name>.ltx). Read when thermal is first switched on.
+void CRenderTarget::heat_load_patterns()
+{
+	heat_patterns.clear();
+	heat_particle_cache.clear();
+
+	string_path fn;
+	FS.update_path(fn, "$game_config$", "r1_thermal.ltx");
+	if (!FS.exist(fn))
+	{
+		Msg("~ r__heatvision: configs\\r1_thermal.ltx is missing, fires and anomalies stay cold");
+		return;
+	}
+	CInifile ini(fn, TRUE, TRUE, FALSE);
+	if (!ini.section_exist("particles"))
+		return;
+	CInifile::Sect& S = ini.r_section("particles");
+	for (CInifile::SectCIt I = S.Data.begin(); I != S.Data.end(); ++I)
+	{
+		if (!I->first.size())
+			continue;
+		heat_pattern P;
+		P.text = *I->first;
+		for (char& c : P.text)
+			c = char(tolower(u8(c)));
+		P.hotness = 0.f;
+		P.gain = 2.f;
+		if (I->second.size())
+			sscanf(*I->second, "%f,%f", &P.hotness, &P.gain);
+		clamp(P.hotness, 0.f, 1.f);
+		clamp(P.gain, 0.f, 100.f);
+		heat_patterns.push_back(P);
+	}
+	Msg("* r__heatvision: %u warm particle name patterns (configs\\r1_thermal.ltx)", u32(heat_patterns.size()));
+}
+
+// The answer for one effect name: cold if any matching pattern says 0, else the longest matching pattern.
+bool CRenderTarget::heat_particle(const shared_str& name, float& hotness, float& gain)
+{
+	if (!ps_r1_thermal_particles || heat_patterns.empty() || !name.size())
+		return false;
+
+	const void* key = *name; // one shared string per effect definition
+	xr_map<const void*, Fvector2>::iterator it = heat_particle_cache.find(key);
+	if (it == heat_particle_cache.end())
+	{
+		xr_string low = *name;
+		for (char& c : low)
+			c = char(tolower(u8(c)));
+		Fvector2 answer;
+		answer.set(0.f, 0.f);
+		size_t best = 0;
+		bool cold = false;
+		for (const heat_pattern& P : heat_patterns)
+		{
+			if (!strstr(low.c_str(), P.text.c_str()))
+				continue;
+			if (!(P.hotness > 0.f))
+				cold = true;
+			else if (P.text.size() > best)
+			{
+				best = P.text.size();
+				answer.set(P.hotness, P.gain);
+			}
+		}
+		if (cold)
+			answer.set(0.f, 0.f);
+		it = heat_particle_cache.insert(mk_pair(key, answer)).first;
+	}
+	hotness = it->second.x;
+	gain = it->second.y;
+	return hotness > 0.f;
+}
+
+ShaderElement* CRenderTarget::heat_element(int skinning, bool lq)
 {
 	if (heat_state <= 0 || skinning < -1 || skinning > 4)
 		return nullptr;
 	// only two-bone meshes have a different one-bone variant (skin_main.h)
-	if (lq && 2 == skinning)
-		element += 1;
-	ShaderElement* E = s_heat[skinning + 1]->E[element]._get();
+	ShaderElement* E = s_heat[skinning + 1]->E[(lq && 2 == skinning) ? SE_R1_HEAT_MASK_LQ : SE_R1_HEAT_MASK]._get();
+	return (E && E->passes.size()) ? E : nullptr;
+}
+
+ShaderElement* CRenderTarget::heat_particle_element()
+{
+	if (heat_state <= 0)
+		return nullptr;
+	ShaderElement* E = s_heat[0]->E[SE_R1_HEAT_PARTICLE]._get();
 	return (E && E->passes.size()) ? E : nullptr;
 }
 
@@ -975,16 +1159,48 @@ void CRenderTarget::heat_idle()
 	if (!heat_screen_live || Device.m_SecondViewport.IsSVPFrame())
 		return;
 	// thermal went off (or r1_thermal_targets dropped the screen): blank $user$heat once, so shaders read "no heat"
-	HW.pDevice->ColorFill(RT_heat->pRT, nullptr, D3DCOLOR_XRGB(0, 0, 0));
+	HW.pDevice->ColorFill(RT_heat->pRT, nullptr, D3DCOLOR_ARGB(0, 0, 0, 0));
 	heat_screen_live = false;
 }
 
 // a depth bias towards the camera, in steps of a 24-bit depth buffer: absorbs rounding between the scene's vertex
-// shaders and the flat one used here
+// shaders and the heat ones
 static void heat_depth_bias(bool on)
 {
 	const float bias = on ? -ps_r1_thermal_bias / 16777216.f : 0.f;
 	CHK_DX(HW.pDevice->SetRenderState(D3DRS_DEPTHBIAS, *(const DWORD*)&bias));
+}
+
+// The sky flag: blue = 1 where the depth buffer still holds the far end of its range, which is where nothing but the
+// sky was drawn (the sky dome and clouds are drawn into the last 0.00001 of the range, see CRender::rmFar). A screen
+// quad just in front of that, depth tested like everything else in the mask.
+void CRenderTarget::heat_sky_flag(float w, float h)
+{
+	ShaderElement* E = s_heat[0]->E[SE_R1_HEAT_SKY]._get();
+	if (!E || 0 == E->passes.size())
+		return;
+
+	const u32 white = 0xffffffff;
+	TL_2c3uv quad[4];
+	quad[0].set(-.5f, h - .5f, white, white, 0.f, 1.f, 0.f, 1.f, 0.f, 1.f);
+	quad[1].set(-.5f, -.5f, white, white, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f);
+	quad[2].set(w - .5f, h - .5f, white, white, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f);
+	quad[3].set(w - .5f, -.5f, white, white, 1.f, 0.f, 1.f, 0.f, 1.f, 0.f);
+	for (u32 i = 0; i < 4; ++i)
+		quad[i].p.z = 0.99998f;
+
+	u32 Offset;
+	TL_2c3uv* pv = (TL_2c3uv*)RCache.Vertex.Lock(4, g_postprocess.stride(), Offset);
+	CopyMemory(pv, quad, sizeof(quad));
+	RCache.Vertex.Unlock(4, g_postprocess.stride());
+
+	static shared_str s_item = "r1_heat_item";
+	RCache.set_ColorWriteEnable(D3DCOLORWRITEENABLE_BLUE);
+	RCache.set_Element(E);
+	RCache.set_c(s_item, 0.f, 0.f, 1.f, 0.f);
+	RCache.set_Geometry(g_postprocess);
+	RCache.Render(D3DPT_TRIANGLELIST, Offset, 0, 4, 0, 2);
+	RCache.set_ColorWriteEnable();
 }
 
 void CRenderTarget::phase_heat()
@@ -996,8 +1212,9 @@ void CRenderTarget::phase_heat()
 	RCache.set_ColorWriteEnable();
 	CHK_DX(HW.pDevice->Clear(0L, NULL, D3DCLEAR_TARGET, 0, 1.0f, 0L));
 
+	heat_sky_flag(float(rtWidth), float(rtHeight));
 	heat_depth_bias(true);
-	RImplementation.GMBase.r_dsgraph_render_heat(SE_R1_HEAT_MASK, true);
+	RImplementation.GMBase.r_dsgraph_render_heat();
 	heat_depth_bias(false);
 	heat_screen_live = true;
 }
@@ -1011,18 +1228,214 @@ void CRenderTarget::phase_heat_svp()
 	RCache.set_ColorWriteEnable();
 	CHK_DX(HW.pDevice->Clear(0L, NULL, D3DCLEAR_TARGET, 0, 1.0f, 0L));
 
+	heat_sky_flag(float(svp_w), float(svp_h));
 	heat_depth_bias(true);
-	RImplementation.GMBase.r_dsgraph_render_heat(SE_R1_HEAT_MASK, !ps_r1_thermal_demo);
-	if (ps_r1_thermal_demo)
-	{
-		// the test look for the lens, with no lens shader that knows about heat: warm bodies painted white straight
-		// into the lens picture
-		RCache.set_RT(rt_svp_work->pRT);
-		RImplementation.GMBase.r_dsgraph_render_heat(SE_R1_HEAT_PAINT, true);
-	}
+	RImplementation.GMBase.r_dsgraph_render_heat();
 	heat_depth_bias(false);
 	heat_svp_valid = true;
 	heat_svp_live = true;
+
+	// the engine's look, straight into the lens picture: whatever shader draws the lens then shows the thermal
+	// picture, with no lens shader that knows about heat. The copies into $user$viewport2 follow as for any SVP frame.
+	if (heat_cfg_look && look_build(1, svp_w, svp_h))
+		look_quad(look[1].shader->E[SE_R1_LOOK_SHOW]._get(), rt_svp_work->pRT, float(svp_w), float(svp_h));
+}
+
+//////////////////////////////////////////////////////////////////////////
+// The engine's thermal look (r1_thermal_look), see docs/r1_thermal.md. Per view four small targets:
+//   down   : the heat mask at sensor size (the view's size / r1_thermal_soft)
+//   glow_a, glow : its blur, at half that size (two passes)
+//   grey   : the picture as one grey value per sensor pixel (world band, cold sky, bodies, ring, glow, grain)
+//   out    : grey -> colour mode. The screen's is $user$thermal.
+// Then one quad stretches 'out' over the view. Working at sensor size is what makes the picture soft, and cheap.
+
+bool CRenderTarget::look_prepare(u32 view, u32 src_w, u32 src_h)
+{
+	look_chain& L = look[view];
+	if (u32(-1) == L.w)
+		return false; // could not be created, until vid_restart
+
+	const float soft = clampr(ps_r1_thermal_soft, 1.f, 8.f);
+	const u32 w = u32(_max(16, iFloor(float(src_w) / soft + .5f)));
+	const u32 h = u32(_max(16, iFloor(float(src_h) / soft + .5f)));
+
+	if (!rt_look_noise._get())
+	{
+		// shared by both views: the noise texture, filled once, and the region pass
+		rt_look_noise.create(R1_RT_THERMAL_NOISE, 128, 128, HW.Caps.fTarget);
+		b_look_extra = xr_new<CBlender_r1_thermal_extra>();
+		s_look_extra.create(b_look_extra, "r1\\thermal_extra");
+		if (rt_look_noise->valid())
+		{
+			RCache.set_ZB(NULL);
+			look_quad(s_look_extra->E[SE_R1_LOOK_NOISE]._get(), rt_look_noise->pRT, 128.f, 128.f);
+		}
+	}
+	if (!L.blender)
+	{
+		L.blender = xr_new<CBlender_r1_thermal_look>(view);
+		L.shader.create(L.blender, view ? "r1\\thermal_look_vp2" : "r1\\thermal_look");
+	}
+	if (L.w == w && L.h == h)
+		return true;
+
+	// first use, or r1_thermal_soft changed: (re)create the targets at the new sensor size
+	const r1_thermal_look_names& N = r1_thermal_look_names_of(view);
+	L.out.destroy();
+	L.grey.destroy();
+	L.glow.destroy();
+	L.glow_a.destroy();
+	L.down.destroy();
+	const u32 gw = (w + 1) / 2, gh = (h + 1) / 2;
+	L.down.create(N.down, w, h, heat_alpha ? D3DFMT_A8R8G8B8 : HW.Caps.fTarget);
+	L.glow_a.create(N.glow_a, gw, gh, HW.Caps.fTarget);
+	L.glow.create(N.glow, gw, gh, HW.Caps.fTarget);
+	L.grey.create(N.grey, w, h, HW.Caps.fTarget);
+	L.out.create(N.out, w, h, HW.Caps.fTarget);
+	if (!L.down->valid() || !L.glow_a->valid() || !L.glow->valid() || !L.grey->valid() || !L.out->valid() ||
+		!rt_look_noise->valid())
+	{
+		Msg("! r__heatvision: can't create the thermal look targets for the %s, no thermal look there until vid_restart",
+		    view ? "SVP lens" : "screen");
+		L.out.destroy();
+		L.grey.destroy();
+		L.glow.destroy();
+		L.glow_a.destroy();
+		L.down.destroy();
+		L.w = L.h = u32(-1);
+		return false;
+	}
+	L.w = w;
+	L.h = h;
+	Msg("* r__heatvision: thermal look for the %s, sensor %ux%u", view ? "SVP lens" : "screen", w, h);
+	return true;
+}
+
+void CRenderTarget::look_draw(ShaderElement* E, IDirect3DSurface9* target, const void* quad4)
+{
+	if (!E || 0 == E->passes.size())
+		return;
+
+	u32 Offset;
+	void* pv = RCache.Vertex.Lock(4, g_postprocess.stride(), Offset);
+	CopyMemory(pv, quad4, 4 * sizeof(TL_2c3uv));
+	RCache.Vertex.Unlock(4, g_postprocess.stride());
+
+	static shared_str n_tap_a = "thermal_tap_a", n_tap_b = "thermal_tap_b", n_ring_a = "thermal_ring_a",
+	                  n_ring_b = "thermal_ring_b", n_body = "thermal_body", n_world = "thermal_world",
+	                  n_sky = "thermal_sky", n_grain = "thermal_grain", n_noise_a = "thermal_noise_a",
+	                  n_noise_b = "thermal_noise_b", n_col_a = "thermal_col_a", n_col_b = "thermal_col_b",
+	                  n_palette = "thermal_palette", n_region = "thermal_region";
+	const look_consts& c = look_c;
+	RCache.set_RT(target);
+	RCache.set_Element(E);
+	// a constant the pass does not have is skipped
+	RCache.set_c(n_tap_a, c.tap_a);
+	RCache.set_c(n_tap_b, c.tap_b);
+	RCache.set_c(n_ring_a, c.ring_a);
+	RCache.set_c(n_ring_b, c.ring_b);
+	RCache.set_c(n_body, c.body);
+	RCache.set_c(n_world, c.world);
+	RCache.set_c(n_sky, c.sky);
+	RCache.set_c(n_grain, c.grain);
+	RCache.set_c(n_noise_a, c.noise_a);
+	RCache.set_c(n_noise_b, c.noise_b);
+	RCache.set_c(n_col_a, c.col_a);
+	RCache.set_c(n_col_b, c.col_b);
+	RCache.set_c(n_palette, c.palette);
+	RCache.set_c(n_region, c.region);
+	RCache.set_Geometry(g_postprocess);
+	RCache.Render(D3DPT_TRIANGLELIST, Offset, 0, 4, 0, 2);
+}
+
+void CRenderTarget::look_quad(ShaderElement* E, IDirect3DSurface9* target, float w, float h)
+{
+	// shifted half a pixel: every pixel's tc is the centre of its footprint (0..1 spans the whole source)
+	const u32 white = 0xffffffff;
+	TL_2c3uv quad[4];
+	quad[0].set(-.5f, h - .5f, white, white, 0.f, 1.f, 0.f, 1.f, 0.f, 1.f);
+	quad[1].set(-.5f, -.5f, white, white, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f);
+	quad[2].set(w - .5f, h - .5f, white, white, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f);
+	quad[3].set(w - .5f, -.5f, white, white, 1.f, 0.f, 1.f, 0.f, 1.f, 0.f);
+	look_draw(E, target, quad);
+}
+
+bool CRenderTarget::look_build(u32 view, u32 src_w, u32 src_h)
+{
+	if (!look_prepare(view, src_w, src_h))
+		return false;
+	look_chain& L = look[view];
+	const float w = float(L.w), h = float(L.h);
+	const float gw = float(L.glow->dwWidth), gh = float(L.glow->dwHeight);
+
+	// the grain changes 30 times a second, like a sensor's own frame rate
+	if (_abs(Device.fTimeGlobal - look_noise_time) > 1.f / 30.f)
+	{
+		look_noise_time = Device.fTimeGlobal;
+		look_noise_shift.set(float(::Random.randI(128)) / 128.f, float(::Random.randI(128)) / 128.f);
+	}
+
+	look_consts& c = look_c;
+	// without the edge term in the mask (no alpha channel) bodies are flat
+	c.body.set(heat_alpha ? ps_r1_thermal_round : 0.f, ps_r1_thermal_ring, ps_r1_thermal_glow, 0.f);
+	c.world.set(ps_r1_thermal_world_base, ps_r1_thermal_world, ps_r1_thermal_world_gamma, 0.f);
+	c.sky.set(ps_r1_thermal_sky, ps_r1_thermal_sky_clouds, 0.f, 0.f);
+	// columns a little stronger than the lines; the line term is +-0.25 in the shader
+	c.grain.set(ps_r1_thermal_grain, ps_r1_thermal_fpn * 2.4f, ps_r1_thermal_fpn * 4.f, h * .5f);
+	// one noise texel per sensor pixel (the noise texture is 128x128 and repeats)
+	c.noise_a.set(w / 128.f, h / 128.f, 0.f, 0.f);
+	c.noise_b.set(look_noise_shift.x, look_noise_shift.y, 0.f, 0.f);
+	c.col_a.set(w / 128.f, 0.f, 0.f, 0.f);
+	c.col_b.set(0.f, 47.5f / 128.f, 0.f, 0.f);
+	c.palette.set(0 == heat_cfg_palette ? 1.f : 0.f, 1 == heat_cfg_palette ? 1.f : 0.f, 2 == heat_cfg_palette ? 1.f : 0.f, 0.f);
+	c.ring_a.set(1.f / w, 1.f / h, 0.f, 0.f);
+	c.ring_b.set(1.f / w, -1.f / h, 0.f, 0.f);
+
+	RCache.set_ZB(NULL);
+	RCache.set_ColorWriteEnable();
+	RCache.set_CullMode(CULL_CCW);
+
+	// four taps a quarter of a sensor pixel off its centre cover the sensor pixel in the full-size source
+	c.tap_a.set(.25f / w, .25f / h, 0.f, 0.f);
+	c.tap_b.set(.25f / w, -.25f / h, 0.f, 0.f);
+	look_quad(L.shader->E[SE_R1_LOOK_DOWN]._get(), L.down->pRT, w, h);
+	// the glow: one sensor pixel around, then one and a half texels of the half-size target around
+	c.tap_a.set(1.f / w, 1.f / h, 0.f, 0.f);
+	c.tap_b.set(1.f / w, -1.f / h, 0.f, 0.f);
+	look_quad(L.shader->E[SE_R1_LOOK_BLUR_A]._get(), L.glow_a->pRT, gw, gh);
+	c.tap_a.set(1.5f / gw, 1.5f / gh, 0.f, 0.f);
+	c.tap_b.set(1.5f / gw, -1.5f / gh, 0.f, 0.f);
+	look_quad(L.shader->E[SE_R1_LOOK_BLUR_B]._get(), L.glow->pRT, gw, gh);
+	// the picture
+	c.tap_a.set(.25f / w, .25f / h, 0.f, 0.f);
+	c.tap_b.set(.25f / w, -.25f / h, 0.f, 0.f);
+	look_quad(L.shader->E[SE_R1_LOOK_GREY]._get(), L.grey->pRT, w, h);
+	look_quad(L.shader->E[SE_R1_LOOK_PALETTE]._get(), L.out->pRT, w, h);
+	return true;
+}
+
+// r1_thermal_region: the thermal picture only inside a circle (a helmet sight's tube, a 2D scope's glass); around it
+// the frame the post-process pass just drew stays as it is. One blended quad over the circle's bounding box.
+void CRenderTarget::look_show_region()
+{
+	const float W = float(Device.dwWidth), H = float(Device.dwHeight);
+	const float cx = heat_cfg_region.x * W, cy = heat_cfg_region.y * H;
+	const float R = heat_cfg_region.z * H + 1.f;
+	const float x0 = clampr(floorf(cx - R), 0.f, W), x1 = clampr(ceilf(cx + R), 0.f, W);
+	const float y0 = clampr(floorf(cy - R), 0.f, H), y1 = clampr(ceilf(cy + R), 0.f, H);
+	if (x1 <= x0 || y1 <= y0)
+		return;
+
+	// uv 0: the place on the screen (0..1), uv 1: the place relative to the circle's centre, in screen heights
+	const u32 white = 0xffffffff;
+	TL_2c3uv quad[4];
+	quad[0].set(x0 - .5f, y1 - .5f, white, white, x0 / W, y1 / H, (x0 - cx) / H, (y1 - cy) / H, 0.f, 0.f);
+	quad[1].set(x0 - .5f, y0 - .5f, white, white, x0 / W, y0 / H, (x0 - cx) / H, (y0 - cy) / H, 0.f, 0.f);
+	quad[2].set(x1 - .5f, y1 - .5f, white, white, x1 / W, y1 / H, (x1 - cx) / H, (y1 - cy) / H, 0.f, 0.f);
+	quad[3].set(x1 - .5f, y0 - .5f, white, white, x1 / W, y0 / H, (x1 - cx) / H, (y0 - cy) / H, 0.f, 0.f);
+	const float soft = heat_cfg_region.w;
+	look_c.region.set(heat_cfg_region.z, soft > 0.0001f ? 1.f / soft : 10000.f, 0.f, 0.f);
+	look_draw(s_look_extra->E[SE_R1_LOOK_REGION]._get(), HW.pBaseRT, quad);
 }
 
 //////////////////////////////////////////////////////////////////////////

@@ -119,8 +119,26 @@ extern ECORE_API Flags32 ps_r1_flags; // r1-only
 extern ECORE_API float ps_r1_fog_luminance; //1.f r1-only
 extern ECORE_API int ps_r1_SoftwareSkinning; // r1-only
 extern ECORE_API int ps_r1_thermal_targets; // r1-only: 1 screen, 2 SVP lens, 3 both
-extern ECORE_API int ps_r1_thermal_demo; // r1-only
 extern ECORE_API float ps_r1_thermal_bias; // r1-only
+extern ECORE_API float ps_r1_thermal_gear; // r1-only thermal, see xrRender_console.cpp and docs/r1_thermal.md
+extern ECORE_API float ps_r1_thermal_lamp;
+extern ECORE_API float ps_r1_thermal_barrel;
+extern ECORE_API int ps_r1_thermal_particles;
+extern ECORE_API int ps_r1_thermal_look;
+extern ECORE_API int ps_r1_thermal_palette;
+extern ECORE_API float ps_r1_thermal_soft;
+extern ECORE_API float ps_r1_thermal_round;
+extern ECORE_API float ps_r1_thermal_ring;
+extern ECORE_API float ps_r1_thermal_glow;
+extern ECORE_API float ps_r1_thermal_grain;
+extern ECORE_API float ps_r1_thermal_fpn;
+extern ECORE_API float ps_r1_thermal_world;
+extern ECORE_API float ps_r1_thermal_world_base;
+extern ECORE_API float ps_r1_thermal_world_gamma;
+extern ECORE_API float ps_r1_thermal_sky;
+extern ECORE_API float ps_r1_thermal_sky_clouds;
+extern ECORE_API Fvector3 ps_r1_thermal_region;
+extern ECORE_API float ps_r1_thermal_region_soft;
 extern ECORE_API int ps_r1_lum_adapt; // r1-only
 extern ECORE_API float ps_r1_lum_adapt_speed; // r1-only
 extern ECORE_API float ps_r1_lum_adapt_speed_down; // r1-only

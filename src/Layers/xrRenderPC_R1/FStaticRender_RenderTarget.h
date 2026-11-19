@@ -79,17 +79,59 @@ private:
 	IDirect3DSurface9* lum_rb[LUM_RB_SLOTS]; // 1x1 D3DPOOL_SYSTEMMEM copies, same format as rt_lum_adapt
 	u32 lum_rb_frame[LUM_RB_SLOTS]; // Device.dwFrame the copy was queued on, 0 = empty / already read
 
-	// R1 thermal (r__heatvision / bus lane "thermal"): heat masks of the warm bodies, see docs/r1_thermal.md
+	// R1 thermal (r__heatvision / bus lane "thermal"): heat masks of the warm things, see docs/r1_thermal.md
 	int heat_state; // 0 = not created yet, 1 = ready, -1 = unavailable (files missing, no target) until vid_restart
 	u32 heat_mode; // what the frame being built gets: 0 = nothing, 1 = the screen mask, 2 = the SVP lens mask
-	ref_rt RT_heat; // $user$heat, the size of the scene target; r = hotness, g = 1 on the player's hands
+	ref_rt RT_heat; // $user$heat, the size of the scene target: r hotness, g hands, b sky, a edge term
 	ref_rt rt_heat_svp_work; // the mask of the last small SVP frame, the size of $user$viewport2_work
 	ref_rt rt_heat_svp; // $user$heat_vp2: its lens part, laid out exactly like $user$viewport2
 	bool heat_screen_live; // $user$heat holds a mask (cleared once when thermal goes off)
 	bool heat_svp_live; // $user$heat_vp2 holds a mask
 	bool heat_svp_valid; // the work mask belongs to the SVP image in $user$viewport2_work (copied along with it)
+	bool heat_alpha; // the mask targets have an alpha channel (it holds the edge term)
+	bool heat_max; // the GPU blends with D3DBLENDOP_MAX
 	IBlender* b_heat;
 	ref_shader s_heat[6]; // per skinning mode, like s_ui_icons: SKIN_NONE, SKIN_0 ... SKIN_4
+	// this frame's settings: the console vars, replaced by the bus lanes "thermal" and "thermal_region"
+	int heat_cfg_targets; // 1 screen, 2 SVP lens, 3 both
+	int heat_cfg_look; // 0 masks only, 1 the engine's look is shown, 2 built ($user$thermal) but not shown on screen
+	int heat_cfg_palette; // 0 white hot, 1 black hot, 2 colour
+	Fvector4 heat_cfg_region; // screen look inside a circle: x, y, radius, soft edge; radius 0 = whole screen
+	u32 heat_lens_wait; // frames thermal has been on for the lens only without an SVP frame (logged once)
+	// warm particle effects: name patterns from configs\r1_thermal.ltx, and the answer per effect name
+	struct heat_pattern
+	{
+		xr_string text;
+		float hotness;
+		float gain;
+	};
+	xr_vector<heat_pattern> heat_patterns;
+	xr_map<const void*, Fvector2> heat_particle_cache;
+
+	// the engine's thermal look (r1_thermal_look): one chain of small targets per view, 0 = the screen, 1 = the SVP lens
+	struct look_chain
+	{
+		ref_rt down; // the mask at sensor size
+		ref_rt glow_a;
+		ref_rt glow; // its blur, half that size
+		ref_rt grey; // the picture as grey values
+		ref_rt out; // the finished picture (the screen's is $user$thermal)
+		u32 w, h; // sensor size, 0 = not created
+		IBlender* blender;
+		ref_shader shader;
+	};
+	look_chain look[2];
+	IBlender* b_look_extra;
+	ref_shader s_look_extra; // region show, noise fill
+	ref_rt rt_look_noise;
+	float look_noise_time; // Device.fTimeGlobal of the last grain change
+	Fvector2 look_noise_shift;
+	bool look_screen_live; // $user$thermal holds this frame's picture
+	struct look_consts
+	{
+		Fvector4 tap_a, tap_b, ring_a, ring_b, body, world, sky, grain, noise_a, noise_b, col_a, col_b, palette, region;
+	};
+	look_consts look_c;
 
 	float im_noise_time;
 	u32 im_noise_shift_w;
@@ -134,13 +176,22 @@ private:
 	void lum_readback(bool queue); // read a finished copy (never waits), then optionally queue this frame's one
 	void lum_readback_clear(); // forget queued copies and publish 0 (adaptation off / restarting)
 
-	bool heat_wanted(); // r__heatvision or the bus lane "thermal"
+	bool heat_wanted(); // r__heatvision or the bus lane "thermal"; also reads this frame's settings
 	bool heat_create();
 	bool heat_create_svp();
 	void heat_destroy();
+	void heat_load_patterns();
 	void heat_idle(); // a normal frame without a screen mask: blank a mask left over from when thermal was on
-	void phase_heat(); // normal frame: warm bodies -> $user$heat
-	void phase_heat_svp(); // small SVP frame: warm bodies -> the lens work mask (and, as a demo, white into the lens)
+	void heat_sky_flag(float w, float h); // blue = 1 where nothing in the scene wrote depth
+	void phase_heat(); // normal frame: warm things -> $user$heat
+	void phase_heat_svp(); // small SVP frame: warm things -> the lens work mask, then the look into the lens picture
+
+	bool look_prepare(u32 view, u32 src_w, u32 src_h); // (re)creates the chain for this source size
+	// one screen quad into 'target' (w x h pixels), texture coordinates 0..1, with every look constant set
+	void look_quad(ShaderElement* E, IDirect3DSurface9* target, float w, float h);
+	void look_draw(ShaderElement* E, IDirect3DSurface9* target, const void* quad4); // the same with 4 given vertices
+	bool look_build(u32 view, u32 src_w, u32 src_h); // scene + mask -> the finished picture of this view
+	void look_show_region(); // the screen picture blended over the frame inside heat_cfg_region
 
 	void calc_tc_noise(Fvector2& p0, Fvector2& p1);
 	void calc_tc_duality_ss(Fvector2& r0, Fvector2& r1, Fvector2& l0, Fvector2& l1);
@@ -154,8 +205,12 @@ public:
 
 	// R1 thermal. heat_begin_frame: called once per frame before the scene graph is built; true = queue warm visuals.
 	bool heat_begin_frame();
-	// the pass that draws a warm visual with this skinning mode (element: SE_R1_HEAT_MASK or SE_R1_HEAT_PAINT)
-	ShaderElement* heat_element(int skinning, bool lq, u32 element);
+	// the pass that draws a warm visual with this skinning mode into the mask
+	ShaderElement* heat_element(int skinning, bool lq);
+	ShaderElement* heat_particle_element(); // the pass that draws a warm particle effect into the mask
+	bool heat_blend_max() { return heat_max; }
+	// is this particle effect warm (configs\r1_thermal.ltx)? hotness 0..1 and the gain on its sprites' brightness
+	bool heat_particle(const shared_str& name, float& hotness, float& gain);
 
 	BOOL SVPSmallEnabled() { return svp_small; }
 	BOOL SVPSmallFrame(); // small SVP target is enabled and this frame is an SVP frame
