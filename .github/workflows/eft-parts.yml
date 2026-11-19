@@ -54,7 +54,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Compile heat_mask, heat_mask_lq, thermal_demo and thermal_demo_paint
+      - name: Compile the R1 thermal shader files
         run: |
           $ErrorActionPreference = 'Stop'
           $fxc = Get-ChildItem (Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\bin') -Recurse -Filter fxc.exe |
@@ -68,9 +68,17 @@ jobs:
           foreach ($f in 'common.h', 'skin.h', 'skin_main.h', 'shared/common.h', 'model_def_hq.vs', 'model_def_lq.vs') {
             Invoke-WebRequest -Uri "$stock/$f" -OutFile (Join-Path $work $f)
           }
-          $ours = 'heat_mask.ps', 'heat_mask_lq.vs', 'thermal_demo.ps', 'thermal_demo_paint.ps', 'ui_icons.vs'
-          foreach ($f in $ours) { Copy-Item (Join-Path 'gamedata\shaders\r1' $f) $work }
+          $pixel = 'heat_mask.ps', 'heat_flat.ps', 'heat_particle.ps', 'thermal_noise.ps', 'thermal_down.ps', 'thermal_blur.ps',
+            'thermal_look.ps', 'thermal_palette.ps', 'thermal_show.ps', 'thermal_show_region.ps'
+          $skinned = 'heat_mask.vs', 'heat_mask_lq.vs', 'ui_icons.vs'
+          $plain = @('heat_particle.vs')
+          foreach ($f in ($pixel + $skinned + $plain)) { Copy-Item (Join-Path 'gamedata\shaders\r1' $f) $work }
           Set-Location $work
+
+          # R1 picks the entry point by searching the whole file text, comments included: these files must use "main"
+          foreach ($f in ($pixel + $skinned + $plain)) {
+            if (Select-String -Path $f -Pattern 'main_(ps|vs)_\d_\d' -Quiet) { throw "$f names a main_ps_x_y / main_vs_x_y entry" }
+          }
 
           $failed = @()
           $judged = 0
@@ -88,13 +96,16 @@ jobs:
             return $ok
           }
 
-          foreach ($ps in 'heat_mask.ps', 'thermal_demo.ps', 'thermal_demo_paint.ps') {
+          foreach ($ps in $pixel) {
             if (-not (Compile $ps 'ps_2_0' 'none')) { $failed += $ps }
+          }
+          foreach ($vs in $plain) {
+            if (-not (Compile $vs 'vs_2_0' 'none')) { $failed += $vs }
           }
           foreach ($skin in 'SKIN_NONE', 'SKIN_0', 'SKIN_1', 'SKIN_2', 'SKIN_3', 'SKIN_4') {
             # the stock model shaders are the control: if fxc cannot build them for this mode, the mode is not judged
             $control = (Compile 'model_def_hq.vs' 'vs_2_0' $skin) -and (Compile 'model_def_lq.vs' 'vs_2_0' $skin)
-            foreach ($vs in 'ui_icons.vs', 'heat_mask_lq.vs') {
+            foreach ($vs in $skinned) {
               $ok = Compile $vs 'vs_2_0' $skin
               if ($control) { $judged++ }
               if (-not $ok -and $control) { $failed += "$vs $skin" }
@@ -102,14 +113,21 @@ jobs:
             }
           }
 
-          # for reading: the position code of the scene's vertex shaders next to the heat ones (two-bone meshes)
-          foreach ($f in 'model_def_hq_vs_2_0_SKIN_2.asm', 'ui_icons_vs_2_0_SKIN_2.asm', 'model_def_lq_vs_2_0_SKIN_2.asm', 'heat_mask_lq_vs_2_0_SKIN_2.asm', 'heat_mask_ps_2_0_none.asm', 'thermal_demo_ps_2_0_none.asm', 'thermal_demo_paint_ps_2_0_none.asm') {
+          # for reading: the position code of the scene's vertex shaders next to the heat ones (two-bone meshes), and
+          # every pixel shader (its last comment line counts the instructions; ps_2_0 allows 32 texture + 64 others)
+          $show = @('model_def_hq_vs_2_0_SKIN_2.asm', 'heat_mask_vs_2_0_SKIN_2.asm', 'model_def_lq_vs_2_0_SKIN_2.asm', 'heat_mask_lq_vs_2_0_SKIN_2.asm', 'heat_particle_vs_2_0_none.asm')
+          $show += $pixel | ForEach-Object { [IO.Path]::GetFileNameWithoutExtension($_) + '_ps_2_0_none.asm' }
+          foreach ($f in $show) {
             if (Test-Path $f) { Write-Host "::group::$f"; Get-Content $f | Write-Host; Write-Host '::endgroup::' }
+          }
+          foreach ($ps in $pixel) {
+            $asm = [IO.Path]::GetFileNameWithoutExtension($ps) + '_ps_2_0_none.asm'
+            if (Test-Path $asm) { Write-Host ("{0,-24} {1}" -f $ps, ((Select-String -Path $asm -Pattern 'instruction slots used').Line)) }
           }
 
           if ($failed.Count) { throw ("shader compile failed: " + ($failed -join ', ')) }
-          if ($judged -ne 12) { throw "only $judged of 12 vertex shader builds could be judged" }
-          Write-Host 'All R1 thermal shader files compile (3 pixel shaders, 2 vertex shaders in 6 skinning modes).'
+          if ($judged -ne 18) { throw "only $judged of 18 vertex shader builds could be judged" }
+          Write-Host 'All R1 thermal shader files compile (10 pixel shaders, 1 plain vertex shader, 3 vertex shaders in 6 skinning modes).'
           exit 0
 
   build:
