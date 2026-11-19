@@ -9,6 +9,7 @@
 #include "pch_script.h"
 #include "../xrEngine/LightAnimLibrary.h"
 #include "level.h"
+#include "look_speed.h"
 #include "actor.h"
 #include "script_game_object.h"
 #include "patrol_path_storage.h"
@@ -277,6 +278,17 @@ void set_time_factor(float time_factor)
 float get_time_factor()
 {
 	return (Level().GetGameTimeFactor());
+}
+
+// Look speed factor for scripts (look_speed.h, docs/look_speed.md). Returns the value now in use (clamped).
+float script_set_look_speed_factor(float factor)
+{
+	return set_look_speed_factor(factor);
+}
+
+float script_get_look_speed_factor()
+{
+	return g_look_speed_factor;
 }
 
 void set_game_difficulty(ESingleGameDifficulty dif)
@@ -3057,6 +3069,9 @@ void CLevel::script_register(lua_State* L)
 
 			def("set_time_factor", set_time_factor),
 			def("get_time_factor", get_time_factor),
+
+			def("set_look_speed_factor", script_set_look_speed_factor),
+			def("get_look_speed_factor", script_get_look_speed_factor),
 
 			def("set_game_difficulty", set_game_difficulty),
 			def("get_game_difficulty", get_game_difficulty),

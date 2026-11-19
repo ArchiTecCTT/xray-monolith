@@ -58,6 +58,7 @@
 #include "LevelDebugScript.h"
 #include "script_attachment_manager.h"
 #include "script_light_inline.h"
+#include "look_speed.h"
 
 #include "alife_simulator.h"
 #include "alife_object_registry.h"
@@ -239,6 +240,9 @@ CLevel::CLevel() :
 #endif
 {
     PROF_EVENT("CLevel::CLevel");
+    // a new CLevel is made for every game start, loaded save and level change: the script look speed factor
+    // (look_speed.h) starts each of them at 1
+    reset_look_speed_factor();
     g_bDebugEvents = Core.ParamsData.test(ECoreParams::debug_ge);
     game_events = xr_new<NET_Queue_Event>();
 
@@ -293,6 +297,7 @@ extern CAI_Space* g_ai_space;
 CLevel::~CLevel()
 {
     PROF_EVENT("CLevel::~CLevel");
+    reset_look_speed_factor();
     //crash_saving::save_impl = nullptr; // CLevel not available, disable crash save
     // R1 queue of attachment UIs (CHUDManager::Render_R1_Attachment_UI): the objects below delete their attachments
     if (g_pGamePersistent) g_pGamePersistent->AttachmentUIsToRender.clear_not_free();

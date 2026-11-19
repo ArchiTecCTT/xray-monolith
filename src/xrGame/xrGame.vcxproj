@@ -1367,6 +1367,7 @@
     <ClInclude Include="level_path_manager_inline.h" />
     <ClInclude Include="level_sounds.h" />
     <ClInclude Include="location_manager.h" />
+    <ClInclude Include="look_speed.h" />
     <ClInclude Include="location_manager_inline.h" />
     <ClInclude Include="login_manager.h" />
     <ClInclude Include="magic_box3.h" />

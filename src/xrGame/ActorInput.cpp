@@ -37,6 +37,7 @@
 #include "holder_custom.h"
 #include "Weapon.h"
 #include "CustomOutfit.h"
+#include "look_speed.h"
 
 extern u32 hud_adj_mode;
 
@@ -370,7 +371,8 @@ void CActor::IR_OnKeyboardHold(int cmd)
 		return;
 	}
 #endif //DEBUG
-	float LookFactor = GetLookFactor();
+	// the look keys turn at rot_speed / factor: the script look speed factor (look_speed.h) slows them like the mouse
+	float LookFactor = GetLookFactor() / g_look_speed_factor;
 	switch (cmd)
 	{
 	case kUP:
@@ -468,6 +470,9 @@ void CActor::IR_OnMouseMove(int dx, int dy)
 
 	CCameraBase* C = cameras[cam_active];
     float scale = (C->f_fov / g_fov) * (psMouseSens * sens_multiple) * psMouseSensScale / 50.f / LookFactor;
+	// the script look speed factor (look_speed.h, docs/look_speed.md): on foot only (first eye, aiming, the third
+	// person and free look cameras). Holders, menus and the UI cursor never come here, and no setting is changed.
+	scale *= g_look_speed_factor;
 	if (dx)
 	{
 		float d = float(dx) * scale;
@@ -721,6 +726,9 @@ void CActor::OnPrevWeaponSlot()
 };
 
 extern float g_AimLookFactor;
+
+// look_speed.h: set by scripts only (level.set_look_speed_factor), never saved, 1 again in every new CLevel
+float g_look_speed_factor = 1.f;
 
 // momopate: Optional restoration of the handling gimmick from the original games
 BOOL g_allow_weapon_control_inertion_factor = 0;

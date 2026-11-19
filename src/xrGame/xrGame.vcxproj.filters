@@ -5427,6 +5427,9 @@
     <ClInclude Include="Actor_Flags.h">
       <Filter>Core\Client\Objects\actor\base</Filter>
     </ClInclude>
+    <ClInclude Include="look_speed.h">
+      <Filter>Core\Client\Objects\actor\base</Filter>
+    </ClInclude>
     <ClInclude Include="actor_input_handler.h">
       <Filter>Core\Client\Objects\actor\base</Filter>
     </ClInclude>
