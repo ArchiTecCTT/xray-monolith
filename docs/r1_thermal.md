@@ -117,6 +117,8 @@ under it (light grey-white; orange).
 | a lit lamp: lamp objects, searchlights, and lamps built into the level that have a glow | `r1_thermal_lamp` (`0.45`) | a lamp object: its model while its light is on. A level lamp: a small spot where its glow is, `r1_thermal_lamp_size` (`0.25`) of the glow's size. Off or shot out = cold |
 | a dormant burner anomaly | `0.25` | its idle heat haze, a faint soft patch |
 | shambling zombie (class `SM_ZOMBI`) | `0.2` | barely above the world: easy to miss |
+| poltergeist (class `SM_POLTR`) | `0` | cold, no body heat. A fire poltergeist's flames are fire particles and are hot |
+| a cloaked bloodsucker | `0.85`, like any mutant | in the thermal picture only, see "Cloaked bloodsuckers" |
 | corpse | its living heat fading to `0` in `heat_vision_cooldown_time` | stays warm through death, no gap |
 | what a fire warms around it | up to `r1_thermal_fire_spread` (`0.6`) at the fire | see "Heat that follows physics" |
 | an object a script gave `obj_hotness` | that value | every surface of it |
@@ -126,6 +128,15 @@ the sky, smoke, dust.
 
 `r1_thermal_ladder 0` switches the ladder off: every creature is `1` again and the top level is
 `r1_thermal_body`, as in round 2.
+
+### Cloaked bloodsuckers
+
+A bloodsucker has three states: visible, half cloaked (its shimmering cloak model) and fully cloaked (not drawn
+at all). With thermal on it is a warm body in the thermal picture in all three. The normal picture is not
+touched: around a thermal tube (`r1_thermal_region`) and with thermal off it looks the same, and a fully cloaked
+one is not there. The fully cloaked body goes to the heat mask only (`IDSGraphManager::set_HeatOnly`); it is not
+drawn into the scene, its shadows or lights, and it is not marked as seen, so the engine updates it exactly as
+often as with thermal off. Thermal does not change what a bloodsucker does.
 
 ### A creature's heat comes from config
 
@@ -179,6 +190,7 @@ smoke          = 0           ; never warm, whatever else the name says
 | a particle effect | a line in a `mod_r1_thermal_<name>.ltx` (`![particles]`). Hotness `0.75` and up counts as an open fire and spreads heat |
 | a script attachment on a creature | nothing to do, it follows the wearer |
 | engine code that draws a model | `IDSGraphManager::set_ItemHeat(x)` around its `add_Dynamic` calls; with a point (`set_ItemHeat(at_point, far_from_it, point, reach)`) the heat sits there and falls off |
+| engine code with a thing that is warm but must not be seen | while `DM->get_HeatWanted()`: `DM->set_HeatOnly(true)`, its `add_Dynamic` calls, `DM->set_HeatOnly(false)`. The heat mask gets it, the scene does not (the fully cloaked bloodsucker) |
 
 ## Heat that follows physics
 
@@ -189,11 +201,18 @@ console var, and `0` is its neutral value (the part is off).
 `0.6` m). Every open fire the frame draws (a particle effect of hotness `0.75` and up) warms what is
 around it:
 
-- the ground, the container and the air around it: a soft round spot in the mask, strongest at the
+- the ground, the container and the air around it: a soft round patch in the mask, strongest at the
   fire and gone at the flames' size plus the reach (a muzzle flash gets a fraction of the reach, an
-  explosion more). It is tested against depth, so a wall in front of the fire hides it;
+  explosion more). A surface gets the warmth of its own distance from the fire, so the patch fades to
+  nothing at its edge. It is steady: its place and size follow the flames slowly (about half a second),
+  not flicker by flicker. It is tested against depth, and it fades out (0.15 s) while level geometry
+  hides the flames from the camera: a fire's warmth is not seen from behind a wall;
 - objects near it (a crate, a gun on the ground, a stalker sitting at it) warm as a whole, by their
-  distance to the fire: a cold object up to the spread value, a warm creature by a third of that.
+  distance to the fire: a cold object up to the spread value, a warm creature by a third of that. Not
+  through level geometry: a stalker behind a wall next to a fire is not warmed by it.
+
+"Level geometry" is the level's own collision mesh. A door or a crate that is an object does not count
+for these two wall tests (the depth test still hides the patch behind it).
 
 Lit lamps do not spread heat in the world; the glow of the look around every warm thing is their
 small version.
@@ -349,9 +368,9 @@ does not run), `z` = `1` while `$user$thermal` holds this frame's picture, `w` =
 | `r1_thermal_force_rain`, `r1_thermal_force_sun` | `-1..1` | `-1` | testing: rain density / sun strength instead of the weather's. `-1` = the weather |
 | `r1_thermal_lightning` | `0..2` | `0.6` | the flash of the thermal sky with a lightning bolt. `0` = off |
 | `r1_thermal_particles` | `0..1` | `1` | warm particle effects on / off |
-| `r1_thermal_sync` | `0..1` | `1` | wait for the frame's skeleton poses before drawing, so the heat redraw matches the scene. `0` = as round 2, for comparing if bodies flicker |
-| `r1_thermal_depth` | `0..50` cm | `2` | the heat redraw of world models is pulled this far towards the camera, the same at any range. Raise it if warm bodies still show holes while they move; a body then shows through cover thinner than this |
-| `r1_thermal_bias` | `0..4096` | `8` | depth bias of the redraw, in steps of a 24-bit depth buffer (the first-person hands and gun only have this one) |
+| `r1_thermal_sync` | `0..1` | `1` | the frame's skeleton poses are final before drawing starts, so the heat redraw matches the scene. If no worker has begun them the main thread computes them itself (the work of `mt_calc_bones 0` for that frame); it never waits for a job nobody is running. `0` = as round 2, for comparing if bodies flicker |
+| `r1_thermal_depth` | `0..50` cm | `2` | the heat redraw of world models gets the depth it would have this many centimetres nearer to the camera, the same at any range and with any near plane. A warm thing is never seen through cover thicker than this (plus the bias below). `0` = exactly the scene's depth. Raise it if warm bodies show holes while they move |
+| `r1_thermal_bias` | `0..4096` | `8` | depth bias of the redraw, in steps of a 24-bit depth buffer (the first-person hands and gun only have this one). In metres it grows with the square of the distance: `0.2` mm at 10 m, `2.4` cm at 100 m |
 | `heat_vision_cooldown` | `0..1` | `1` | corpses cool down (`0` = corpses stay at `1`) |
 | `heat_vision_cooldown_time` | `0..300000` ms | `20000` | how long a corpse takes to reach `0` |
 | `heat_vision_zombie_cold` | `0..1` | `0` | `1` = zombies have no heat |
@@ -394,6 +413,18 @@ objects). It is read when the object is queued, so it follows the object from th
   `r1_thermal_sun 0`, `r1_thermal_lightning 0`, `r1_thermal_lamp_size 0`, `r1_thermal_barrel_len 0`
   and the three old defaults above (`cfg_load thermal_r2`; `cfg_load thermal_r3` puts round 3 back).
 
+## Changed for mods since round 3
+
+- A mod that ships its own `heat_mask.vs` or `heat_mask_lq.vs` has to take the new ones. The depth pull was
+  wrong in round 3's files (they took `r1_heat_vs.z` off the clip-space depth, which is 9 percent of the
+  distance, not centimetres). New constant `r1_heat_depth`: `x` = the pull in metres, `y` = the near plane,
+  `z` = near x far / (far - near). `r1_heat_vs.z` is `0` from now on, so an old copy gets no pull at all.
+- `heat_spot.ps`: the blue of the vertex colour is the depth of the quad inside a fire's patch (`0` for a
+  lamp's spot). A mod's own copy of round 3's file would draw a fire's patch as hard-edged discs.
+- `configs\r1_thermal.ltx`: `SM_POLTR = 0` in `[creature_classes]`.
+- `IDSGraphManager::set_HeatOnly`, `get_HeatWanted`. `Device.bones_task_running` is gone
+  (`Device.bones_task_state`, `Device.bones_task_finish()`).
+
 ## Limits
 
 - A warm thing is hidden by anything that writes depth in front of it (walls, terrain, the gun,
@@ -402,8 +433,14 @@ objects). It is read when the object is queued, so it follows the object from th
 - A gun whose model has no usable fire point shows whole, at half the barrel's heat.
 - A corpse that was already dead when it came online starts cooling at that moment.
 - A lamp built into the level is only warm if the level has a glow on it; fires without particles are cold.
-- A fire's warm spot is a round patch facing the camera: it lies on whatever is at the fire and
-  behind it. The barrel or pit a fire burns in is level geometry and only gets that spot.
+- A fire's warm patch lies on whatever is within its reach in front of the fire, and on whatever is behind
+  the fire in the view, at any distance (there it is a round patch facing the camera). The barrel or pit a
+  fire burns in is level geometry and only gets that patch.
+- The wall tests of a fire (patch hidden from the camera, objects not warmed) only know the level's own
+  geometry, not doors or other objects, and test the middle and the top of the flames: a fire seen over a low
+  wall keeps its patch.
+- A warm thing shows through cover thinner than `r1_thermal_depth` (2 cm) plus the depth bias. Beyond about
+  180 m the bias alone is more than 8 cm, so a thin wall no longer hides a body that far away.
 - World surfaces do not follow sun, shade or rain. The honest way needs every surface's baked sun and
   sky exposure in the thermal pass, and R1's world shaders only write colour. It would take
   replacement world pixel shaders (the `lmap*`, `vert*`, `impl*` families, about twenty files) that
@@ -424,7 +461,9 @@ On, per frame (1080p, `r1_thermal_soft 3`):
 - the mask: one clear of a screen-size target, one screen quad for the sky flag (only sky pixels pass
   the depth test), one extra draw call per visible warm mesh part with a 5-instruction pixel shader,
   one extra draw per visible warm particle effect, and one draw call for all soft spots together (one
-  quad per open fire and per visible lamp glow);
+  quad per visible lamp glow, 5 to 16 quads per open fire: 16 for a fire that is small in the view, fewer
+  for one that fills it, so a fire's quads stay at about three screens of pixels at most, with a short
+  shader and no texture);
 - the look: five passes on small targets (640x360 twice, 320x180 twice, 640x360 again), together
   about as many texture reads as two and a half screen-size ones, then one screen quad with one
   texture read (in place of the post-process pass) or a quad over the circle;
@@ -432,9 +471,11 @@ On, per frame (1080p, `r1_thermal_soft 3`):
   of radius `0.35` is about a quarter of the sensor;
 - the same on SVP frames for the lens, at the lens's size.
 
-On the CPU, per frame: one distance test per dynamic model against the open fires of the last frame
-(only while a fire is in view), one small update per warm creature, and, when the worker that
-computes skeleton poses is not done yet as drawing starts, a short wait for it (`r1_thermal_sync`).
+On the CPU, per frame: one distance test per dynamic model against the open fires (only while a fire is
+in view), two rays against the level per fire, one or two more per object within a fire's reach, and one
+small update per warm creature. The skeleton poses are made final before drawing starts
+(`r1_thermal_sync`): if a worker is computing them the main thread waits for it, if none has begun the
+main thread computes them itself. It does not wait for a job that has not started.
 
 Memory: the mask (8 MB at 1080p), five small targets (about 4 MB), a 128x128 noise texture; for the
 lens, two masks and five small targets more. Created on first use, kept until `vid_restart`.
