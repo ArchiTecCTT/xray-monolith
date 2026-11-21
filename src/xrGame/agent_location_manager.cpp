@@ -13,6 +13,7 @@
 #include "agent_enemy_manager.h"
 #include "ai/stalker/ai_stalker.h"
 #include "cover_point.h"
+#include "cover_spacing_engine.h"
 
 const float MIN_SUITABLE_ENEMY_DISTANCE = 3.f; //10.f;
 
@@ -83,7 +84,14 @@ bool CAgentLocationManager::suitable(CAI_Stalker* object, const CCoverPoint* loc
 		if (!(*I)->cover())
 		{
 			if (this->object().member().registered_in_combat(&(*I)->object()))
+			{
+				// A teammate that fights and has no cover yet used to be skipped here: exactly the men that are
+				// about to pick the same spot. Now a spot within ai_cover_body_spacing of him, and nearer to
+				// him than to us, is his (0 = skipped, as before).
+				if (cover_spacing_engine::body_refuses(object, (*I)->object(), location->position()))
+					return (false);
 				continue;
+			}
 
 			if ((*I)->object().Position().distance_to_sqr(location->position()) <= _sqr(5.f))
 				return (false);
@@ -101,6 +109,11 @@ bool CAgentLocationManager::suitable(CAI_Stalker* object, const CCoverPoint* loc
 				                                                                            location->position()) + 2.f)
 				return (false);
 	}
+
+	// The loop above knows the own group only (one team + squad + group). The level-wide claims add the allies
+	// of other groups, at ai_cover_ally_spacing and with the same "who is closer" rule (cover_spacing_engine.h).
+	if (cover_spacing_engine::refuses(object, location->position()))
+		return (false);
 
 	if (use_enemy_info)
 	{
@@ -139,6 +152,9 @@ void CAgentLocationManager::make_suitable(CAI_Stalker* object, const CCoverPoint
 			(*I)->cover(0);
 		}
 	}
+
+	// the same for allies of other groups whose cover is within ai_cover_ally_spacing of the one just taken
+	cover_spacing_engine::evict_neighbours(object, location);
 }
 
 void CAgentLocationManager::add(CDangerLocationPtr location)
