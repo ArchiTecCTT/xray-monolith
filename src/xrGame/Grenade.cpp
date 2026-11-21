@@ -11,6 +11,7 @@
 #include "game_cl_base.h"
 #include "xrserver_objects_alife.h"
 #include "script_game_object.h"
+#include "ai/stalker/ai_stalker.h"
 
 #ifdef EXPLOSIVE_CHANGE
 #include "../xrEngine/GameMtlLib.h"
@@ -199,6 +200,11 @@ void CGrenade::Throw()
 	inherited::Throw();
 	m_fake_missile->processing_activate(); //@sliph
 	m_thrown = true;
+
+	// a stalker throwing on a script's request (npc:throw_grenade) learns here that the grenade has left his hand
+	CAI_Stalker* const stalker = smart_cast<CAI_Stalker*>(H_Parent());
+	if (stalker && stalker->scripted_throw_active())
+		stalker->scripted_throw_on_release(ID());
 }
 
 

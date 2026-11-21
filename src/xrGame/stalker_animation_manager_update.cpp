@@ -121,6 +121,14 @@ bool CStalkerAnimationManager::play_script()
 		return (false);
 	}
 
+	// a script's grenade throw (npc:throw_grenade) needs his torso: an animation queued by a script (the state
+	// manager's "hide", say) waits in its queue until the throw is over, then plays from its start
+	if (object().scripted_throw_active())
+	{
+		script().reset();
+		return (false);
+	}
+
 	play_script_impl();
 
 	return (true);

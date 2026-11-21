@@ -1083,6 +1083,7 @@
     <ClInclude Include="control_action_inline.h" />
     <ClInclude Include="cover_spacing.h" />
     <ClInclude Include="cover_spacing_engine.h" />
+    <ClInclude Include="scripted_throw.h" />
     <ClInclude Include="cover_evaluators.h" />
     <ClInclude Include="cover_evaluators_inline.h" />
     <ClInclude Include="cover_manager.h" />
@@ -2579,6 +2580,10 @@
     </ClCompile>
     <ClCompile Include="Ai\Stalker\ai_stalker_events.cpp" />
     <ClCompile Include="Ai\Stalker\ai_stalker_feel.cpp" />
+    <ClCompile Include="Ai\Stalker\ai_stalker_scripted_throw.cpp">
+      <PrecompiledHeaderFile>pch_script.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderOutputFile>$(IntDir)$(ProjectName)_script.pch</PrecompiledHeaderOutputFile>
+    </ClCompile>
     <ClCompile Include="Ai\Stalker\ai_stalker_fire.cpp">
       <PrecompiledHeaderFile>pch_script.h</PrecompiledHeaderFile>
       <PrecompiledHeaderOutputFile>$(IntDir)$(ProjectName)_script.pch</PrecompiledHeaderOutputFile>

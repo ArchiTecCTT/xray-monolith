@@ -463,6 +463,11 @@ _value_type CStalkerPropertyEvaluatorShouldThrowGrenade::evaluate()
 	return						(false);
 #else // #if 1
 
+	// a script's throw (npc:throw_grenade) is under way: the planner does not start one of its own on top of it, and
+	// does not move the throw target
+	if (object().scripted_throw_active())
+		return (false);
+
 	if (m_storage->property(eWorldPropertyStartedToThrowGrenade))
 		return (true);
 

@@ -4521,6 +4521,9 @@
     <ClInclude Include="cover_spacing.h">
       <Filter>AI\AMonsters\humans\stalker\CoverEvaluators</Filter>
     </ClInclude>
+    <ClInclude Include="scripted_throw.h">
+      <Filter>AI\AMonsters\humans\stalker\Miscellaneous</Filter>
+    </ClInclude>
     <ClInclude Include="cover_spacing_engine.h">
       <Filter>AI\AMonsters\humans\stalker\CoverEvaluators</Filter>
     </ClInclude>
@@ -8563,6 +8566,9 @@
       <Filter>AI\AMonsters\humans\stalker\Miscellaneous</Filter>
     </ClCompile>
     <ClCompile Include="Ai\Stalker\ai_stalker_feel.cpp">
+      <Filter>AI\AMonsters\humans\stalker\Miscellaneous</Filter>
+    </ClCompile>
+    <ClCompile Include="Ai\Stalker\ai_stalker_scripted_throw.cpp">
       <Filter>AI\AMonsters\humans\stalker\Miscellaneous</Filter>
     </ClCompile>
     <ClCompile Include="Ai\Stalker\ai_stalker_fire.cpp">

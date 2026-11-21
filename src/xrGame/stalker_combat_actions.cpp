@@ -1605,6 +1605,13 @@ void CStalkerCombatActionThrowGrenade::execute()
 {
 	inherited::execute();
 
+	// a script's throw (npc:throw_grenade) took over while this one was still turning him: step aside
+	if (object().scripted_throw_active())
+	{
+		m_storage->set_property(eWorldPropertyStartedToThrowGrenade, false);
+		return;
+	}
+
 	const CInventoryItem* grenade = object().inventory().ItemFromSlot(GRENADE_SLOT);
 	if (!grenade || grenade->object().ID() != m_grenade_id)
 	{

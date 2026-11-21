@@ -12,6 +12,7 @@
 #include "../../object_handler.h"
 #include "../../AI_PhraseDialogManager.h"
 #include "../../step_manager.h"
+#include "../../scripted_throw.h"
 #include "../../../xrServerEntities/script_export_space.h"
 
 #ifdef DEBUG
@@ -756,6 +757,35 @@ public:
 	void update_throw_params();
 	void on_throw_completed();
 	IC const u32& last_throw_time() const;
+
+	// a grenade throw asked for by a script: npc:throw_grenade(pos [, crouch]). scripted_throw.h,
+	// ai_stalker_scripted_throw.cpp, docs/npc_throw.md
+private:
+	scripted_throw::machine m_scripted_throw;
+	Fvector m_scripted_throw_target; // the point the script gave
+	Fvector m_scripted_throw_aim; // the point the arc was computed for (the target plus the engine's miss offset)
+	u16 m_scripted_throw_grenade_id;
+	u8 m_scripted_throw_body; // EBodyState, 0xff = not decided yet (the body state hook is asked)
+
+	CInventoryItem* scripted_throw_grenade();
+	bool scripted_throw_wounded();
+	bool scripted_throw_animation_locked();
+	bool scripted_throw_aligned();
+	scripted_throw::step scripted_throw_aim();
+	void scripted_throw_ended();
+	void scripted_throw_update_object_handler();
+	void scripted_throw_update_movement(u32 time_delta);
+	void scripted_throw_update_sight();
+	void scripted_throw_reset();
+	void scripted_throw_on_death();
+
+public:
+	IC bool scripted_throw_active() const { return m_scripted_throw.active; }
+	IC int scripted_throw_state() const { return m_scripted_throw.st; }
+	IC LPCSTR scripted_throw_reason() const { return scripted_throw::reason_name(m_scripted_throw.why); }
+	bool scripted_throw_request(const Fvector& target, int crouch); // crouch: 1 yes, 0 no, -1 not said
+	void scripted_throw_cancel();
+	void scripted_throw_on_release(u16 grenade_id);
 
 #ifdef DEBUG
 public:

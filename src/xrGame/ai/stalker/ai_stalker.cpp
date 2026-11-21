@@ -207,6 +207,8 @@ void CAI_Stalker::reinit()
 	m_can_throw_grenades = true;
 	m_throw_time_interval = 20000;
 
+	scripted_throw_reset();
+
 	brain().CStalkerPlanner::m_storage.set_property(StalkerDecisionSpace::eWorldPropertyCriticallyWounded, false);
 
 	{
@@ -602,6 +604,8 @@ void CAI_Stalker::reload(LPCSTR section)
 
 void CAI_Stalker::Die(CObject* who)
 {
+	scripted_throw_on_death();
+
 	movement().on_death();
 
 	notify_on_wounded_or_killed(who);
@@ -830,6 +834,7 @@ void CAI_Stalker::net_Destroy()
 #ifdef HOLDERCUSTOM_NEW
 	detach_Holder();
 #endif
+	scripted_throw_reset();
 	inherited::net_Destroy();
 	CInventoryOwner::net_Destroy();
 	m_pPhysics_support->in_NetDestroy();
@@ -956,6 +961,13 @@ void CAI_Stalker::update_object_handler()
 	if (!g_Alive())
 		return;
 
+	// a grenade throw asked for by a script borrows the goal for this update (ai_stalker_scripted_throw.cpp)
+	if (m_scripted_throw.active)
+	{
+		scripted_throw_update_object_handler();
+		return;
+	}
+
 	try
 	{
 		try
@@ -1058,6 +1070,9 @@ void CAI_Stalker::UpdateCL()
 			{
 				START_PROFILE("stalker/client_update/sight_manager")
 					VERIFY(!m_pPhysicsShell);
+					if (m_scripted_throw.active)
+						scripted_throw_update_sight();
+
 					try
 					{
 						sight().update();
@@ -1291,7 +1306,10 @@ void CAI_Stalker::Think()
 				return;
 
 			//	try {
-			movement().update(update_delta);
+			if (m_scripted_throw.active)
+				scripted_throw_update_movement(update_delta);
+			else
+				movement().update(update_delta);
 			//	}
 #if 0//def DEBUG
 	catch (::luabind::cast_failed &message) {
