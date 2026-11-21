@@ -1282,7 +1282,8 @@
         // The stalker stops, turns to pos, takes the grenade from his grenade slot, throws it with the engine's own
         // arc, miss and force rules, and whatever was running him carries on. Works under any planner action or
         // script combat mode. crouch: true = from crouch, false = standing, left out = the
-        // npc_on_combat_set_body_state hook decides (operator throw grenade), standing by default.
+        // npc_on_combat_set_body_state hook decides (operator throw grenade), standing by default. Pass a real
+        // boolean or nothing, not nil.
         // true = accepted, the throw is under way. false = refused, see throw_grenade_reason()
         bool throw_grenade(vector pos)
         bool throw_grenade(vector pos, bool crouch)

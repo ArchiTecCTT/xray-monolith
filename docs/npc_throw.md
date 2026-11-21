@@ -44,6 +44,9 @@ Stalkers only. On any other object: `throw_grenade` returns `false`, the state i
 | `false` | he throws standing |
 | left out | the `npc_on_combat_set_body_state` hook is asked, with the operator "throw grenade" (`stalker_ids.action_throw_grenade`), as for a throw of the combat planner. Standing if no script answers. |
 
+Pass a real boolean or nothing. `nil` as the second argument is not "left out" for the script binding and may be
+turned down as a wrong call: write `npc:throw_grenade(pos, want_crouch and true or false)`.
+
 Refused when (checked in this order):
 
 | reason | when |
@@ -53,7 +56,7 @@ Refused when (checked in this order):
 | `busy` | a scripted request is already active on him |
 | `wounded` | he is wounded (`npc:wounded()`) or critically hit |
 | `script_control` | a script action runs him (`npc:script(true, ...)`) |
-| `smart_cover` | he is in a smart cover or entering one |
+| `smart_cover` | he is in a smart cover, entering one, or sent to one |
 | `animation` | an animation moves him (animpoint with a position, cutscene) or he is on a mounted weapon |
 | `no_grenade` | no grenade in his grenade slot |
 | `busy` | the grenade is already in his hand: the combat planner is throwing it |

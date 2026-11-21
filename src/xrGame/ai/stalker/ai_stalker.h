@@ -769,6 +769,7 @@ private:
 
 	CInventoryItem* scripted_throw_grenade();
 	bool scripted_throw_wounded();
+	bool scripted_throw_smart_cover();
 	bool scripted_throw_animation_locked();
 	bool scripted_throw_aligned();
 	scripted_throw::step scripted_throw_aim();

@@ -71,6 +71,12 @@ bool CAI_Stalker::scripted_throw_wounded()
 	return brain().CStalkerPlanner::m_storage.property(StalkerDecisionSpace::eWorldPropertyCriticallyWounded);
 }
 
+// in a smart cover, entering one, or sent to one: its animations own him
+bool CAI_Stalker::scripted_throw_smart_cover()
+{
+	return movement().in_smart_cover() || movement().target_params().cover();
+}
+
 // an animation that owns his position, or a mounted weapon: no throw from there
 bool CAI_Stalker::scripted_throw_animation_locked()
 {
@@ -127,7 +133,7 @@ bool CAI_Stalker::scripted_throw_request(const Fvector& target, int crouch)
 	{
 		facts.wounded = scripted_throw_wounded();
 		facts.script_control = !!GetScriptControl();
-		facts.smart_cover = movement().in_smart_cover();
+		facts.smart_cover = scripted_throw_smart_cover();
 		facts.animation = scripted_throw_animation_locked();
 
 		CInventoryItem* const item = inventory().ItemFromSlot(GRENADE_SLOT);
@@ -296,7 +302,7 @@ void CAI_Stalker::scripted_throw_update_object_handler()
 	facts.alive = !!g_Alive();
 	facts.wounded = scripted_throw_wounded();
 	facts.script_control = !!GetScriptControl();
-	facts.smart_cover = movement().in_smart_cover();
+	facts.smart_cover = scripted_throw_smart_cover();
 	facts.animation = scripted_throw_animation_locked();
 	facts.grenade_present = !!missile;
 	facts.in_hand_idle = in_hand && (missile_state == CMissile::eIdle);
