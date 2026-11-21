@@ -53,8 +53,9 @@ each ally heading to a cover near it (falling to 0 at `ai_cover_ally_spacing`), 
 no cover standing near it (0 at `ai_cover_body_spacing`), 6 at most. Cover quality runs from 0 (best) to
 1, plus 10 for a spot with no wall towards the enemy. So an ally inside half the spacing makes a spot
 lose to any free walled spot, and a crowded spot behind a wall still beats a free spot in the open.
-An ally that has a cover counts by the cover, not by where he stands: a man running past does not
-spoil the spots along his way.
+An ally that has a cover counts by the cover, not by where he stands: a man running to his cover does
+not spoil the spots along his way. An ally with no cover only counts against spots he is nearer to than
+we are, so a teammate walking past does not make the cover we sit on worse.
 
 **No cover found** (`CStalkerActionTakeCover::execute`). The stalker goes to a spot
 `ai_cover_fallback_side_offset` to the side of a teammate (of his own group, within 30 m) that has an
@@ -109,6 +110,10 @@ no cover and no free side.
   one engine group: scope 0 and scope 1 then see the same allies. Scope 1 matters for stalkers that
   were given their own squad or group ids.
 - Cover spacing is by faction, not by relation: two friendly factions do not space from each other.
+- A script can keep a stalker on the cover he holds (`npc_on_best_cover_repick`, `flags.allow = false`).
+  The engine asks before it replaces a held cover, so such a veto also overrules spacing: a stalker
+  that already sits too close to an ally stays there for as long as the script says no. First picks
+  (no cover held yet) are never vetoed and always spaced.
 - Monsters and the player are not in the list. NPCs do not keep away from the player's cover.
 - Smart covers are claimed like any cover, but the smart cover evaluation itself is unchanged.
 - A group of more than 64 stalkers overflows the engine's 64-bit member mask (old engine limit, only
