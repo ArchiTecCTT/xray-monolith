@@ -128,6 +128,10 @@
         ai_wait_in_smart_cover_time [0; 120000] // How long (ms) NPC waits at smart cover before giving up. Default 30000
         ai_sudden_attack_break_on_fire [0; 1] // 1 = an NPC sneaking up on an enemy that has not seen him (sudden attack) stops sneaking when he is hit or a bullet lands within 5 m of him. 0 = old behaviour. Default 1
 
+        // Combat AI - grenade throws asked for by scripts (npc:throw_grenade, see class game_object)
+        ai_scripted_throw [0; 1] // 0 = npc:throw_grenade refuses every request with the reason "disabled". Default 1
+        ai_scripted_throw_debug [0; 1] // 1 = log lines "[THROW] id=.. sec=.. dist=.. result=start|refused|thrown|failed reason=..", one per request start and end. Default 0
+
         // Combat AI - danger perception multipliers (1.0 = original, 0.0 = disabled, 5.0 = 5x urgency)
         ai_danger_ricochet_mult [0.0; 5.0] // Bullet ricochet danger urgency multiplier. Default 1.0 (base score 3000)
         ai_danger_attack_sound_mult [0.0; 5.0] // Gunshot sound danger urgency multiplier. Default 1.0 (base score 2500)
@@ -647,6 +651,11 @@
 
     level {
         bool is_demo_record()
+
+        // Feature test for npc:throw_grenade and its companions. On an exe without them this field is nil:
+        //   local HAS_THROW = level.scripted_throw_version ~= nil
+        int scripted_throw_version() // 1
+
         float get_music_volume()
         void set_music_volume(float)
 
@@ -1267,6 +1276,28 @@
 		get_legs_shaders(), set_legs_shader(id, shader, texture), reset_legs_shader(id)
 		actor only, same as get_shaders, set_shader and reset_shader but for the first person legs model
 		does nothing when the legs are not shown
+
+        // Scripted grenade throw, stalkers only (any other object: false / 0 / "not_stalker", no log line).
+        // Test first: if level.scripted_throw_version then ... end
+        // The stalker stops, turns to pos, takes the grenade from his grenade slot, throws it with the engine's own
+        // arc, miss and force rules, and whatever was running him carries on. Works under any planner action or
+        // script combat mode. crouch: true = from crouch, false = standing, left out = the
+        // npc_on_combat_set_body_state hook decides (operator throw grenade), standing by default.
+        // true = accepted, the throw is under way. false = refused, see throw_grenade_reason()
+        bool throw_grenade(vector pos)
+        bool throw_grenade(vector pos, bool crouch)
+        // 0 nothing asked yet, 1 a request is active, 2 the last request threw the grenade, -1 the last request
+        // was refused or failed
+        int throw_grenade_state()
+        // why the last request was refused or failed: "none", "not_stalker", "disabled", "dead", "busy", "wounded",
+        // "script_control", "smart_cover", "animation", "no_grenade", "bad_target", "too_close" (under 5 m),
+        // "too_far" (past the engine's range for the game difficulty: 30 / 40 / 50 / 60 m, less 1 m), "cooldown"
+        // (under 2 s since his last throw), "reloading", "arc_blocked", "timeout", "cancelled"
+        string throw_grenade_reason()
+        // stops an active request (reason "cancelled"). Once the pin is out the grenade still leaves his hand
+        void cancel_throw_grenade()
+        // callback (see callbacks_gameobject.script): npc_on_scripted_throw -- (npc, ok, reason), once when an
+        // accepted request ends
     }
 
     class CActorCondition : CEntityCondition {

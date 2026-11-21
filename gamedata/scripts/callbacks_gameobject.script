@@ -447,6 +447,16 @@ _G.CAI_Stalker__ShouldThrow = function(npc)
 	return flags.ret_value
 end
 
+-- A grenade throw asked for by a script (npc:throw_grenade(pos [, crouch])) has ended.
+-- ok = true: the grenade left his hand. ok = false: no throw, reason says why
+-- ("arc_blocked", "timeout", "no_grenade", "wounded", "dead", "cancelled", ...).
+-- Fires once per accepted request, never for a request that throw_grenade refused (it returned false).
+-- Needs an exe with level.scripted_throw_version; on an older exe this is never called.
+AddScriptCallback("npc_on_scripted_throw")
+_G.CAI_Stalker__OnScriptedThrow = function(npc, ok, reason)
+	SendScriptCallback("npc_on_scripted_throw", npc, ok, reason)
+end
+
 -- NPC grenade throw force override. Return a float to override throw force.
 -- Lower values = shorter throw range.
 AddScriptCallback("npc_on_missile_throw_force")

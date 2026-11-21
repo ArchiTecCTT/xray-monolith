@@ -294,6 +294,16 @@ PAGE = filter_false(page {
 		id = "ai_sudden_attack_break_on_fire",
 		def = "1",
 	}),
+	line {},
+	get_item_if_exists(list_bool {
+		id = "ai_scripted_throw",
+		def = "1",
+	}),
+	get_item_if_exists(list_bool {
+		id = "ai_scripted_throw_debug",
+		def = "0",
+	}),
+	line {},
 	track {
 		id = "ai_close_move_distance",
 		def = 1.5,

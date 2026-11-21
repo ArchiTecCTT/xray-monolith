@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="windows-1251"?>
+
+<!-- Modded Exes options, Stalkers page: grenade throws asked for by scripts (docs/npc_throw.md).
+     A file of its own, so installing it replaces nothing. -->
+<string_table>
+	<string id="ui_mm_modded_exes_gameplay_stalkers_ai_scripted_throw">
+		<text>Stalkers Scripted Grenade Throws (ai_scripted_throw)</text>
+	</string>
+	<string id="ui_mm_modded_exes_gameplay_stalkers_ai_scripted_throw_desc">
+		<text>Lets scripts (squad tactics mods) make an NPC throw a grenade at a point on purpose. The script decides when and where; the engine does the throw.\n \nOff = every such request is refused, NPCs only throw when the game itself decides to.\n \nDefault: on.</text>
+	</string>
+	<string id="ui_mm_modded_exes_gameplay_stalkers_ai_scripted_throw_debug">
+		<text>Stalkers Scripted Grenade Throws Log (ai_scripted_throw_debug)</text>
+	</string>
+	<string id="ui_mm_modded_exes_gameplay_stalkers_ai_scripted_throw_debug_desc">
+		<text>Writes one [THROW] line to the log when a scripted grenade throw starts and one when it ends (thrown, refused or failed, with the reason).\n \nDefault: off.</text>
+	</string>
+</string_table>
