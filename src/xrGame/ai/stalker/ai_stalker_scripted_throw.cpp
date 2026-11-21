@@ -34,6 +34,8 @@
 #include "../../sight_manager.h"
 #include "../../sight_action.h"
 #include "../../game_cl_single.h"
+#include "../../sound_player.h"
+#include "ai_stalker_space.h"
 
 // console vars (console_commands.cpp), saved in user.ltx
 int g_ai_scripted_throw = 1; // 0 = every request is refused ("disabled")
@@ -160,6 +162,9 @@ bool CAI_Stalker::scripted_throw_request(const Fvector& target, int crouch)
 	m_scripted_throw_body = (crouch == 1)
 		                        ? u8(MonsterSpace::eBodyStateCrouch)
 		                        : ((crouch == 0) ? u8(MonsterSpace::eBodyStateStand) : u8(0xff));
+
+	// the planner's throw action shouts here too
+	sound().play(StalkerSpace::eStalkerSoundThrowGrenade);
 
 	scripted_throw_log(*this, target, "start", r_none);
 	return true;
@@ -349,6 +354,14 @@ void CAI_Stalker::scripted_throw_update_movement(u32 time_delta)
 {
 	stalker_movement_manager_smart_cover& manager = movement();
 
+	// the request is ended from his frame update; should that have stopped coming, it ends here
+	if (m_scripted_throw.overdue(Device.dwTimeGlobal))
+	{
+		scripted_throw_ended();
+		manager.update(time_delta);
+		return;
+	}
+
 	if (m_scripted_throw_body == u8(0xff))
 	{
 		MonsterSpace::EBodyState const asked = manager.body_state_combat_override(
@@ -369,9 +382,11 @@ void CAI_Stalker::scripted_throw_update_movement(u32 time_delta)
 
 	manager.update(time_delta);
 
-	// ... and back in the other order
+	// ... and back in the other order. "crouch" with "free" is not a pair the setter takes: should somebody have
+	// left it there, he stays in "danger" until they set it again
 	manager.set_body_state(their_body_state);
-	manager.set_mental_state(their_mental_state);
+	if ((their_body_state != MonsterSpace::eBodyStateCrouch) || (their_mental_state != MonsterSpace::eMentalStateFree))
+		manager.set_mental_state(their_mental_state);
 	manager.set_movement_type(their_movement_type);
 }
 

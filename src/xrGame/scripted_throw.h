@@ -58,6 +58,7 @@ namespace scripted_throw
 	const unsigned k_prepare_timeout_ms = 3000; // to turn, get the grenade into the hand and pull the pin
 	const unsigned k_total_timeout_ms = 8000; // the whole request, wind-up included; a safety net
 	const unsigned k_release_tail_ms = 1500; // after the release: wait for the thrown grenade to leave the slot
+	const unsigned k_overdue_ms = k_total_timeout_ms + 2000; // nobody ended it by then: see machine::overdue
 	const int k_arc_tries = 4; // the engine picks a new miss offset for each try
 	const float k_aim_angle = 0.3926991f; // PI/8, the planner action's own "is facing the target" test
 
@@ -271,6 +272,17 @@ namespace scripted_throw
 		{
 			if (active)
 				finish(released, r_dead);
+		}
+
+		// The request is ended frame by frame (tick). If his frames stop coming while he is still thought about,
+		// he would stand there for good: the slower update asks this and ends it.
+		bool overdue(unsigned now)
+		{
+			if (!active || (now - start < k_overdue_ms))
+				return false;
+
+			finish(released, r_timeout);
+			return true;
 		}
 
 		// true = a running request was stopped
