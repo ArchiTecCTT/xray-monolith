@@ -6,7 +6,7 @@
 // Part 2 plays a small squad on a row of cover points with those rules, the way the engine's search uses them:
 // with the default spacing nobody ends up near anybody, with 0 they stack as before.
 // Part 3 is a size check: 200 stalkers, every one of them searching 300 spots.
-// Part 4 reads the engine sources and checks the wiring.
+// Part 4 reads the engine sources and the game data and checks the wiring (the sudden attack switch included).
 //
 //   g++ -std=c++17 -g -Wall -fsanitize=address,undefined tests/cover_spacing_test.cpp -o /tmp/cover_spacing_test
 //   /tmp/cover_spacing_test .
@@ -400,6 +400,8 @@ int main(int argc, char** argv)
 	// the fallback: the side-step when the offset is set, the old 1.2 m behind only when it is 0
 	const std::string execute = body(actions, "void CStalkerActionTakeCover::execute()");
 	CHECK(count(execute, "cover_spacing_engine::side_step(m_object, position,") == 1);
+	// a spot that is still free is kept (two coverless men stepping beside each other would walk backwards otherwise)
+	CHECK(count(execute, "if (!m_side_step_valid || !cover_spacing_engine::side_step_free(m_object, m_side_step_position))") == 1);
 	CHECK(execute.find("g_ai_cover_fallback_side_offset > 0.f") < execute.find("cover_spacing_engine::side_step"));
 	CHECK(execute.find("cover_spacing_engine::side_step") < execute.find("-1.2f"));
 	CHECK(count(execute, "set_nearest_accessible_position()") == 1);
@@ -424,6 +426,47 @@ int main(int argc, char** argv)
 
 	// the new file is in the project
 	CHECK(count(project, "<ClCompile Include=\"cover_spacing_engine.cpp\" />") == 1);
+
+	// the sudden attack switch: the action reads the hit time and the near bullet time, the sound memory writes the
+	// latter where the sound arrives with the spot the bullet hit, the var is registered and on by default
+	const std::string sudden = body(actions, "void CStalkerActionSuddenAttack::execute()");
+	CHECK(count(sudden, "if (g_ai_sudden_attack_break_on_fire)") == 1);
+	CHECK(count(sudden, "object().memory().hit().last_hit_time() >= since") == 1);
+	CHECK(count(sudden, "object().memory().sound().last_near_bullet_hit_time() >= since") == 1);
+	CHECK(sudden.find("g_ai_sudden_attack_break_on_fire") < sudden.find("const CEntityAlive* enemy"));
+	CHECK(count(actions, "int   g_ai_sudden_attack_break_on_fire = 1;") == 1);
+	CHECK(count(console, "CMD4(CCC_Integer, \"ai_sudden_attack_break_on_fire\", &g_ai_sudden_attack_break_on_fire, 0, 1);") == 1);
+	const std::string sounds = read(game + "sound_memory_manager.cpp");
+	const std::string heard = body(sounds, "void CSoundMemoryManager::feel_sound_new(");
+	CHECK(count(sounds, "m_last_near_bullet_hit_time = Device.dwTimeGlobal;") == 1);
+	CHECK(count(heard, "is_sound_type(sound_type, SOUND_TYPE_WEAPON_BULLET_HIT)") == 1);
+	CHECK(count(sounds, "m_last_near_bullet_hit_time = 0;") == 1); // reinit
+	CHECK(count(read(game + "sound_memory_manager_inline.h"), "m_last_near_bullet_hit_time = 0;") == 1); // the constructor
+
+	// the game data: every var is on the Stalkers options page (hidden on an exe without it), in lua_help_ex, and
+	// has a label and a description
+	const std::string options = read(root + "/gamedata/scripts/options_modded_exes_stalkers.script");
+	const std::string help = read(root + "/gamedata/scripts/lua_help_ex.script");
+	const std::string strings = read(root + "/gamedata/configs/text/eng/ui_mm_modded_exes_cover_spacing.xml");
+	const char* vars[] = {"ai_cover_ally_spacing", "ai_cover_body_spacing", "ai_cover_fallback_side_offset",
+	                      "ai_cover_spacing_scope", "ai_cover_spacing_debug", "ai_sudden_attack_break_on_fire"};
+	for (const char* v : vars)
+	{
+		const std::string name = v;
+		CHECK(count(console, "\"" + name + "\"") == 1);
+		CHECK(count(options, "id = \"" + name + "\"") == 1);
+		CHECK(count(help, "        " + name + " [0; ") == 1);
+		CHECK(count(strings, "<string id=\"ui_mm_modded_exes_gameplay_stalkers_" + name + "\">") == 1);
+		CHECK(count(strings, "<string id=\"ui_mm_modded_exes_gameplay_stalkers_" + name + "_desc\">") == 1);
+	}
+	CHECK(count(options, "get_item_if_exists(") == 7); // the six new ones and ai_enhanced_vision
+	// the page's defaults are the engine's
+	CHECK(options.find("id = \"ai_cover_ally_spacing\",\n\t\tdef = 4.0,") != std::string::npos);
+	CHECK(options.find("id = \"ai_cover_body_spacing\",\n\t\tdef = 2.5,") != std::string::npos);
+	CHECK(options.find("id = \"ai_cover_fallback_side_offset\",\n\t\tdef = 3.5,") != std::string::npos);
+	CHECK(options.find("id = \"ai_cover_spacing_scope\",\n\t\tdef = \"1\",") != std::string::npos);
+	CHECK(options.find("id = \"ai_cover_spacing_debug\",\n\t\tdef = \"0\",") != std::string::npos);
+	CHECK(options.find("id = \"ai_sudden_attack_break_on_fire\",\n\t\tdef = \"1\",") != std::string::npos);
 
 	if (g_fail)
 	{
