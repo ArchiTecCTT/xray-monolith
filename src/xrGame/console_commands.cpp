@@ -64,6 +64,7 @@
 #include "..\..\xrEngine\x_ray.h"
 
 #include "NewZoomFlag.h"
+#include "cover_spacing_engine.h"
 float n_zoom_step_count = 3.0f;
 
 string_path g_last_saved_game;
@@ -2999,6 +3000,18 @@ void CCC_RegisterCommands()
     // 0.0 = use engine default min (3m); max 80m covers any realistic sniper scenario
     CMD4(CCC_Float, "ai_cover_sniper_min_dist",    &g_ai_cover_sniper_min_dist,    0.f,  80.f);
     CMD4(CCC_Float, "ai_cover_default_max_dist",   &g_ai_cover_default_max_dist,   3.f,  50.f);
+
+    // Ally cover spacing (docs/cover_spacing.md, cover_spacing_engine.h). 0 = that rule off, the old behaviour.
+    // default 4m: a cover this close to a cover an ally of the same team holds or is running to is refused
+    CMD4(CCC_Float,   "ai_cover_ally_spacing",         &g_ai_cover_ally_spacing,         0.f, 10.f);
+    // default 2.5m: the same for a teammate that fights with no cover yet, by where he stands
+    CMD4(CCC_Float,   "ai_cover_body_spacing",         &g_ai_cover_body_spacing,         0.f, 10.f);
+    // default 3.5m: no cover found = stand this far to the side of a teammate (0 = 1.2m behind him, as before)
+    CMD4(CCC_Float,   "ai_cover_fallback_side_offset", &g_ai_cover_fallback_side_offset, 0.f, 10.f);
+    // whose claims count: 0 = own group (team + squad + group), 1 = everybody of the same team on the level
+    CMD4(CCC_Integer, "ai_cover_spacing_scope",        &g_ai_cover_spacing_scope,        0, 1);
+    // 1 = "[COVER] id=.. reason=ally_claim|body|side_step .." lines in the log, one per stalker, reason and second
+    CMD4(CCC_Integer, "ai_cover_spacing_debug",        &g_ai_cover_spacing_debug,        0, 1);
     // 0 = randomize every LookOut init; default 5000ms; max 12000ms (~12s is very cautious)
     CMD4(CCC_Integer, "ai_crouch_look_out_delta",    (int*)&g_ai_crouch_look_out_delta,    0,    12000);
     // 0 = leave immediately; default 30000ms (30s); max 120000ms (2min)

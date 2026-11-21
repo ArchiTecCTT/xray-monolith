@@ -15,8 +15,17 @@
 
 class CAI_Stalker;
 class CCoverPoint;
+class CMemberOrder;
 class CExplosive;
 class CGameObject;
+
+// cover_spacing_engine.h (not included here: this header goes into a lot of files)
+namespace cover_spacing_engine
+{
+	int on_member_add(const CMemberOrder* order);
+	void on_member_remove(const CMemberOrder* order, int slot);
+	void on_member_cover(const CMemberOrder* order, const CCoverPoint* cover);
+}
 
 class CMemberOrder
 {
@@ -72,9 +81,13 @@ protected:
 	CMemberDeathReaction m_member_death_reaction;
 	CGrenadeReaction m_grenade_reaction;
 	bool m_detour;
+	// his place in the level-wide list of cover claims (cover_spacing_engine.h)
+	int m_spacing_slot;
 
 public:
 	IC CMemberOrder(CAI_Stalker* object);
+	IC ~CMemberOrder();
+	IC int spacing_slot() const;
 	IC bool initialized() const;
 	IC CAI_Stalker& object() const;
 	IC float probability() const;

@@ -1081,6 +1081,8 @@
     <ClInclude Include="controller_state_panic_inline.h" />
     <ClInclude Include="control_action.h" />
     <ClInclude Include="control_action_inline.h" />
+    <ClInclude Include="cover_spacing.h" />
+    <ClInclude Include="cover_spacing_engine.h" />
     <ClInclude Include="cover_evaluators.h" />
     <ClInclude Include="cover_evaluators_inline.h" />
     <ClInclude Include="cover_manager.h" />
@@ -2786,6 +2788,7 @@
       <PrecompiledHeaderFile>pch_script.h</PrecompiledHeaderFile>
       <PrecompiledHeaderOutputFile>$(IntDir)$(ProjectName)_script.pch</PrecompiledHeaderOutputFile>
     </ClCompile>
+    <ClCompile Include="cover_spacing_engine.cpp" />
     <ClCompile Include="cover_evaluators.cpp" />
     <ClCompile Include="cover_manager.cpp" />
     <ClCompile Include="cover_point_script.cpp">

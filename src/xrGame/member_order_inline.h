@@ -18,6 +18,18 @@ IC CMemberOrder::CMemberOrder(CAI_Stalker* object) :
 	m_processed = false;
 	m_selected_enemy = 0;
 	m_detour = false;
+	m_spacing_slot = cover_spacing_engine::on_member_add(this);
+}
+
+IC CMemberOrder::~CMemberOrder()
+{
+	// death, net_Destroy and a change of team all delete the order: his cover claim goes with it
+	cover_spacing_engine::on_member_remove(this, m_spacing_slot);
+}
+
+IC int CMemberOrder::spacing_slot() const
+{
+	return (m_spacing_slot);
 }
 
 IC bool CMemberOrder::initialized() const
@@ -69,6 +81,8 @@ IC void CMemberOrder::selected_enemy(u32 selected_enemy)
 IC void CMemberOrder::cover(const CCoverPoint* object_cover) const
 {
 	m_cover = object_cover;
+	// every set and every clear of a member's cover goes through here: keep his claim in step
+	cover_spacing_engine::on_member_cover(this, object_cover);
 }
 
 IC const CCoverPoint* CMemberOrder::cover() const

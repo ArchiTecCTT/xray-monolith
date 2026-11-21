@@ -39,6 +39,7 @@
 #include "smart_cover_evaluators.h"
 #include "inventory.h"
 #include "weaponmagazined.h"
+#include "cover_spacing_engine.h"
 
 using namespace StalkerSpace;
 using namespace StalkerDecisionSpace;
@@ -205,6 +206,9 @@ void CStalkerCombatPlanner::finalize()
 
 	if (!object().g_Alive())
 		return;
+
+	// leaving combat: the spot he claimed is free for his allies again (cover_spacing_engine.h)
+	cover_spacing_engine::release(m_object);
 
 	object().memory().danger().time_line(Device.dwTimeGlobal + 3000);
 	if (object().agent_manager().member().registered_in_combat(m_object))
