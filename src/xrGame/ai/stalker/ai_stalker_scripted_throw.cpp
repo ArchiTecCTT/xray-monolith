@@ -170,10 +170,35 @@ bool CAI_Stalker::scripted_throw_request(const Fvector& target, int crouch)
 	return true;
 }
 
-void CAI_Stalker::scripted_throw_cancel()
+bool CAI_Stalker::scripted_throw_cancel()
 {
-	if (m_scripted_throw.cancel())
-		scripted_throw_ended();
+	if (!m_scripted_throw.cancel())
+		return false;
+
+	scripted_throw_ended();
+	return true;
+}
+
+// A request that ended with no throw after the throw was ordered (the 8 s cap, an exception): the grenade may sit
+// in his hand with the pin out, and the inventory only puts away an item that is idle. Put it at rest the way
+// CObjectActionHide::finalize does, so that the gun can come back.
+void CAI_Stalker::scripted_throw_disarm()
+{
+	CInventoryItem* const grenade = scripted_throw_grenade();
+	if (!grenade || (inventory().ActiveItem() != grenade))
+		return;
+
+	CMissile* const missile = smart_cast<CMissile*>(grenade);
+	if (!missile)
+		return;
+
+	u32 const state = missile->GetState();
+	if ((state != CMissile::eThrowStart) && (state != CMissile::eReady))
+		return;
+
+	missile->StopCurrentAnimWithoutCallback();
+	missile->SetState(CHUDState::eIdle);
+	missile->SetNextState(CHUDState::eIdle);
 }
 
 // reinit / net_destroy: forget it, tell nobody
@@ -214,6 +239,9 @@ void CAI_Stalker::scripted_throw_ended()
 	// as after a throw of the combat planner: his own and his group's "last throw" time
 	if (ok && g_Alive())
 		on_throw_completed();
+
+	if (!ok && g_Alive())
+		scripted_throw_disarm();
 
 	scripted_throw_log(*this, m_scripted_throw_target, ok ? "thrown" : "failed", why);
 
@@ -272,8 +300,6 @@ void CAI_Stalker::scripted_throw_update_object_handler()
 	facts.animation = scripted_throw_animation_locked();
 	facts.grenade_present = !!missile;
 	facts.in_hand_idle = in_hand && (missile_state == CMissile::eIdle);
-	facts.primed = in_hand && ((missile_state == CMissile::eThrowStart) || (missile_state == CMissile::eReady) ||
-		(missile_state == CMissile::eThrow));
 	facts.aligned = scripted_throw_aligned();
 
 	scripted_throw::step what = m_scripted_throw.tick(facts);
@@ -283,8 +309,7 @@ void CAI_Stalker::scripted_throw_update_object_handler()
 	if ((what == s_end) || !missile)
 	{
 		// over: the others' goal was never taken away, so this is the plain update again
-		if (m_scripted_throw.active)
-			m_scripted_throw.cancel();
+		m_scripted_throw.abort(); // does nothing after s_end
 		scripted_throw_ended();
 
 		try
@@ -323,8 +348,8 @@ void CAI_Stalker::scripted_throw_update_object_handler()
 	if (failed)
 	{
 		// as update_object_handler does, and the request is off
-		if (m_scripted_throw.cancel())
-			scripted_throw_ended();
+		m_scripted_throw.abort();
+		scripted_throw_ended();
 
 		CObjectHandler::set_goal(MonsterSpace::eObjectActionIdle);
 		CObjectHandler::update();

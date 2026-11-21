@@ -1294,8 +1294,9 @@
         // "too_far" (past the engine's range for the game difficulty: 30 / 40 / 50 / 60 m, less 1 m), "cooldown"
         // (under 2 s since his last throw), "reloading", "arc_blocked", "timeout", "cancelled"
         string throw_grenade_reason()
-        // stops an active request (reason "cancelled"). Once the pin is out the grenade still leaves his hand
-        void cancel_throw_grenade()
+        // true = an active request was stopped (reason "cancelled"). false = nothing to stop, or too late: once the
+        // arc is found clear the throw is ordered and goes through
+        bool cancel_throw_grenade()
         // callback (see callbacks_gameobject.script): npc_on_scripted_throw -- (npc, ok, reason), once when an
         // accepted request ends
     }

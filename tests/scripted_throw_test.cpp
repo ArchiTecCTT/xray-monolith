@@ -3,7 +3,7 @@
 //
 // Part 1 runs the header the engine includes: every refusal of a request, in the order the engine checks them.
 // Part 2 plays requests frame by frame the way ai_stalker_scripted_throw.cpp does: a clean throw, the timeouts, a
-// blocked arc, a grenade that goes missing, a wound before and after the pin is out, death, cancel.
+// blocked arc, a grenade that goes missing, a wound before and after the throw is ordered, death, cancel.
 // Part 3 reads the engine sources and the game data and checks the wiring: each hook is there once and only acts
 // for a stalker with an active request, the script calls, the vars and their defaults, the Lua glue.
 //
@@ -171,7 +171,6 @@ struct sim
 		f.animation = animation;
 		f.grenade_present = present;
 		f.in_hand_idle = present && in_hand && !primed;
-		f.primed = present && in_hand && primed;
 		f.aligned = aligned;
 		return f;
 	}
@@ -245,7 +244,7 @@ static void test_machine()
 		CHECK(took > 2400 && took < 3200); // 900 swap + 1500 wind-up + 300 until the grenade object is gone
 	}
 
-	// the wind-up may run past the 3 s: the prepare timeout only counts until the pin is out
+	// the wind-up may run past the 3 s: the prepare timeout only counts until the throw is ordered
 	{
 		sim s;
 		s.swap_ms = 2500;
@@ -348,15 +347,39 @@ static void test_machine()
 		CHECK(s.m.why == r_animation);
 	}
 
-	// wounded with the pin out: the throw goes through, a live grenade is not kept in the hand
+	// once the throw is ordered nothing calls it off (the engine cannot put a grenade away mid-throw): a wound,
+	// a script action, a cancel all leave it running, and it ends thrown
 	{
 		sim s;
 		s.m.accept(s.now);
-		while (!s.primed && s.frame()) {}
-		CHECK(s.primed);
+		while (!s.m.aimed && s.frame()) {}
+		CHECK(s.m.aimed && s.m.active);
 		s.wounded = true;
+		s.script_control = true;
+		s.smart_cover = true;
+		s.animation = true;
+		CHECK(!s.m.cancel());
+		CHECK(s.m.active && s.m.st == st_preparing);
 		s.run();
-		CHECK(s.m.st == st_thrown);
+		CHECK(s.m.st == st_thrown && s.m.why == r_none);
+	}
+	// ... the very frame the arc is accepted counts already: the order goes out in that frame
+	{
+		sim s;
+		s.m.accept(s.now);
+		while (!s.m.aimed && s.frame()) {}
+		CHECK(!s.primed || s.throw_since == s.now); // the grenade itself has not moved yet
+		CHECK(!s.m.cancel());
+	}
+	// the engine side breaks: over in any phase
+	{
+		sim s;
+		s.m.accept(s.now);
+		while (!s.m.aimed && s.frame()) {}
+		s.m.abort();
+		CHECK(!s.m.active && s.m.st == st_failed && s.m.why == r_cancelled);
+		s.m.abort();
+		CHECK(s.m.st == st_failed);
 	}
 
 	// death while preparing: failed "dead". Death after the release: it was thrown
@@ -397,11 +420,12 @@ static void test_machine()
 		CHECK(s.now - t0 >= k_release_tail_ms && s.now - t0 < k_release_tail_ms + 40);
 	}
 
-	// cancel: failed "cancelled", once
+	// cancel while he is still turning or swapping: failed "cancelled", once
 	{
 		sim s;
 		s.m.accept(s.now);
 		s.frame();
+		CHECK(!s.m.aimed);
 		CHECK(s.m.cancel());
 		CHECK(!s.m.active && s.m.st == st_failed && s.m.why == r_cancelled);
 		CHECK(!s.m.cancel());
@@ -456,7 +480,7 @@ static void test_machine()
 	{
 		machine m;
 		m.accept(10);
-		m.cancel();
+		CHECK(m.cancel());
 		m.on_release(20);
 		CHECK(!m.released && m.st == st_failed);
 	}
@@ -501,8 +525,10 @@ static void test_wiring(const std::string& root)
 		CHECK(count(stalker, "scripted_throw_update_sight()") == 1);
 	}
 	// a request does not outlive him or his object
-	CHECK(before(body(stalker, "void CAI_Stalker::Die(CObject* who)"), "scripted_throw_on_death();",
-	             "movement().on_death();"));
+	// ... after the engine has marked him dead, so a new request from the callback is refused
+	CHECK(before(body(stalker, "void CAI_Stalker::Die(CObject* who)"), "inherited::Die(who);",
+	             "scripted_throw_on_death();"));
+	CHECK(count(stalker, "scripted_throw_on_death();") == 1);
 	CHECK(before(body(stalker, "void CAI_Stalker::net_Destroy()"), "scripted_throw_reset();",
 	             "inherited::net_Destroy();"));
 	CHECK(has(body(stalker, "void CAI_Stalker::reinit()"), "scripted_throw_reset();"));
@@ -545,6 +571,14 @@ static void test_wiring(const std::string& root)
 		const std::string f = body(glue, "void CAI_Stalker::scripted_throw_ended()");
 		CHECK(before(f, "if (ok && g_Alive())\n\t\ton_throw_completed();", "CAI_Stalker__OnScriptedThrow"));
 		CHECK(has(f, "funct(self, ok, reason_name(why));"));
+		// a failed end leaves the grenade at rest, so that the inventory can put it away
+		CHECK(before(f, "if (!ok && g_Alive())\n\t\tscripted_throw_disarm();", "CAI_Stalker__OnScriptedThrow"));
+	}
+	{
+		const std::string f = body(glue, "void CAI_Stalker::scripted_throw_disarm()");
+		CHECK(has(f, "(state != CMissile::eThrowStart) && (state != CMissile::eReady)"));
+		CHECK(before(f, "missile->StopCurrentAnimWithoutCallback();", "missile->SetState(CHUDState::eIdle);"));
+		CHECK(has(f, "missile->SetNextState(CHUDState::eIdle);"));
 	}
 	CHECK(has(glue, "int g_ai_scripted_throw = 1;"));
 	CHECK(has(glue, "int g_ai_scripted_throw_debug = 0;"));
@@ -643,7 +677,7 @@ static void test_wiring(const std::string& root)
 		CHECK(has(help, "bool throw_grenade(vector pos, bool crouch)"));
 		CHECK(has(help, "int throw_grenade_state()"));
 		CHECK(has(help, "string throw_grenade_reason()"));
-		CHECK(has(help, "void cancel_throw_grenade()"));
+		CHECK(has(help, "bool cancel_throw_grenade()"));
 		CHECK(has(help, "int scripted_throw_version()"));
 		// every reason the engine can give is in the help text and in the doc
 		const std::string doc = read(root + "/docs/npc_throw.md");

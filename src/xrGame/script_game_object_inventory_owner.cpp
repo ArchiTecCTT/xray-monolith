@@ -1750,11 +1750,10 @@ LPCSTR CScriptGameObject::throw_grenade_reason() const
 	return stalker ? stalker->scripted_throw_reason() : scripted_throw::reason_name(scripted_throw::r_not_stalker);
 }
 
-void CScriptGameObject::cancel_throw_grenade()
+bool CScriptGameObject::cancel_throw_grenade()
 {
 	CAI_Stalker* stalker = smart_cast<CAI_Stalker*>(&object());
-	if (stalker)
-		stalker->scripted_throw_cancel();
+	return stalker && stalker->scripted_throw_cancel();
 }
 
 bool CScriptGameObject::can_throw_grenades() const

@@ -25,7 +25,7 @@ local ok = npc:throw_grenade(pos)            -- bool
 local ok = npc:throw_grenade(pos, crouch)    -- bool
 local st = npc:throw_grenade_state()         -- int
 local why = npc:throw_grenade_reason()       -- string
-npc:cancel_throw_grenade()
+local stopped = npc:cancel_throw_grenade()   -- bool
 ```
 
 Stalkers only. On any other object: `throw_grenade` returns `false`, the state is `0`, the reason is
@@ -84,9 +84,11 @@ Two things differ from a planner throw, both on purpose:
   `arc_blocked`. Nothing is thrown at a wall. (The planner checks from his feet while he still holds the gun.)
 
 For that time, and only on this stalker, the engine overrides what anybody else tells him about his weapon, where
-he looks, how he moves and his body state. The others' orders are not lost: when the request ends, the weapon goal
-that was set last is still there and the gun comes back by itself; movement and body state are back on his next
-update. The combat planner does not start or continue a throw of its own on him during a request.
+he looks, how he moves and his body state. The orders about his weapon, movement and body state are not lost: when
+the request ends, the weapon goal that was set last is still there and the gun comes back by itself; movement and
+body state are back on his next update. Where he looks is **not** put back by the engine: he keeps looking at the
+target until whoever runs him sets his sight again (the combat planner's actions and the state manager do that on
+their own). The combat planner does not start or continue a throw of its own on him during a request.
 
 A request ends by itself:
 
@@ -95,15 +97,17 @@ A request ends by itself:
 | the grenade left his hand and the thrown grenade is gone from the slot (or 1.5 s after the release) | `2` | `none` |
 | the arc was blocked on all four tries | `-1` | `arc_blocked` |
 | the engine found the target out of range from his hand | `-1` | `too_far` |
-| 3 s passed and the pin is still in (he could not turn, or the gun would not go away) | `-1` | `timeout` |
+| 3 s passed and the throw is not ordered yet (he could not turn, or the gun would not go away) | `-1` | `timeout` |
 | 8 s passed in all (a safety net; a normal throw takes 2.5 to 4 s) | `-1` | `timeout` |
-| the grenade left his slot before the throw (dropped, traded, taken by a script) | `-1` | `no_grenade` |
-| before the pin was out he was wounded, taken by a script action, sent into a smart cover or an animation | `-1` | `wounded`, `script_control`, `smart_cover`, `animation` |
+| the grenade left his slot before the release (dropped, traded, taken by a script) | `-1` | `no_grenade` |
+| before the throw was ordered he was wounded, taken by a script action, sent into a smart cover or an animation | `-1` | `wounded`, `script_control`, `smart_cover`, `animation` |
 | he died before the release | `-1` | `dead` |
-| `npc:cancel_throw_grenade()` | `-1` | `cancelled` |
+| `npc:cancel_throw_grenade()` before the throw was ordered (or the engine's weapon handling failed) | `-1` | `cancelled` |
 
-Once the pin is out the throw goes through, wounded or not: a live grenade is not kept in the hand. If he dies after
-the release, the request counts as thrown.
+The throw is **ordered** the moment the arc is found clear. From then on it goes through, wounded or not, and
+cannot be cancelled: the engine has no way to put a grenade away once its throw has started (the game's own planner
+finishes such a throw too). If he dies after the release, the request counts as thrown. If the 8 s cap ends a
+request after the throw was ordered, the engine puts the grenade at rest in his hand so that the gun can come back.
 
 The 3 s timeout covers turning, swapping and aiming. The wind-up with the pin out is the engine's own
 (1 to 2.5 s with the default vars) and is not cut short.
@@ -128,9 +132,9 @@ The reason of the last refusal or end, one of:
 
 ### `npc:cancel_throw_grenade()`
 
-Ends an active request as failed with `cancelled`; does nothing otherwise. Before the pin is out he simply takes his
-gun again. With the pin out the engine cannot put it back: the grenade still leaves his hand when the gun comes
-back, as it does when the game interrupts a throw of its own. The state stays `-1` in that case.
+`true` = an active request was stopped: it ends as failed with `cancelled` and he takes his gun again.
+`false` = there was nothing to stop, or it is too late: the throw is already ordered and goes through (the state
+stays `1` and ends as `2`).
 
 ## The callback
 

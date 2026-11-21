@@ -55,7 +55,7 @@ namespace scripted_throw
 	const float k_min_distance = 5.f; // m, closer is refused
 	const float k_range_margin = 1.f; // m, kept free below the engine's range for its own miss offset
 	const unsigned k_cooldown_ms = 2000; // after any completed throw of this stalker
-	const unsigned k_prepare_timeout_ms = 3000; // to turn, get the grenade into the hand and pull the pin
+	const unsigned k_prepare_timeout_ms = 3000; // to turn, get the grenade into the hand and find a clear arc
 	const unsigned k_total_timeout_ms = 8000; // the whole request, wind-up included; a safety net
 	const unsigned k_release_tail_ms = 1500; // after the release: wait for the thrown grenade to leave the slot
 	const unsigned k_overdue_ms = k_total_timeout_ms + 2000; // nobody ended it by then: see machine::overdue
@@ -122,7 +122,6 @@ namespace scripted_throw
 		bool animation;
 		bool grenade_present; // the request's grenade is still in the grenade slot
 		bool in_hand_idle; // ... it is the active item and at rest: the arc can be computed from the hand
-		bool primed; // ... the pin is out (throw start / ready / throw): the throw cannot be called off cleanly
 		bool aligned; // the head points at the target
 	};
 
@@ -138,7 +137,10 @@ namespace scripted_throw
 	struct machine
 	{
 		bool active;
-		bool aimed; // the arc was clear when computed
+		// The arc was clear when computed and the throw was ordered. From here on nothing calls it off: the engine
+		// cannot put a grenade away once its throw has started (CInventory::Update only hides an idle item), so
+		// the one way to give him back with a gun in his hands is to let the throw happen.
+		bool aimed;
 		bool released; // the grenade has left the hand
 		int arc_tries;
 		unsigned start; // ms
@@ -218,9 +220,9 @@ namespace scripted_throw
 			if (!f.grenade_present)
 				return fail(r_no_grenade);
 
-			if (!f.primed)
+			if (!aimed)
 			{
-				// nothing is committed yet: these still call it off
+				// the throw is not ordered yet: these still call it off
 				if (f.wounded) return fail(r_wounded);
 				if (f.script_control) return fail(r_script_control);
 				if (f.smart_cover) return fail(r_smart_cover);
@@ -285,14 +287,21 @@ namespace scripted_throw
 			return true;
 		}
 
-		// true = a running request was stopped
+		// true = a running request was stopped. Too late once the throw is ordered: it goes through.
 		bool cancel()
 		{
-			if (!active)
+			if (!active || aimed)
 				return false;
 
 			finish(false, r_cancelled);
 			return true;
+		}
+
+		// the engine side broke (an exception in his object handler): over, whatever the phase
+		void abort()
+		{
+			if (active)
+				finish(released, r_cancelled);
 		}
 	};
 }

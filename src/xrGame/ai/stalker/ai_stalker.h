@@ -773,6 +773,7 @@ private:
 	bool scripted_throw_aligned();
 	scripted_throw::step scripted_throw_aim();
 	void scripted_throw_ended();
+	void scripted_throw_disarm();
 	void scripted_throw_update_object_handler();
 	void scripted_throw_update_movement(u32 time_delta);
 	void scripted_throw_update_sight();
@@ -784,7 +785,7 @@ public:
 	IC int scripted_throw_state() const { return m_scripted_throw.st; }
 	IC LPCSTR scripted_throw_reason() const { return scripted_throw::reason_name(m_scripted_throw.why); }
 	bool scripted_throw_request(const Fvector& target, int crouch); // crouch: 1 yes, 0 no, -1 not said
-	void scripted_throw_cancel();
+	bool scripted_throw_cancel(); // false = nothing to stop, or the throw is already ordered
 	void scripted_throw_on_release(u16 grenade_id);
 
 #ifdef DEBUG

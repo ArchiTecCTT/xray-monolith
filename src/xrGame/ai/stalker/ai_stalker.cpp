@@ -604,8 +604,6 @@ void CAI_Stalker::reload(LPCSTR section)
 
 void CAI_Stalker::Die(CObject* who)
 {
-	scripted_throw_on_death();
-
 	movement().on_death();
 
 	notify_on_wounded_or_killed(who);
@@ -629,6 +627,10 @@ void CAI_Stalker::Die(CObject* who)
 #ifdef HOLDERCUSTOM_NEW
 	detach_Holder();
 #endif
+
+	// after inherited::Die: he is dead for everybody by now (npc:kill comes here with his health still up), so a
+	// script that answers the callback with a new request is refused
+	scripted_throw_on_death();
 
 	//запретить использование слотов в инвенторе
 	inventory().SetSlotsUseful(false);
