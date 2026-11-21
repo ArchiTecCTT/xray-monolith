@@ -264,8 +264,10 @@ void CAI_Stalker::scripted_throw_ended()
 		funct(self, ok, reason_name(why));
 }
 
-// the arc from his hand to the target, with the engine's own miss rule. A blocked arc gets a few more tries (each
-// one picks a new miss offset) and then fails the request: nothing is thrown at a wall.
+// The arc from his hand to the target, with the engine's own miss rule. A blocked arc gets a few more tries (each
+// one picks a new miss offset) and then fails the request: nothing is thrown at a wall in front of him.
+// As for the planner's throws this is the arc of this moment: update_throw_params applies its force spread after
+// the check, and computes the arc again at the release if he has turned since.
 scripted_throw::step CAI_Stalker::scripted_throw_aim()
 {
 	CLevelGraph const& graph = ai().level_graph();

@@ -84,7 +84,9 @@ Two things differ from a planner throw, both on purpose:
 - `npc_on_should_throw` is **not** asked. The caller has decided.
 - The arc is checked from his hand, once he is turned and holds the grenade, before the pin is pulled. If it is
   blocked, the engine tries three more miss offsets (one per frame) and then ends the request as failed with
-  `arc_blocked`. Nothing is thrown at a wall. (The planner checks from his feet while he still holds the gun.)
+  `arc_blocked`: nothing is thrown at a wall in front of him. (The planner checks from his feet while he still
+  holds the gun.) As for the game's own throws, the check is of the arc at that moment: the force spread is applied
+  after it and he may still turn a little during the wind-up, so a grenade can clip something near the far end.
 
 For that time, and only on this stalker, the engine overrides what anybody else tells him about his weapon, where
 he looks, how he moves and his body state. The orders about his weapon, movement and body state are not lost: when
@@ -110,7 +112,9 @@ A request ends by itself:
 The throw is **ordered** the moment the arc is found clear. From then on it goes through, wounded or not, and
 cannot be cancelled: the engine has no way to put a grenade away once its throw has started (the game's own planner
 finishes such a throw too). If he dies after the release, the request counts as thrown. If the 8 s cap ends a
-request after the throw was ordered, the engine puts the grenade at rest in his hand so that the gun can come back.
+request after the throw was ordered (it should not: turn, swap, wind-up and throw add up to 6 s at most), the
+engine puts the grenade at rest in his hand so that the gun can come back; the request is reported as failed, and a
+throw animation that was already playing at that instant still lets the grenade go.
 
 The 3 s timeout covers turning, swapping and aiming. The wind-up with the pin out is the engine's own
 (1 to 2.5 s with the default vars) and is not cut short.
