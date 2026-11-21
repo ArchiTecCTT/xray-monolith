@@ -487,7 +487,8 @@ int main(int argc, char** argv)
 		CHECK(count(strings, "<string id=\"ui_mm_modded_exes_gameplay_stalkers_" + name + "\">") == 1);
 		CHECK(count(strings, "<string id=\"ui_mm_modded_exes_gameplay_stalkers_" + name + "_desc\">") == 1);
 	}
-	CHECK(count(options, "get_item_if_exists(") == 7); // the six new ones and ai_enhanced_vision
+	// the six new ones, ai_enhanced_vision, and the two of the scripted grenade throw (docs/npc_throw.md)
+	CHECK(count(options, "get_item_if_exists(") == 9);
 	// the page's defaults are the engine's
 	CHECK(options.find("id = \"ai_cover_ally_spacing\",\n\t\tdef = 4.0,") != std::string::npos);
 	CHECK(options.find("id = \"ai_cover_body_spacing\",\n\t\tdef = 2.5,") != std::string::npos);

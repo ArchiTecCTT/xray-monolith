@@ -26,10 +26,10 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: svp_lens_test, svp_lens_zoom_test, audio_mix_test, look_speed_test and cover_spacing_test
+      - name: svp_lens_test, svp_lens_zoom_test, audio_mix_test, look_speed_test, cover_spacing_test and scripted_throw_test
         run: |
           set -e
-          for t in svp_lens_test svp_lens_zoom_test audio_mix_test look_speed_test cover_spacing_test; do
+          for t in svp_lens_test svp_lens_zoom_test audio_mix_test look_speed_test cover_spacing_test scripted_throw_test; do
             g++ -std=c++17 -g -Wall -fsanitize=address,undefined "tests/$t.cpp" -o "/tmp/$t"
             "/tmp/$t" .
           done
