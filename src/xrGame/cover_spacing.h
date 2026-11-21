@@ -79,6 +79,13 @@ namespace cover_spacing
 		return k_penalty * (1.f - sqrtf(to_spot_sqr) / spacing);
 	}
 
+	// The same for an ally with no cover (his body or his side-step spot): he only counts against a spot he is
+	// nearer to than I am, as in body_refuses. A teammate walking past does not make my own cover worse.
+	inline float body_penalty(float body_to_spot_sqr, float spacing, float me_to_spot_sqr)
+	{
+		return (body_to_spot_sqr < me_to_spot_sqr) ? crowd_penalty(body_to_spot_sqr, spacing) : 0.f;
+	}
+
 	// The fallback side-step: `offset` metres to one side of the teammate, across the line from him to the enemy,
 	// and k_side_step_back behind that line (away from the enemy). The height is the teammate's.
 	// false when the enemy is on top of the teammate (no line to stand beside).

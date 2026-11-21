@@ -263,11 +263,11 @@ float cover_spacing_engine::penalty(CAI_Stalker* stalker, const Fvector& spot)
 	const scope_filter ally(stalker);
 	const cover_spacing::vec p = to_vec(spot);
 
+	const float me_to_spot_sqr = stalker->Position().distance_to_sqr(spot);
 	float total = 0.f, worst = 0.f, worst_distance_sqr = 0.f;
 	const member_type* worst_member = 0;
-	auto add = [&](const member_type& m, float d, float spacing)
+	auto add = [&](const member_type& m, float d, float value)
 	{
-		const float value = cover_spacing::crowd_penalty(d, spacing);
 		total += value;
 		if (value > worst)
 		{
@@ -280,8 +280,12 @@ float cover_spacing_engine::penalty(CAI_Stalker* stalker, const Fvector& spot)
 	// allies that have a spot count by the spot (where they are heading) ...
 	s_registry.claims_near(p, _max(ally_spacing, body_spacing), [&](const member_type& m, float d)
 	{
-		if (ally(m))
-			add(m, d, (m.kind == cover_spacing::claim_cover) ? ally_spacing : body_spacing);
+		if (!ally(m))
+			return;
+		if (m.kind == cover_spacing::claim_cover)
+			add(m, d, cover_spacing::crowd_penalty(d, ally_spacing));
+		else
+			add(m, d, cover_spacing::body_penalty(d, body_spacing, me_to_spot_sqr));
 	});
 
 	// ... and allies that have none count by where they stand
@@ -291,7 +295,7 @@ float cover_spacing_engine::penalty(CAI_Stalker* stalker, const Fvector& spot)
 		s_registry.bodies_near(p, body_spacing, [&](const member_type& m, float d)
 		{
 			if (ally(m))
-				add(m, d, body_spacing);
+				add(m, d, cover_spacing::body_penalty(d, body_spacing, me_to_spot_sqr));
 		});
 	}
 

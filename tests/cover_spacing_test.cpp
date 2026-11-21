@@ -104,6 +104,10 @@ int main(int argc, char** argv)
 	CHECK(crowd_penalty(16.f, 4.f) == 0.f && crowd_penalty(100.f, 4.f) == 0.f);
 	CHECK(crowd_penalty(1.f, 0.f) == 0.f);
 	CHECK(k_penalty_cap < 10.f); // a crowded spot behind a wall must still beat a free one in the open (+10)
+	// an ally with no cover costs only on spots he is nearer to than I am: not on the cover I sit on
+	CHECK(near_to(body_penalty(1.f, 2.5f, 100.f), crowd_penalty(1.f, 2.5f)) && body_penalty(1.f, 2.5f, 100.f) > 0.f);
+	CHECK(body_penalty(1.f, 2.5f, 0.25f) == 0.f);
+	CHECK(body_penalty(1.f, 2.5f, 1.f) == 0.f); // a tie is mine
 
 	// the side-step: enemy to the north (+z), so "right" is east (+x) and "back" is south
 	vec spot;
@@ -396,6 +400,10 @@ int main(int argc, char** argv)
 	CHECK(count(evaluate, "value += cover_spacing_engine::penalty(m_stalker, cover_point->position());") == 1);
 	CHECK(evaluate.find("cover_spacing_engine::penalty_enabled()") < evaluate.find("value += 1000.f"));
 	CHECK(evaluate.find("else if (m_stalker") < evaluate.find("value += 1000.f"));
+	// in that penalty an ally's cover always counts, an ally with no cover by body_penalty (twice: side-step spots and bodies)
+	const std::string penalty = body(engine, "float cover_spacing_engine::penalty(");
+	CHECK(count(penalty, "cover_spacing::crowd_penalty(d, ally_spacing)") == 1);
+	CHECK(count(penalty, "cover_spacing::body_penalty(d, body_spacing, me_to_spot_sqr)") == 2);
 
 	// the fallback: the side-step when the offset is set, the old 1.2 m behind only when it is 0
 	const std::string execute = body(actions, "void CStalkerActionTakeCover::execute()");
