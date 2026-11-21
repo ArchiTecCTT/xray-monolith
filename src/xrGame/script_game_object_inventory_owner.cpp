@@ -1724,6 +1724,39 @@ bool CScriptGameObject::movement_enabled()
 	return (monster->movement().enabled());
 }
 
+// A grenade throw asked for by a script (docs/npc_throw.md). Stalkers only; on anything else these answer "no"
+// without a log line, so a caller does not have to sort its objects first.
+bool CScriptGameObject::throw_grenade(const Fvector& target)
+{
+	CAI_Stalker* stalker = smart_cast<CAI_Stalker*>(&object());
+	return stalker && stalker->scripted_throw_request(target, -1);
+}
+
+bool CScriptGameObject::throw_grenade(const Fvector& target, bool crouch)
+{
+	CAI_Stalker* stalker = smart_cast<CAI_Stalker*>(&object());
+	return stalker && stalker->scripted_throw_request(target, crouch ? 1 : 0);
+}
+
+int CScriptGameObject::throw_grenade_state() const
+{
+	CAI_Stalker* stalker = smart_cast<CAI_Stalker*>(&object());
+	return stalker ? stalker->scripted_throw_state() : int(scripted_throw::st_idle);
+}
+
+LPCSTR CScriptGameObject::throw_grenade_reason() const
+{
+	CAI_Stalker* stalker = smart_cast<CAI_Stalker*>(&object());
+	return stalker ? stalker->scripted_throw_reason() : scripted_throw::reason_name(scripted_throw::r_not_stalker);
+}
+
+void CScriptGameObject::cancel_throw_grenade()
+{
+	CAI_Stalker* stalker = smart_cast<CAI_Stalker*>(&object());
+	if (stalker)
+		stalker->scripted_throw_cancel();
+}
+
 bool CScriptGameObject::can_throw_grenades() const
 {
 	CAI_Stalker* stalker = smart_cast<CAI_Stalker*>(&object());

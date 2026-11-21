@@ -382,6 +382,12 @@ class_<CScriptGameObject> script_register_game_object1(class_<CScriptGameObject>
 
 		.def("can_throw_grenades", SAFE_WRAP((bool (CScriptGameObject::*)() const)&CScriptGameObject::can_throw_grenades))
 		.def("can_throw_grenades", SAFE_WRAP((void (CScriptGameObject::*)(bool))&CScriptGameObject::can_throw_grenades))
+		// a grenade throw asked for by a script (docs/npc_throw.md)
+		.def("throw_grenade", SAFE_WRAP((bool (CScriptGameObject::*)(const Fvector&))&CScriptGameObject::throw_grenade))
+		.def("throw_grenade", SAFE_WRAP((bool (CScriptGameObject::*)(const Fvector&, bool))&CScriptGameObject::throw_grenade))
+		.def("throw_grenade_state", SAFE_WRAP(&CScriptGameObject::throw_grenade_state))
+		.def("throw_grenade_reason", SAFE_WRAP(&CScriptGameObject::throw_grenade_reason))
+		.def("cancel_throw_grenade", SAFE_WRAP(&CScriptGameObject::cancel_throw_grenade))
 
 		.def("group_throw_time_interval",
 		     SAFE_WRAP((u32 (CScriptGameObject::*)() const)&CScriptGameObject::group_throw_time_interval))

@@ -3017,6 +3017,14 @@ void CCC_RegisterCommands()
     // lands within 5 m of him. 0 = old behaviour
     extern int g_ai_sudden_attack_break_on_fire;
     CMD4(CCC_Integer, "ai_sudden_attack_break_on_fire", &g_ai_sudden_attack_break_on_fire, 0, 1);
+
+    // Grenade throws asked for by scripts, npc:throw_grenade(pos [, crouch]) (docs/npc_throw.md)
+    // default 1; 0 = every request is refused with the reason "disabled"
+    extern int g_ai_scripted_throw;
+    CMD4(CCC_Integer, "ai_scripted_throw",       &g_ai_scripted_throw,       0, 1);
+    // 1 = "[THROW] id=.. sec=.. dist=.. result=.. reason=.." in the log, one line per request start and end
+    extern int g_ai_scripted_throw_debug;
+    CMD4(CCC_Integer, "ai_scripted_throw_debug", &g_ai_scripted_throw_debug, 0, 1);
     // 0 = randomize every LookOut init; default 5000ms; max 12000ms (~12s is very cautious)
     CMD4(CCC_Integer, "ai_crouch_look_out_delta",    (int*)&g_ai_crouch_look_out_delta,    0,    12000);
     // 0 = leave immediately; default 30000ms (30s); max 120000ms (2min)

@@ -291,6 +291,13 @@ float script_get_look_speed_factor()
 	return g_look_speed_factor;
 }
 
+// The feature test for npc:throw_grenade and its companions (docs/npc_throw.md): on an exe without them
+// level.scripted_throw_version is nil. The number goes up when the script API changes.
+int script_scripted_throw_version()
+{
+	return 1;
+}
+
 void set_game_difficulty(ESingleGameDifficulty dif)
 {
 	g_SingleGameDifficulty = dif;
@@ -3072,6 +3079,7 @@ void CLevel::script_register(lua_State* L)
 
 			def("set_look_speed_factor", script_set_look_speed_factor),
 			def("get_look_speed_factor", script_get_look_speed_factor),
+			def("scripted_throw_version", script_scripted_throw_version),
 
 			def("set_game_difficulty", set_game_difficulty),
 			def("get_game_difficulty", get_game_difficulty),

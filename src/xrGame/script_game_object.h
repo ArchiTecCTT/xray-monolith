@@ -826,6 +826,12 @@ public:
 	void reload_weapon();
 
 	bool can_throw_grenades() const;
+	// a grenade throw asked for by a script, stalkers only (docs/npc_throw.md)
+	bool throw_grenade(const Fvector& target);
+	bool throw_grenade(const Fvector& target, bool crouch);
+	int throw_grenade_state() const;
+	LPCSTR throw_grenade_reason() const;
+	void cancel_throw_grenade();
 	void can_throw_grenades(bool can_throw_grenades);
 
 	u32 throw_time_interval() const;
