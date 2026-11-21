@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="windows-1251"?>
+
+<!-- Modded Exes options, Stalkers page: ally cover spacing and the sudden attack switch (docs/cover_spacing.md).
+     A file of its own, so installing it replaces nothing. -->
+<string_table>
+	<string id="ui_mm_modded_exes_gameplay_stalkers_ai_cover_ally_spacing">
+		<text>Stalkers Cover Spacing To Allies' Cover (m) (ai_cover_ally_spacing)</text>
+	</string>
+	<string id="ui_mm_modded_exes_gameplay_stalkers_ai_cover_ally_spacing_desc">
+		<text>NPCs refuse a cover this close to a cover that an ally of the same faction already holds or is running to, unless they are clearly closer to it than he is to his. A cover just outside this distance of an ally's still costs a little, so a free spot wins.\n \n0 = off (old behaviour).\n \nDefault: 4.0.</text>
+	</string>
+	<string id="ui_mm_modded_exes_gameplay_stalkers_ai_cover_body_spacing">
+		<text>Stalkers Cover Spacing To Coverless Allies (m) (ai_cover_body_spacing)</text>
+	</string>
+	<string id="ui_mm_modded_exes_gameplay_stalkers_ai_cover_body_spacing_desc">
+		<text>NPCs refuse a cover this close to a teammate who is fighting with no cover of his own, when the spot is nearer to him than to them.\n \n0 = off (old behaviour).\n \nDefault: 2.5.</text>
+	</string>
+	<string id="ui_mm_modded_exes_gameplay_stalkers_ai_cover_fallback_side_offset">
+		<text>Stalkers No-Cover Side Step (m) (ai_cover_fallback_side_offset)</text>
+	</string>
+	<string id="ui_mm_modded_exes_gameplay_stalkers_ai_cover_fallback_side_offset_desc">
+		<text>When an NPC finds no cover at all, he stands this far to the left or right of the nearest teammate in the fight, instead of queueing right behind him.\n \n0 = off (old behaviour: 1.2 m behind a teammate).\n \nDefault: 3.5.</text>
+	</string>
+	<string id="ui_mm_modded_exes_gameplay_stalkers_ai_cover_spacing_scope">
+		<text>Stalkers Cover Spacing Counts The Whole Faction (ai_cover_spacing_scope)</text>
+	</string>
+	<string id="ui_mm_modded_exes_gameplay_stalkers_ai_cover_spacing_scope_desc">
+		<text>ON: every ally of the same faction on the level counts for cover spacing. OFF: only the NPC's own engine group.\n \nDefault: ON.</text>
+	</string>
+	<string id="ui_mm_modded_exes_gameplay_stalkers_ai_cover_spacing_debug">
+		<text>Stalkers Cover Spacing Log (ai_cover_spacing_debug)</text>
+	</string>
+	<string id="ui_mm_modded_exes_gameplay_stalkers_ai_cover_spacing_debug_desc">
+		<text>If enabled, the log gets "[COVER]" lines: which NPC was refused or steered away from a cover because of an ally, and each no-cover side step. For testing only.\n \nDefault: OFF.</text>
+	</string>
+	<string id="ui_mm_modded_exes_gameplay_stalkers_ai_sudden_attack_break_on_fire">
+		<text>Stalkers Stop Sneaking When Shot At (ai_sudden_attack_break_on_fire)</text>
+	</string>
+	<string id="ui_mm_modded_exes_gameplay_stalkers_ai_sudden_attack_break_on_fire_desc">
+		<text>If enabled, an NPC that is sneaking up on an enemy who has not seen him gives the sneaking up and fights normally as soon as he is hit or a bullet lands within 5 m of him.
+ 
+Default: ON.</text>
+	</string>
+</string_table>

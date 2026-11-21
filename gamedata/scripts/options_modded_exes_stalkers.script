@@ -255,6 +255,45 @@ PAGE = filter_false(page {
 		cmd = "ai_cover_default_max_dist",
 	},
 	line {},
+	-- Ally cover spacing (exe "combat-cover-spacing" and later; hidden on an exe without these console vars).
+	-- 0 = that rule off, the behaviour of older exes.
+	get_item_if_exists(track {
+		id = "ai_cover_ally_spacing",
+		def = 4.0,
+		min = 0.0,
+		max = 10.0,
+		step = 0.5,
+		cmd = "ai_cover_ally_spacing",
+	}),
+	get_item_if_exists(track {
+		id = "ai_cover_body_spacing",
+		def = 2.5,
+		min = 0.0,
+		max = 10.0,
+		step = 0.5,
+		cmd = "ai_cover_body_spacing",
+	}),
+	get_item_if_exists(track {
+		id = "ai_cover_fallback_side_offset",
+		def = 3.5,
+		min = 0.0,
+		max = 10.0,
+		step = 0.5,
+		cmd = "ai_cover_fallback_side_offset",
+	}),
+	get_item_if_exists(list_bool {
+		id = "ai_cover_spacing_scope",
+		def = "1",
+	}),
+	get_item_if_exists(list_bool {
+		id = "ai_cover_spacing_debug",
+		def = "0",
+	}),
+	line {},
+	get_item_if_exists(list_bool {
+		id = "ai_sudden_attack_break_on_fire",
+		def = "1",
+	}),
 	track {
 		id = "ai_close_move_distance",
 		def = 1.5,
