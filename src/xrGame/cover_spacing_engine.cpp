@@ -12,6 +12,7 @@
 #include "ai_object_location.h"
 #include "memory_manager.h"
 #include "enemy_manager.h"
+#include "danger_manager.h"
 #include "stalker_movement_manager_smart_cover.h"
 #include "restricted_object.h"
 
@@ -105,6 +106,17 @@ namespace
 		}
 	};
 
+	// A claimed cover counts only while its owner has an enemy or a danger to hide from. A script can run a cover
+	// search for a stalker outside combat, and that sets his cover like any search: such a claim would otherwise
+	// keep the whole team off the spots around it until he dies or goes offline.
+	IC bool live(const member_type& m)
+	{
+		if (m.kind != cover_spacing::claim_cover)
+			return true; // a side-step spot only exists while he is taking cover
+		const CAI_Stalker& owner = m.owner->object();
+		return owner.memory().enemy().selected() || owner.memory().danger().selected();
+	}
+
 	void refresh_bodies()
 	{
 		s_registry.refresh_bodies(Device.dwTimeGlobal, [](const CMemberOrder* order, cover_spacing::vec& p)
@@ -113,21 +125,24 @@ namespace
 		});
 	}
 
-	// Does an ally stand within `spacing` of the spot, or head for a spot that close? `except` (may be 0) is a
-	// teammate whose body does not count. refresh_bodies() must have run.
+	// Does an ally head for a spot within `spacing` of this one, or stand that close to it and nearer to it than
+	// the stalker is (a man walking past the spot the stalker stands on does not count)? `except` (may be 0) is
+	// a teammate whose body does not count. refresh_bodies() must have run.
 	bool crowded(const scope_filter& ally, const Fvector& spot, float spacing, const CAI_Stalker* except)
 	{
 		if (spacing <= 0.f)
 			return false;
 		bool result = false;
 		const cover_spacing::vec p = to_vec(spot);
+		const float me_to_spot_sqr = ally.m_self->Position().distance_to_sqr(spot);
 		s_registry.claims_near(p, spacing, [&](const member_type& m, float)
 		{
-			result = result || ally(m);
+			result = result || (ally(m) && live(m));
 		});
-		s_registry.bodies_near(p, spacing, [&](const member_type& m, float)
+		s_registry.bodies_near(p, spacing, [&](const member_type& m, float d)
 		{
-			result = result || (ally(m) && (&m.owner->object() != except));
+			result = result || (ally(m) && (&m.owner->object() != except) &&
+				cover_spacing::body_refuses(d, spacing, me_to_spot_sqr));
 		});
 		return result;
 	}
@@ -184,7 +199,7 @@ bool cover_spacing_engine::refuses(CAI_Stalker* stalker, const Fvector& spot)
 
 	s_registry.claims_near(to_vec(spot), _max(ally_spacing, body_spacing), [&](const member_type& m, float d)
 	{
-		if (refused_by || !ally(m))
+		if (refused_by || !ally(m) || !live(m))
 			return;
 		bool refuse;
 		if (m.kind == cover_spacing::claim_cover)
@@ -230,15 +245,23 @@ void cover_spacing_engine::evict_neighbours(CAI_Stalker* stalker, const CCoverPo
 	if (ally_spacing <= 0.f || !cover || !s_registry.claim_count())
 		return;
 
-	// collect first: taking a cover away changes the list that is being walked
+	// Only an ally that lost the "who is closer" comparison loses his cover. suitable() made that comparison for a
+	// cover a search picked, but make_suitable is also called for covers no search looked at (the danger
+	// evaluator calls it on every think), and without the comparison here two stalkers could take each other's
+	// cover away for ever. An ally that keeps his makes suitable() refuse ours on its next check.
+	// Collect first: taking a cover away changes the list that is being walked.
+	const float taker_to_cover_sqr = stalker->Position().distance_to_sqr(cover->position());
 	const scope_filter ally(stalker);
 	const u32 k_max_losers = 16;
 	const CMemberOrder* losers[k_max_losers];
 	u32 loser_count = 0;
-	s_registry.claims_near(to_vec(cover->position()), ally_spacing, [&](const member_type& m, float)
+	s_registry.claims_near(to_vec(cover->position()), ally_spacing, [&](const member_type& m, float d)
 	{
-		if (m.kind != cover_spacing::claim_cover || !ally(m) || !m.owner->cover())
+		if (m.kind != cover_spacing::claim_cover || !ally(m) || !live(m) || !m.owner->cover())
 			return;
+		if (cover_spacing::claim_refuses(
+			d, ally_spacing, m.owner->object().Position().distance_to_sqr(to_fvector(m.claim)), taker_to_cover_sqr))
+			return; // he is as close to his cover as the taker is to this one: he keeps it
 		if (loser_count < k_max_losers)
 			losers[loser_count++] = m.owner;
 	});
@@ -280,7 +303,7 @@ float cover_spacing_engine::penalty(CAI_Stalker* stalker, const Fvector& spot)
 	// allies that have a spot count by the spot (where they are heading) ...
 	s_registry.claims_near(p, _max(ally_spacing, body_spacing), [&](const member_type& m, float d)
 	{
-		if (!ally(m))
+		if (!ally(m) || !live(m))
 			return;
 		if (m.kind == cover_spacing::claim_cover)
 			add(m, d, cover_spacing::crowd_penalty(d, ally_spacing));

@@ -231,8 +231,8 @@ void CCoverEvaluatorBest::evaluate_cover(const CCoverPoint* cover_point, float w
 		// which left the search with nothing in a crowd).
 		value += cover_spacing_engine::penalty(m_stalker, cover_point->position());
 	}
-	else if (m_stalker && m_stalker->agent_manager().member().members().size() > 1) {
-		// ai_cover_ally_spacing 0 and ai_cover_body_spacing 0: the check as it was
+	if (m_stalker && (g_ai_cover_body_spacing <= 0.f) && m_stalker->agent_manager().member().members().size() > 1) {
+		// ai_cover_body_spacing 0: the body check as it was (the penalty above then counts allies' covers only)
 		for (auto& it : m_stalker->agent_manager().member().members()) {
 			CAI_Stalker* teammate = &it->object();
 			if (teammate->ID() == m_stalker->ID()) continue;
