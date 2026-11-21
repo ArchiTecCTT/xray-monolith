@@ -93,6 +93,11 @@ int main(int argc, char** argv)
 	CHECK(!claim_refuses(16.1f, 4.f, 0.f, 0.f)); // further apart than the spacing
 	CHECK(claim_refuses(16.f, 4.f, 0.f, 0.f)); // exactly the spacing still counts (the vanilla <=)
 	CHECK(!claim_refuses(0.f, 0.f, 0.f, 0.f)); // spacing 0 = off
+	// the same comparison decides who loses his cover when one is taken next to his: two men that both sit on
+	// their covers 3 m apart keep them (each "refuses" the other, nobody is evicted), a man still 10 m from his
+	// loses it to one that has arrived
+	CHECK(claim_refuses(9.f, 4.f, 0.f, 0.f));
+	CHECK(!claim_refuses(9.f, 4.f, 100.f, 0.f));
 	// a teammate with no cover: his body owns the spots he is nearer to than I am
 	CHECK(body_refuses(1.f, 2.5f, 25.f));
 	CHECK(!body_refuses(1.f, 2.5f, 0.25f)); // I sit on the spot, he walks past: still mine
@@ -394,12 +399,26 @@ int main(int argc, char** argv)
 	CHECK(count(suitable, "cover_spacing_engine::refuses(object, location->position())") == 1);
 	CHECK(suitable.find("registered_in_combat") < suitable.find("cover_spacing_engine::body_refuses"));
 	CHECK(count(body(location, "void CAgentLocationManager::make_suitable("), "cover_spacing_engine::evict_neighbours(object, location)") == 1);
+	// taking a cover only takes away the cover of an ally that lost the "who is closer" comparison: make_suitable
+	// is also called for covers no search looked at, and two stalkers must not evict each other for ever
+	const std::string evict = body(engine, "void cover_spacing_engine::evict_neighbours(");
+	CHECK(count(evict, "if (cover_spacing::claim_refuses(") == 1);
+	CHECK(evict.find("if (cover_spacing::claim_refuses(") < evict.find("losers[loser_count++] = m.owner;"));
+	// a claimed cover counts only while its owner has an enemy or a danger: in the refusal, the eviction, the cost
+	// and the side-step's crowd check
+	CHECK(count(engine, "return owner.memory().enemy().selected() || owner.memory().danger().selected();") == 1);
+	CHECK(count(engine, "!live(m)") == 3 && count(engine, "(ally(m) && live(m))") == 1);
+	// a kept side-step spot is not dropped for an ally that is further from it than the stalker himself
+	CHECK(count(body(engine, "bool crowded("), "cover_spacing::body_refuses(d, spacing, me_to_spot_sqr)") == 1);
 
 	// the evaluator: the soft penalty when the feature is on, the old +1000 only when both spacings are 0
 	const std::string evaluate = body(evaluators, "void CCoverEvaluatorBest::evaluate_cover(");
 	CHECK(count(evaluate, "value += cover_spacing_engine::penalty(m_stalker, cover_point->position());") == 1);
 	CHECK(evaluate.find("cover_spacing_engine::penalty_enabled()") < evaluate.find("value += 1000.f"));
-	CHECK(evaluate.find("else if (m_stalker") < evaluate.find("value += 1000.f"));
+	// ai_cover_body_spacing 0 alone brings the old body check back, whatever ai_cover_ally_spacing is
+	CHECK(count(evaluate, "if (m_stalker && (g_ai_cover_body_spacing <= 0.f) && m_stalker->agent_manager().member().members().size() > 1) {") == 1);
+	CHECK(evaluate.find("(g_ai_cover_body_spacing <= 0.f)") < evaluate.find("value += 1000.f"));
+	CHECK(count(evaluate, "else if") == 0);
 	// in that penalty an ally's cover always counts, an ally with no cover by body_penalty (twice: side-step spots and bodies)
 	const std::string penalty = body(engine, "float cover_spacing_engine::penalty(");
 	CHECK(count(penalty, "cover_spacing::crowd_penalty(d, ally_spacing)") == 1);
@@ -448,6 +467,7 @@ int main(int argc, char** argv)
 	const std::string heard = body(sounds, "void CSoundMemoryManager::feel_sound_new(");
 	CHECK(count(sounds, "m_last_near_bullet_hit_time = Device.dwTimeGlobal;") == 1);
 	CHECK(count(heard, "is_sound_type(sound_type, SOUND_TYPE_WEAPON_BULLET_HIT)") == 1);
+	CHECK(count(heard, "if (!shooter_entity || (shooter_entity->g_Team() != entity_alive->g_Team()))") == 1); // not his own side's bullets
 	CHECK(count(sounds, "m_last_near_bullet_hit_time = 0;") == 1); // reinit
 	CHECK(count(read(game + "sound_memory_manager_inline.h"), "m_last_near_bullet_hit_time = 0;") == 1); // the constructor
 
