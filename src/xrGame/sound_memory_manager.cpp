@@ -171,7 +171,13 @@ void CSoundMemoryManager::feel_sound_new(CObject* object, int sound_type, CSound
 	// hit (the sound memory below keeps the shooter's position). ai_sudden_attack_break_on_fire reads it.
 	if (m_stalker && is_sound_type(sound_type, SOUND_TYPE_WEAPON_BULLET_HIT) &&
 		(m_stalker->Position().distance_to_sqr(position) <= _sqr(k_near_bullet_hit_radius)))
-		m_last_near_bullet_hit_time = Device.dwTimeGlobal;
+	{
+		// not his own bullets and not his own side's (a teammate firing past him); a bullet nobody owns counts
+		const CObject* shooter = (object && object->H_Parent()) ? object->H_Parent() : object;
+		const CEntityAlive* shooter_entity = smart_cast<const CEntityAlive*>(shooter);
+		if (!shooter_entity || (shooter_entity->g_Team() != entity_alive->g_Team()))
+			m_last_near_bullet_hit_time = Device.dwTimeGlobal;
+	}
 
 	VERIFY(_valid(sound_power));
 	if (is_sound_type(sound_type, SOUND_TYPE_WEAPON))
