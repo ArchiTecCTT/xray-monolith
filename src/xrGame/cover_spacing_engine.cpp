@@ -49,12 +49,14 @@ namespace
 	{
 		if (!stalker->g_Alive())
 			return 0;
-		// not CAI_Stalker::agent_manager(): that one takes for granted that the group still has a manager
-		const CAgentManager* manager = Level().seniority_holder().team(stalker->g_Team()).squad(stalker->g_Squad())
-		                                      .group(stalker->g_Group()).get_agent_manager();
-		if (!manager)
+		// CAI_Stalker::agent_manager() takes for granted that his group has a manager. It has one for as long as
+		// a stalker is registered in the group, so look for him there first.
+		const CGroupHierarchyHolder& group = Level().seniority_holder().team(stalker->g_Team())
+		                                            .squad(stalker->g_Squad()).group(stalker->g_Group());
+		const CEntity* entity = stalker;
+		if (std::find(group.members().begin(), group.members().end(), entity) == group.members().end())
 			return 0;
-		return manager->member().get_member(stalker->ID());
+		return group.agent_manager().member().get_member(stalker->ID());
 	}
 
 	LPCSTR reason_name(cover_spacing::note_reason reason)
