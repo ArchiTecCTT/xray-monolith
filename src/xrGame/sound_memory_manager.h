@@ -53,6 +53,14 @@ private:
 	u32 m_max_sound_count;
 
 private:
+	// when a bullet last landed within k_near_bullet_hit_radius of a stalker (0 = never):
+	// ai_sudden_attack_break_on_fire reads it
+	u32 m_last_near_bullet_hit_time;
+
+public:
+	IC u32 last_near_bullet_hit_time() const { return m_last_near_bullet_hit_time; }
+
+private:
 	u32 m_last_sound_time;
 	u32 m_sound_decrease_quant;
 	float m_decrease_factor;

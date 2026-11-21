@@ -39,6 +39,7 @@ extern BOOL g_ai_move_to_cover_run;
 #include "weaponmagazined.h"
 #include "stalker_animation_manager.h"
 #include "hit_memory_manager.h"
+#include "sound_memory_manager.h"
 #include "level_path_manager.h"
 #include "cover_spacing_engine.h"
 
@@ -52,6 +53,9 @@ float g_ai_cover_detour_radius  = 5.f;
 u32   g_ai_cover_detour_time     = 120000;
 
 float g_ai_close_move_distance         = 1.5f;
+// 1 = the sudden attack (sneaking up on an enemy that has not seen him) ends when the stalker is hit or a bullet
+// lands near him. 0 = it ends only the old ways.
+int   g_ai_sudden_attack_break_on_fire = 1;
 u32   g_ai_crouch_look_out_delta       = 5000;
 u32   g_ai_wait_in_smart_cover_time    = 30000;
 
@@ -1300,6 +1304,20 @@ void CStalkerActionSuddenAttack::execute()
 	//if (object().agent_manager().member().combat_members().size() > 1)
 	//	m_storage->set_property	(eWorldPropertyUseSuddenness,false);
 	//Alundaio: END
+
+	// ai_sudden_attack_break_on_fire: a stalker that is being shot at stops sneaking up on his enemy. "Shot at" is
+	// a hit, or a bullet that landed within 5 m of him, since 3 s before this action began. Once the property is
+	// cleared it stays cleared for this fight (only the combat planner's start sets it).
+	if (g_ai_sudden_attack_break_on_fire)
+	{
+		const u32 since = (start_level_time() > 3000) ? (start_level_time() - 3000) : 1;
+		if ((object().memory().hit().last_hit_time() >= since) ||
+			(object().memory().sound().last_near_bullet_hit_time() >= since))
+		{
+			m_storage->set_property(eWorldPropertyUseSuddenness, false);
+			return;
+		}
+	}
 
 	const CEntityAlive* enemy = object().memory().enemy().selected();
 	if (!enemy)

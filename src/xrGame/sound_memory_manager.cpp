@@ -43,6 +43,8 @@
 //#define SAVE_VISIBLE_OBJECT_SOUNDS
 
 const float COMBAT_SOUND_PERCEIVE_RADIUS_SQR = _sqr(5.f);
+// a bullet that lands this close to a stalker counts as "he is being shot at" (last_near_bullet_hit_time)
+const float k_near_bullet_hit_radius = 5.f;
 
 CSoundMemoryManager::~CSoundMemoryManager()
 {
@@ -61,6 +63,7 @@ void CSoundMemoryManager::reinit()
 	m_sounds = 0;
 	m_priorities.clear();
 	m_last_sound_time = 0;
+	m_last_near_bullet_hit_time = 0;
 	m_sound_threshold = m_min_sound_threshold;
 	VERIFY(_valid(m_sound_threshold));
 #ifdef USE_SELECTED_SOUND
@@ -163,6 +166,12 @@ void CSoundMemoryManager::feel_sound_new(CObject* object, int sound_type, CSound
 	CEntityAlive* entity_alive = m_object;
 	if (!entity_alive->g_Alive())
 		return;
+
+	// A bullet landed close to a stalker: note when. This is the only place that still has the spot the bullet
+	// hit (the sound memory below keeps the shooter's position). ai_sudden_attack_break_on_fire reads it.
+	if (m_stalker && is_sound_type(sound_type, SOUND_TYPE_WEAPON_BULLET_HIT) &&
+		(m_stalker->Position().distance_to_sqr(position) <= _sqr(k_near_bullet_hit_radius)))
+		m_last_near_bullet_hit_time = Device.dwTimeGlobal;
 
 	VERIFY(_valid(sound_power));
 	if (is_sound_type(sound_type, SOUND_TYPE_WEAPON))
