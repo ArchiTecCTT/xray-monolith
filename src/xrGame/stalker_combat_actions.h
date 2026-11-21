@@ -119,6 +119,11 @@ private:
 	MonsterSpace::EBodyState m_body_state;
 	MonsterSpace::EMovementType m_movement_type;
 	const CCoverPoint* m_last_notified_cover;
+	// the fallback side-step (no cover found): the spot in use and when it was last worked out
+	bool m_side_step_valid;
+	u32 m_side_step_time;
+	u32 m_side_step_vertex_id;
+	Fvector m_side_step_position;
 
 public:
 	CStalkerActionTakeCover(CAI_Stalker* object, LPCSTR action_name = "");

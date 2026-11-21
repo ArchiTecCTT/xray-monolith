@@ -40,6 +40,7 @@ extern BOOL g_ai_move_to_cover_run;
 #include "stalker_animation_manager.h"
 #include "hit_memory_manager.h"
 #include "level_path_manager.h"
+#include "cover_spacing_engine.h"
 
 #define DISABLE_COVER_BEFORE_DETOUR
 
@@ -505,6 +506,11 @@ void CStalkerActionKillEnemy::execute()
 CStalkerActionTakeCover::CStalkerActionTakeCover(CAI_Stalker* object, LPCSTR action_name) :
 	inherited(object, action_name)
 {
+	m_last_notified_cover = nullptr;
+	m_side_step_valid = false;
+	m_side_step_time = 0;
+	m_side_step_vertex_id = u32(-1);
+	m_side_step_position.set(0.f, 0.f, 0.f);
 }
 
 void CStalkerActionTakeCover::initialize()
@@ -512,6 +518,8 @@ void CStalkerActionTakeCover::initialize()
 	inherited::initialize();
 
 	m_last_notified_cover = nullptr;
+	m_side_step_valid = false;
+	m_side_step_time = 0;
 	m_body_state = object().movement().body_state();
 	//	m_movement_type								= Random.randI(2) ? eMovementTypeRun : eMovementTypeWalk;
 	m_movement_type = g_ai_move_to_cover_run ? eMovementTypeRun : eMovementTypeWalk;
@@ -550,6 +558,10 @@ void CStalkerActionTakeCover::initialize()
 void CStalkerActionTakeCover::finalize()
 {
 	inherited::finalize();
+
+	// the side-step spot is his only while he is taking cover
+	m_side_step_valid = false;
+	cover_spacing_engine::release_side_step(m_object);
 }
 
 void CStalkerActionTakeCover::execute()
@@ -588,6 +600,10 @@ void CStalkerActionTakeCover::execute()
 	const CCoverPoint* point = object().best_cover(position);
 	if (point)
 	{
+		// a real cover: the side-step spot, if he had one, is over (his claim is the cover now)
+		m_side_step_valid = false;
+		m_side_step_time = 0;
+
 		setup_cover(*point);
 
 		if (point != m_last_notified_cover)
@@ -611,7 +627,35 @@ void CStalkerActionTakeCover::execute()
 	else
 	{
 		bool teammate_cover_found = false;
-		if (object().agent_manager().member().members().size() > 1) {
+		if (g_ai_cover_fallback_side_offset > 0.f) {
+			// No cover: stand beside a teammate, not behind him. The spot is ai_cover_fallback_side_offset to
+			// his left or right (across his line to the enemy) and 1 m back, on ground that can be walked in a
+			// straight line from him, and not where another ally stands or is heading (cover_spacing_engine.h).
+			// It is kept for 2 s, so it does not follow every step the teammate makes; with none found it is
+			// tried again after half a second.
+			const u32 keep_time = m_side_step_valid ? 2000 : 500;
+			if (!m_side_step_time || (Device.dwTimeGlobal >= m_side_step_time + keep_time)) {
+				m_side_step_valid = cover_spacing_engine::side_step(m_object, position, m_side_step_vertex_id,
+				                                                    m_side_step_position);
+				m_side_step_time = Device.dwTimeGlobal;
+			}
+
+			// the restrictions can change while the spot is kept
+			if (m_side_step_valid && (!object().movement().restrictions().accessible(m_side_step_vertex_id) ||
+				!object().movement().restrictions().accessible(m_side_step_position))) {
+				m_side_step_valid = false;
+				cover_spacing_engine::release_side_step(m_object);
+			}
+
+			if (m_side_step_valid) {
+				object().movement().set_level_dest_vertex(m_side_step_vertex_id);
+				object().movement().set_desired_position(&m_side_step_position);
+				teammate_cover_found = true;
+			}
+		}
+		else if (object().agent_manager().member().members().size() > 1) {
+			// ai_cover_fallback_side_offset 0: the fallback as it was, 1.2 m behind the first teammate
+			// that has an enemy
 			for (auto& it : object().agent_manager().member().members()) {
 				CAI_Stalker* teammate = &it->object();
 				if (teammate->ID() == object().ID()) continue;
