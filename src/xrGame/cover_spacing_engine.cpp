@@ -33,6 +33,7 @@ namespace
 
 	const u32 k_note_interval_ms = 1000; // one debug line per stalker and reason per second
 	const float k_side_step_mate_range = 30.f; // a teammate further than this is not worth running to
+	const u32 k_side_step_mates = 4; // how many of the nearest teammates the side-step tries to stand beside
 
 	IC cover_spacing::vec to_vec(const Fvector& v)
 	{
@@ -110,6 +111,25 @@ namespace
 		{
 			p = to_vec(order->object().Position());
 		});
+	}
+
+	// Does an ally stand within `spacing` of the spot, or head for a spot that close? `except` (may be 0) is a
+	// teammate whose body does not count. refresh_bodies() must have run.
+	bool crowded(const scope_filter& ally, const Fvector& spot, float spacing, const CAI_Stalker* except)
+	{
+		if (spacing <= 0.f)
+			return false;
+		bool result = false;
+		const cover_spacing::vec p = to_vec(spot);
+		s_registry.claims_near(p, spacing, [&](const member_type& m, float)
+		{
+			result = result || ally(m);
+		});
+		s_registry.bodies_near(p, spacing, [&](const member_type& m, float)
+		{
+			result = result || (ally(m) && (&m.owner->object() != except));
+		});
+		return result;
 	}
 }
 
@@ -296,12 +316,15 @@ bool cover_spacing_engine::side_step(CAI_Stalker* stalker, const Fvector& enemy_
 	if (offset <= 0.f || !order)
 		return false;
 
-	// the nearest teammate of the own group that has an enemy (the old code took the first one in the list, the
-	// same man for everybody), and my place in the list: odd places try the left side first, even ones the right
+	// The teammates of the own group that have an enemy, nearest first, k_side_step_mates at most (the old code
+	// took the first one in the list, the same man for everybody). A man that already stands beside somebody
+	// has an enemy too, so the next one can stand beside him: with little cover a squad ends up in a line across
+	// the enemy's direction, not in a knot.
 	// (order_of found his record, so his group has an agent manager)
 	const CAgentMemberManager::MEMBER_STORAGE& members = stalker->agent_manager().member().members();
-	CAI_Stalker* mate = 0;
-	float mate_distance_sqr = _sqr(k_side_step_mate_range);
+	CAI_Stalker* mates[k_side_step_mates];
+	float mate_distances_sqr[k_side_step_mates];
+	u32 mate_count = 0;
 	u32 my_index = 0;
 	for (u32 i = 0; i < members.size(); ++i)
 	{
@@ -314,26 +337,48 @@ bool cover_spacing_engine::side_step(CAI_Stalker* stalker, const Fvector& enemy_
 		if (!candidate->memory().enemy().selected())
 			continue;
 		const float distance_sqr = candidate->Position().distance_to_sqr(stalker->Position());
-		if (distance_sqr < mate_distance_sqr)
+		if (distance_sqr >= _sqr(k_side_step_mate_range))
+			continue;
+
+		// keep the nearest few, sorted
+		u32 place = mate_count;
+		while (place > 0 && mate_distances_sqr[place - 1] > distance_sqr)
+			--place;
+		if (place >= k_side_step_mates)
+			continue;
+		if (mate_count < k_side_step_mates)
+			++mate_count;
+		for (u32 j = mate_count - 1; j > place; --j)
 		{
-			mate_distance_sqr = distance_sqr;
-			mate = candidate;
+			mates[j] = mates[j - 1];
+			mate_distances_sqr[j] = mate_distances_sqr[j - 1];
 		}
+		mates[place] = candidate;
+		mate_distances_sqr[place] = distance_sqr;
 	}
 
 	const CLevelGraph& graph = ai().level_graph();
-	const u32 mate_vertex_id = mate ? mate->ai_location().level_vertex_id() : u32(-1);
-	bool found = false;
-	bool left = !!(my_index & 1);
-	if (mate && graph.valid_vertex_id(mate_vertex_id))
-	{
-		const float body_spacing = g_ai_cover_body_spacing;
-		const scope_filter ally(stalker);
-		if (body_spacing > 0.f)
-			refresh_bodies();
+	const float body_spacing = g_ai_cover_body_spacing;
+	const scope_filter ally(stalker);
+	if (mate_count && body_spacing > 0.f)
+		refresh_bodies();
 
-		for (u32 attempt = 0; attempt < 2 && !found; ++attempt, left = !left)
+	// my place in the list decides the side that is tried first: odd places the left, even ones the right
+	const bool left_first = !!(my_index & 1);
+	bool found = false, left = left_first;
+	CAI_Stalker* mate = 0;
+	float mate_distance_sqr = 0.f;
+	for (u32 i = 0; i < mate_count && !found; ++i)
+	{
+		mate = mates[i];
+		mate_distance_sqr = mate_distances_sqr[i];
+		const u32 mate_vertex_id = mate->ai_location().level_vertex_id();
+		if (!graph.valid_vertex_id(mate_vertex_id))
+			continue;
+
+		for (u32 attempt = 0; attempt < 2 && !found; ++attempt)
 		{
+			left = (attempt == 0) ? left_first : !left_first;
 			cover_spacing::vec target;
 			if (!cover_spacing::side_step_target(to_vec(mate->Position()), to_vec(enemy_position), offset, left,
 			                                     target))
@@ -353,26 +398,12 @@ bool cover_spacing_engine::side_step(CAI_Stalker* stalker, const Fvector& enemy_
 				continue;
 
 			// not where another ally stands or is heading (the teammate himself is `offset` away by design)
-			bool crowded = false;
-			if (body_spacing > 0.f)
-			{
-				const cover_spacing::vec p = to_vec(spot);
-				s_registry.claims_near(p, body_spacing, [&](const member_type& m, float)
-				{
-					crowded = crowded || ally(m);
-				});
-				s_registry.bodies_near(p, body_spacing, [&](const member_type& m, float)
-				{
-					crowded = crowded || (ally(m) && (&m.owner->object() != mate));
-				});
-			}
-			if (crowded)
+			if (crowded(ally, spot, body_spacing, mate))
 				continue;
 
 			vertex_id = spot_vertex_id;
 			position = spot;
 			found = true;
-			break;
 		}
 	}
 
@@ -385,4 +416,13 @@ bool cover_spacing_engine::side_step(CAI_Stalker* stalker, const Fvector& enemy_
 		note(stalker, cover_spacing::note_side_step, found ? (left ? "left" : "right") : "none",
 		     mate ? u32(mate->ID()) : u32(-1), mate ? _sqrt(mate_distance_sqr) : 0.f, offset);
 	return found;
+}
+
+bool cover_spacing_engine::side_step_free(CAI_Stalker* stalker, const Fvector& position)
+{
+	const float body_spacing = g_ai_cover_body_spacing;
+	if (body_spacing <= 0.f)
+		return true;
+	refresh_bodies();
+	return !crowded(scope_filter(stalker), position, body_spacing, 0);
 }

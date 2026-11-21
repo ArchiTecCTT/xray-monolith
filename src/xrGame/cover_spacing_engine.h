@@ -39,7 +39,9 @@ namespace cover_spacing_engine
 	// what a spot costs for the allies heading to or standing near it: 0 = free
 	float penalty(CAI_Stalker* stalker, const Fvector& spot);
 
-	// CStalkerActionTakeCover, no cover found: a spot beside the nearest teammate that has an enemy.
+	// CStalkerActionTakeCover, no cover found: a spot beside one of the nearest teammates that have an enemy.
 	// false = none (the caller stays where it is, as before)
 	bool side_step(CAI_Stalker* stalker, const Fvector& enemy_position, u32& vertex_id, Fvector& position);
+	// is the side-step spot he uses still clear of other allies (their bodies and the spots they head for)?
+	bool side_step_free(CAI_Stalker* stalker, const Fvector& position);
 }

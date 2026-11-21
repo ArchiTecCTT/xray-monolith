@@ -635,12 +635,14 @@ void CStalkerActionTakeCover::execute()
 			// No cover: stand beside a teammate, not behind him. The spot is ai_cover_fallback_side_offset to
 			// his left or right (across his line to the enemy) and 1 m back, on ground that can be walked in a
 			// straight line from him, and not where another ally stands or is heading (cover_spacing_engine.h).
-			// It is kept for 2 s, so it does not follow every step the teammate makes; with none found it is
-			// tried again after half a second.
+			// A spot is looked at again every 2 s and kept for as long as no other ally has come to stand on it:
+			// working it out anew from teammates that have moved (or that stand beside us in turn) would walk the
+			// whole group about. With none found it is tried again after half a second.
 			const u32 keep_time = m_side_step_valid ? 2000 : 500;
 			if (!m_side_step_time || (Device.dwTimeGlobal >= m_side_step_time + keep_time)) {
-				m_side_step_valid = cover_spacing_engine::side_step(m_object, position, m_side_step_vertex_id,
-				                                                    m_side_step_position);
+				if (!m_side_step_valid || !cover_spacing_engine::side_step_free(m_object, m_side_step_position))
+					m_side_step_valid = cover_spacing_engine::side_step(m_object, position, m_side_step_vertex_id,
+					                                                    m_side_step_position);
 				m_side_step_time = Device.dwTimeGlobal;
 			}
 
