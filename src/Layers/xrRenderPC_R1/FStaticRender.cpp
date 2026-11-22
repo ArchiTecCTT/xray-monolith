@@ -134,8 +134,7 @@ void CRender::destroy()
 void CRender::reset_begin()
 {
 	// The reset releases and re-records the state blocks that queued render packets point to (raw pointers),
-	// so drop every packet queued so far. Per-light graphs are dropped lazily via m_dsgraph_epoch (LightPPA.cpp)
-	++m_dsgraph_epoch;
+	// so drop every packet queued so far. A light's own graph is emptied before each capture (LightPPA.cpp)
 	GMBase.RGraph.clear();
 	if (L_Dynamic) L_Dynamic->reset();
 
