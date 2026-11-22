@@ -973,7 +973,11 @@ void CAI_Stalker::update_object_handler()
 
 	// ... and one that has just ended keeps him on the per-frame update until the gun is back
 	if (m_scripted_throw_restoring)
+	{
 		scripted_throw_restore();
+		if (!g_Alive()) // the inventory's update calls a script on a slot change
+			return;
+	}
 
 	try
 	{

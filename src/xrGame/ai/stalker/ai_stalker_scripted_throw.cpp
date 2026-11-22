@@ -206,9 +206,10 @@ bool CAI_Stalker::scripted_throw_aligned()
 // does the man who has one in his slot. A gun does not: farther than 30 m from the camera and not drawn, it gets one
 // only after its scheduler update, a few times a second. Its half-second "put away" then takes many seconds, and so
 // does drawing it again. So during a request, and until the gun is back after it:
-//	- he and the items that are changing hands are put on the next frame's update list, wherever the camera is;
+//	- he and the items that are changing hands are put on the next frame's update list, wherever the camera is
+//	  (this function);
 //	- the inventory's own update, which makes the slot change once an item is hidden and which he otherwise gets from
-//	  the scheduler only, runs every frame (as the actor's does).
+//	  the scheduler only, runs every frame, as the actor's does (the callers, as their last step).
 void CAI_Stalker::scripted_throw_keep_updated()
 {
 	MakeMeCrow();
@@ -223,8 +224,6 @@ void CAI_Stalker::scripted_throw_keep_updated()
 		if (CInventoryItem* const next = items.ItemFromSlot(next_slot))
 			next->object().MakeMeCrow();
 	}
-
-	items.Update();
 }
 
 // update_object_handler() after a request has ended, until the gun is back in his hands and at rest (or
@@ -240,6 +239,8 @@ void CAI_Stalker::scripted_throw_restore()
 	}
 
 	scripted_throw_keep_updated();
+	// calls a script on a slot change: the caller looks at him again afterwards
+	inventory().Update();
 }
 
 bool CAI_Stalker::scripted_throw_request(const Fvector& target, int crouch)
@@ -458,14 +459,6 @@ void CAI_Stalker::scripted_throw_update_object_handler()
 {
 	scripted_throw_keep_updated();
 
-	// the inventory's update calls a script on a slot change, and a script may call the request off
-	if (!m_scripted_throw.active)
-	{
-		if (g_Alive())
-			scripted_throw_plain_update();
-		return;
-	}
-
 	CInventoryItem* const grenade = scripted_throw_grenade();
 	CMissile* const missile = grenade ? smart_cast<CMissile*>(grenade) : nullptr;
 	bool const in_hand = missile && (inventory().ActiveItem() == grenade);
@@ -491,7 +484,8 @@ void CAI_Stalker::scripted_throw_update_object_handler()
 		// over: the others' goal was never taken away, so this is the plain update again
 		m_scripted_throw.abort(Device.dwTimeGlobal); // does nothing after s_end
 		scripted_throw_ended();
-		scripted_throw_plain_update();
+		if (g_Alive()) // the callback is a script's
+			scripted_throw_plain_update();
 		return;
 	}
 
@@ -522,8 +516,11 @@ void CAI_Stalker::scripted_throw_update_object_handler()
 		m_scripted_throw.abort(Device.dwTimeGlobal);
 		scripted_throw_ended();
 
-		CObjectHandler::set_goal(MonsterSpace::eObjectActionIdle);
-		CObjectHandler::update();
+		if (g_Alive()) // the callback is a script's
+		{
+			CObjectHandler::set_goal(MonsterSpace::eObjectActionIdle);
+			CObjectHandler::update();
+		}
 		return;
 	}
 
@@ -543,6 +540,12 @@ void CAI_Stalker::scripted_throw_update_object_handler()
 		planner.set_target_state(theirs);
 	else
 		CObjectHandler::set_goal(MonsterSpace::eObjectActionIdle);
+
+	// The slot change (gun hidden, empty hands, grenade) is the inventory's update. It comes last on purpose:
+	//	- everything above has read the items as the frame found them. A grenade taken into the hand here reads "at
+	//	  rest" until its draw starts on the next frame;
+	//	- it calls a script on a slot change, and that script may end the request or kill him: nothing follows it.
+	inventory().Update();
 }
 
 // Think() while a request is active: he stands, in danger, in the asked body state, for this update only

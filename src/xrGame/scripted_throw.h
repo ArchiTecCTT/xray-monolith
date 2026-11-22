@@ -184,6 +184,7 @@ namespace scripted_throw
 		bool aimed;
 		bool released; // the grenade has left the hand
 		bool in_hand; // the grenade has been in his hand and at rest at least once
+		bool rest_seen; // the last frame saw it in his hand and at rest (see tick)
 		bool was_aligned; // he has faced the target at least once
 		int arc_tries;
 		unsigned start; // ms
@@ -204,6 +205,7 @@ namespace scripted_throw
 			aimed = false;
 			released = false;
 			in_hand = false;
+			rest_seen = false;
 			was_aligned = false;
 			arc_tries = 0;
 			start = 0;
@@ -245,6 +247,7 @@ namespace scripted_throw
 			aimed = false;
 			released = false;
 			in_hand = false;
+			rest_seen = false;
 			was_aligned = false;
 			arc_tries = 0;
 			start = now;
@@ -300,10 +303,16 @@ namespace scripted_throw
 			if (!f.grenade_present)
 				return fail(r_no_grenade, f.now);
 
+			// "In his hand and at rest" has to hold on two frames running. An item that is taken into the hand reads
+			// "at rest" until its draw starts on the next frame (CMissile::OnActiveItem); a throw ordered on that
+			// one frame would skip the draw.
+			bool const at_rest = f.in_hand_idle && rest_seen;
+			rest_seen = f.in_hand_idle;
+
 			if (!aimed)
 			{
 				// the first time each: the clock of the aim limit, and the two times of the debug line
-				if (f.in_hand_idle && !in_hand)
+				if (at_rest && !in_hand)
 				{
 					in_hand = true;
 					in_hand_time = f.now;
@@ -333,7 +342,7 @@ namespace scripted_throw
 			if (aimed)
 				return s_throw;
 
-			if (f.in_hand_idle && f.aligned)
+			if (at_rest && f.aligned)
 				return s_aim;
 
 			return s_hold;

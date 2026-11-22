@@ -47,6 +47,10 @@ static std::string body(const std::string& text, const std::string& signature)
 	size_t b = text.find("\n}", a);
 	return text.substr(a, b == std::string::npos ? b : b - a);
 }
+static bool ends_with(const std::string& text, const std::string& what)
+{
+	return text.size() >= what.size() && !text.compare(text.size() - what.size(), what.size(), what);
+}
 // a comes before b in text, and both are there
 static bool before(const std::string& text, const std::string& a, const std::string& b)
 {
@@ -365,6 +369,38 @@ static void test_machine()
 		s.run();
 		CHECK(s.m.why == r_timeout && s.m.lim == l_aim && s.m.in_hand_time == held);
 		CHECK(s.now - t0 < k_aim_timeout_ms + 40);
+	}
+	// A grenade that has just been taken into the hand reads "at rest" for the rest of that frame, before its draw
+	// starts. One such frame is not "in his hand": no arc is asked for, no throw is ordered, the draw is not skipped.
+	{
+		sim s;
+		s.turn_ms = 0; // he faces the target from the start
+		s.swap_ms = 100000;
+		s.m.accept(s.now);
+		for (int i = 0; i < 20; ++i) s.frame();
+		s.in_hand = true; // the slot change: at rest for this one frame
+		CHECK(s.frame() && s.last == s_hold);
+		CHECK(!s.m.in_hand && s.arc_asked == 0 && !s.m.aimed);
+		s.in_hand = false; // the draw has started
+		for (int i = 0; i < 30; ++i) CHECK(s.frame() && s.last == s_hold);
+		CHECK(!s.m.in_hand && s.arc_asked == 0);
+		s.in_hand = true; // the draw is over: at rest for good
+		CHECK(s.frame() && s.last == s_hold);
+		CHECK(!s.m.in_hand);
+		CHECK(s.frame() && s.last == s_throw);
+		CHECK(s.m.in_hand && s.m.aimed && s.arc_asked == 1);
+		s.run();
+		CHECK(s.m.st == st_thrown);
+	}
+	// ... and a blocked arc is still tried again on the very next frame
+	{
+		sim s;
+		s.arc_clear_on_try = 3;
+		s.m.accept(s.now);
+		while (!s.arc_asked && s.frame()) {}
+		CHECK(s.arc_asked == 1 && s.last == s_hold);
+		CHECK(s.frame() && s.arc_asked == 2 && s.last == s_hold);
+		CHECK(s.frame() && s.arc_asked == 3 && s.last == s_throw);
 	}
 	// the limits fit under the hard cap
 	CHECK(k_swap_timeout_ms + k_aim_timeout_ms < k_total_timeout_ms);
@@ -690,23 +726,32 @@ static void test_wiring(const std::string& root)
 		CHECK(has(f, "MakeMeCrow();"));
 		CHECK(has(f, "active->object().MakeMeCrow();"));
 		CHECK(has(f, "next->object().MakeMeCrow();"));
-		CHECK(before(f, "next->object().MakeMeCrow();", "items.Update();"));
+		// the slot change is not made in here: see below
+		CHECK(!has(f, "Update()"));
 		CHECK(count(glue, "scripted_throw_keep_updated();") == 2);
 
 		const std::string update = body(glue, "void CAI_Stalker::scripted_throw_update_object_handler()");
 		CHECK(before(update, "scripted_throw_keep_updated();", "scripted_throw_grenade();"));
-		// a script may call the request off from the inventory's slot callback: no second end
-		CHECK(before(update, "scripted_throw_keep_updated();", "if (!m_scripted_throw.active)"));
-		CHECK(before(update, "if (!m_scripted_throw.active)", "m_scripted_throw.tick(facts)"));
+		// The inventory's update is the last thing of his frame. It calls a script on a slot change (which may end
+		// the request or kill him), and a grenade it puts into his hand reads "at rest" until the next frame.
+		CHECK(count(update, "inventory().Update();") == 1);
+		CHECK(before(update, "m_scripted_throw.tick(facts)", "inventory().Update();"));
+		CHECK(before(update, "planner.set_target_state(theirs);", "inventory().Update();"));
+		CHECK(ends_with(update, "\n\tinventory().Update();"));
+		// a script's callback may have killed him: no weapon update on a dead man
+		CHECK(has(update, "scripted_throw_ended();\n\t\tif (g_Alive()) // the callback is a script's\n"
+		                  "\t\t\tscripted_throw_plain_update();"));
 
 		const std::string restore = body(glue, "void CAI_Stalker::scripted_throw_restore()");
 		CHECK(has(restore, "weapon && (weapon->GetState() == CHUDState::eIdle) && !weapon->IsPending()"));
 		CHECK(has(restore, "Device.dwTimeGlobal - m_scripted_throw.end_time >= k_restore_ms"));
 		CHECK(before(restore, "m_scripted_throw_restoring = false;", "scripted_throw_keep_updated();"));
+		CHECK(before(restore, "scripted_throw_keep_updated();", "inventory().Update();"));
+		CHECK(ends_with(restore, "\n\tinventory().Update();"));
 
 		const std::string handler = body(stalker, "void CAI_Stalker::update_object_handler()");
 		CHECK(before(handler, "scripted_throw_update_object_handler();",
-		             "if (m_scripted_throw_restoring)\n\t\tscripted_throw_restore();"));
+		             "if (m_scripted_throw_restoring)\n\t{\n\t\tscripted_throw_restore();\n\t\tif (!g_Alive())"));
 		CHECK(before(handler, "scripted_throw_restore();", "CObjectHandler::update();"));
 		CHECK(count(stalker, "scripted_throw_restore()") == 1);
 
