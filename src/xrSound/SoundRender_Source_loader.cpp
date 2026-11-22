@@ -161,6 +161,7 @@ bool CSoundRender_Source::LoadWave(LPCSTR pName)
 
 void CSoundRender_Source::load(LPCSTR name)
 {
+	FrameProbe::LoadScope probe(FrameProbe::ldSound, name);
 	string_path fn, N;
 	xr_strcpy(N, name);
 	strlwr(N);

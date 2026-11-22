@@ -102,6 +102,7 @@ dxRender_Visual* CModelPool::Instance_Duplicate(dxRender_Visual* V)
 
 dxRender_Visual* CModelPool::Instance_Load(const char* N, BOOL allow_register, bool assert)
 {
+	FrameProbe::LoadScope probe(FrameProbe::ldModel, N);
 	dxRender_Visual* V;
 	string_path fn;
 	string_path name;

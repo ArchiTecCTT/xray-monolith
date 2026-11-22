@@ -116,6 +116,12 @@
         ai_cover_sniper_min_dist [0; 80] // Min cover distance (m) for sniper wielders. 0 = no minimum. Default 20.0
         ai_cover_default_max_dist [3; 50] // Max cover distance (m) for all other weapons. Default 20.0
 
+        // Frame time and the Lua collector (docs/frame_probe.md). All four are 0 = off by default
+        mt_frame_spike_ms [0; 1000] // One "[frame]" log line for every frame that took this many ms or longer: the main thread's update / prep / render / present / wait, each worker task, the Lua collector and anything loaded from disk. At most four lines a second
+        mt_frame_summary_sec [0; 600] // One "[frames]" log line every this many seconds with the averages of the same numbers
+        lua_parallel_gc_pause [0; 400] // Percent. The parallel collector starts its next collection only when the Lua heap is this large compared with its size when the last one ended (120 = 20 % bigger). 0..100 = start at once, as before. Uses less CPU, holds more memory
+        lua_parallel_gc_slack [0; 262144] // KB. While a collection runs, scripts do no collector work of their own until they have allocated this much since the parallel collector's last step. 0 = as before (a slice of collector work per ~1 KB allocated)
+
         // Combat AI - ally cover spacing (0 = that rule off, the old behaviour)
         ai_cover_ally_spacing [0; 10] // A cover within this distance (m) of a cover an ally of the same team holds or is running to is refused, unless we are clearly closer to ours than he is to his. Default 4.0
         ai_cover_body_spacing [0; 10] // A cover within this distance (m) of a teammate who fights with no cover yet, and nearer to him than to us, is refused. Also the reach of the soft crowd penalty around coverless allies. Default 2.5
@@ -184,7 +190,7 @@
     }
 
     jit.util { // additions beyond stock jit.util
-        table jit.util.gcstat() // {total, threshold, estimate, debt} in bytes plus cycles = completed GC collections since start; read-only snapshot, values may be mid-cycle under parallel GC
+        table jit.util.gcstat() // {total, threshold, estimate, debt} in bytes plus cycles = completed GC collections since start; read-only snapshot, values may be mid-cycle under parallel GC. Also gc_ms_main, gc_ms_other, gc_ms_atomic = milliseconds the collector has run since start on the main thread, on a worker, and inside atomic phases, and atomics = atomic phases run; these four only advance while mt_frame_spike_ms or mt_frame_summary_sec is above 0 (docs/frame_probe.md)
     }
 
     globals {

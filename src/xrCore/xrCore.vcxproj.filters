@@ -87,6 +87,9 @@
     <ClCompile Include="FTimer.cpp">
       <Filter>Kernel</Filter>
     </ClCompile>
+    <ClCompile Include="FrameProbe.cpp">
+      <Filter>Kernel</Filter>
+    </ClCompile>
     <ClCompile Include="stdafx.cpp">
       <Filter>Kernel</Filter>
     </ClCompile>
@@ -298,6 +301,9 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="FTimer.h">
+      <Filter>Kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="FrameProbe.h">
       <Filter>Kernel</Filter>
     </ClInclude>
     <ClInclude Include="resource.h">

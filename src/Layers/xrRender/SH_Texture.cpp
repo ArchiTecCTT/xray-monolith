@@ -218,6 +218,7 @@ void CTexture::Load()
 {
 	PROF_EVENT("CTexture::Load");
 	if (flags.bLoaded || flags.bLoading) return;
+	FrameProbe::LoadScope probe(FrameProbe::ldTexture, cName.c_str());
 	flags.bLoading = true;
 	flags.bLoaded = false;
 	desc_cache = 0;

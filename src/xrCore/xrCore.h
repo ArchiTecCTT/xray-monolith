@@ -309,6 +309,7 @@ DEFINE_VECTOR(xr_rtoken, RTokenVec, RTokenVecIt);
 #include "xrParams.h"
 
 #include "_thread_types.h"
+#include "FrameProbe.h"
 
 // CRC32 functions
 XRCORE_API u32 crc32(const void* P, u32 len);

@@ -93,6 +93,8 @@ extern int psLua_ParallelGCStep;
 extern int psLua_ParallelGC_CallAmount;
 extern BOOL psLua_ParallelGC_debug;
 extern BOOL psLua_ParallelGC;
+extern int psLua_ParallelGCPause;
+extern int psLua_ParallelGCSlack;
 extern BOOL lua_debug;
 BOOL lua_busy_hands_debug = TRUE;
 
@@ -2784,6 +2786,12 @@ void CCC_RegisterCommands()
 	CMD4(CCC_Integer, "lua_parallel_gc_call_amount", &psLua_ParallelGC_CallAmount, 1, 50);
 	CMD4(CCC_Integer, "lua_parallel_gc_debug", &psLua_ParallelGC_debug, 0, 1);
 	CMD4(CCC_Integer, "lua_parallel_gc", &psLua_ParallelGC, 0, 1);
+	// for CPUs with few cores, both off at 0: docs/frame_probe.md
+	CMD4(CCC_Integer, "lua_parallel_gc_pause", &psLua_ParallelGCPause, 0, 400);
+	CMD4(CCC_Integer, "lua_parallel_gc_slack", &psLua_ParallelGCSlack, 0, 262144);
+	// where a frame's time goes, in the log: docs/frame_probe.md
+	CMD4(CCC_Integer, "mt_frame_spike_ms", &FrameProbe::spike_ms, 0, 1000);
+	CMD4(CCC_Integer, "mt_frame_summary_sec", &FrameProbe::summary_sec, 0, 600);
 
 	CMD4(CCC_Integer, "lua_debug", &lua_debug, 0, 1);
 	CMD4(CCC_Integer, "lua_use_functor_cache", &lua_use_functor_cache, 0, 1);

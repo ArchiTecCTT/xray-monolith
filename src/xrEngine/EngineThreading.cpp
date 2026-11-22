@@ -16,6 +16,7 @@ BOOL mt_SchedulerRT = FALSE;
 void XRay::Engine::PreRenderThread()
 {
 	PROF_THREAD("Secondary Task 1");
+	FrameProbe::TaskScope probe(FrameProbe::tkParticles);
 
 	if (g_pGamePersistent && g_pGamePersistent->pEnvironment && g_pGamePersistent->pEnvironment->eff_Rain)
 	{
@@ -33,6 +34,7 @@ void XRay::Engine::PreRenderThread()
 void XRay::Engine::PreRenderPostTransformsThread()
 {
     PROF_THREAD("Secondary Task 1.1");
+	FrameProbe::TaskScope probe(FrameProbe::tkOcclGrass);
     {
         PROF_EVENT("seqParallelRender");
         for (auto& it : Device.seqParallelRender)
@@ -53,6 +55,7 @@ void XRay::Engine::CalculateBonesThread()
 	PROF_THREAD("Secondary Task 3");
 
 	PROF_EVENT("CalculateBones");
+	FrameProbe::TaskScope probe(FrameProbe::tkBones);
 
 	if (!g_SpatialSpace) return;
 	if (Device.Paused()) return;
@@ -156,7 +159,8 @@ int psLua_ParallelGC_CallAmount = 25;
 void XRay::Engine::GameThread()
 {
 	PROF_THREAD("Secondary Task 2")
-		
+	FrameProbe::TaskScope probe(FrameProbe::tkGame);
+
 	// we has granted permission to execute
 	if (g_hud)
 	{
@@ -175,6 +179,7 @@ void XRay::Engine::GameThread()
 		if (mt_Scheduler)
 		{
 			PROF_EVENT("Sheduler Deferred");
+			FrameProbe::TaskScope probe_scheduler(FrameProbe::tkScheduler);
             if (mt_SchedulerRT)
             {
                 ::Engine.Sheduler.Update();
@@ -205,6 +210,8 @@ void XRay::Engine::GameThread()
     static auto LuaGC = []()
     {
         PROF_EVENT("seqLuaGC");
+		const u64 probe_start = FrameProbe::measuring ? FrameProbe::now() : 0;
+		const int probe_calls = Device.LuaGCCount;
         // Do at least once
         do
         {
@@ -216,6 +223,8 @@ void XRay::Engine::GameThread()
             }
 
         } while (Device.isRendering && Device.LuaGCCount < psLua_ParallelGC_CallAmount);
+		if (probe_start)
+			FrameProbe::task_add(FrameProbe::tkLuaGC, FrameProbe::now() - probe_start, u32(Device.LuaGCCount - probe_calls));
     };
     if (psLua_ParallelGC && Device.LuaGC)
         Device.secondary_tasks.run(LuaGC);

@@ -701,6 +701,7 @@ void CCustomMonster::eye_pp_s2()
 	Device.secondary_tasks.run([=]()
 	{
 		if (this_thread_id != GetCurrentThreadId()) { PROF_THREAD("X-Ray PPL Thread") }
+		FrameProbe::TaskScope probe(FrameProbe::tkVision);
 		feel_vision_update(eye_matrix.c,float(dwDT)/1000.f,memory().visual().transparency_threshold());
 
 	});
