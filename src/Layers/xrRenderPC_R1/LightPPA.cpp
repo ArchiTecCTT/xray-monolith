@@ -146,6 +146,22 @@ void CLightR_Manager::render_point	()
 }
 */
 
+// Each light has a draw graph of its own (light::GMLight), and its packets point straight at shader passes, texture
+// lists and models. A packet that stays queued after the frame it was captured for is drawn the next time the light
+// is lit, which can be much later: a muzzle flash, a lamp that comes back into view. By then a script may have
+// swapped the shader (set_shader), or the model may be gone, and the draw reads freed memory (the crash was in
+// CBackend::set_Textures under render_point).
+//
+// The graph only keeps packets of the priorities its mask allows, and light.h allows deferred (0) but not forward
+// (1). render() is called once per priority, and the call for priority 1 used to capture everything again, into
+// the priority 0 queues, and then draw and clear only the empty priority 1 queues. That left one capture queued in
+// every light, drawn with the next frame's on top of it. So: no capture for a priority the graph does not take, and
+// the graph is emptied before every capture.
+static IC bool light_graph_takes(light* L, u32 _priority)
+{
+	return L->GMLight.i_mask[_priority];
+}
+
 void CLightR_Manager::render_point(u32 _priority)
 {
 	// for each light
@@ -161,6 +177,7 @@ void CLightR_Manager::render_point(u32 _priority)
 		float lc_scale = 1 - lc_dist / lc_limit;
 		if (lc_scale < EPS) continue;
 		if (L->range < 0.01f) continue;
+		if (!light_graph_takes(L, _priority)) continue;
 
 		//		1. Calculate light frustum
 		Fvector L_dir, L_up, L_right, L_pos;
@@ -205,12 +222,8 @@ void CLightR_Manager::render_point(u32 _priority)
 		CFrustum F;
 		F.CreateFromMatrix(L_combine, FRUSTUM_P_LRTB | FRUSTUM_P_FAR);
 
-		// vid_restart: render packets queued before the reset hold released state blocks, drop them
-		if (L->GMLight.reset_epoch != RImplementation.m_dsgraph_epoch)
-		{
-			L->GMLight.reset_epoch = RImplementation.m_dsgraph_epoch;
-			L->GMLight.RGraph.clear<false>();
-		}
+		// Nothing may be left in this light's graph from an earlier capture: see light_graph_takes
+		L->GMLight.RGraph.clear<false>();
 		L->GMLight.traverse((CSector*)L->SpatialComponent->spatial.sector, F, L_pos, L_combine);
 		L->GMLight.r_dsgraph_capture(false,true);
 
@@ -249,6 +262,7 @@ void CLightR_Manager::render_spot(u32 _priority)
 		float lc_dist = lc_COP.distance_to(L->SpatialComponent->spatial.sphere.P) - L->SpatialComponent->spatial.sphere.R;
 		float lc_scale = 1 - lc_dist / lc_limit;
 		if (lc_scale < EPS) continue;
+		if (!light_graph_takes(L, _priority)) continue;
 
 		//		1. Calculate light frustum
 		Fvector L_dir, L_up, L_right, L_pos;
@@ -297,12 +311,8 @@ void CLightR_Manager::render_spot(u32 _priority)
 
 		CFrustum F;
 		F.CreateFromMatrix(L_combine, FRUSTUM_P_LRTB | FRUSTUM_P_FAR);
-		// vid_restart: render packets queued before the reset hold released state blocks, drop them
-		if (L->GMLight.reset_epoch != RImplementation.m_dsgraph_epoch)
-		{
-			L->GMLight.reset_epoch = RImplementation.m_dsgraph_epoch;
-			L->GMLight.RGraph.clear<false>();
-		}
+		// Nothing may be left in this light's graph from an earlier capture: see light_graph_takes
+		L->GMLight.RGraph.clear<false>();
 		L->GMLight.traverse((CSector*)L->SpatialComponent->spatial.sector, F, L_pos, L_combine);
 		L->GMLight.r_dsgraph_capture(false, true);
 
