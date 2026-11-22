@@ -93,6 +93,8 @@ extern int psLua_ParallelGCStep;
 extern int psLua_ParallelGC_CallAmount;
 extern BOOL psLua_ParallelGC_debug;
 extern BOOL psLua_ParallelGC;
+extern int psLua_ParallelGCPause;
+extern int psLua_ParallelGCSlack;
 extern BOOL lua_debug;
 BOOL lua_busy_hands_debug = TRUE;
 
@@ -1363,6 +1365,23 @@ public:
 	}
 };
 
+class CCC_MusicNext : public IConsole_Command
+{
+public:
+	CCC_MusicNext(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = true; }
+
+	virtual void Execute(LPCSTR args)
+	{
+		if (*args)
+		{
+			InvalidSyntax();
+			return;
+		}
+		if (g_pGameLevel)
+			Level().SkipMusicTrack();
+	}
+};
+
 class CCC_FlushLog : public IConsole_Command
 {
 public:
@@ -1964,10 +1983,9 @@ public:
 				return;
 			}
 
-			string4096 S;
 			shared_str m_script_name = "console command";
-			xr_sprintf(S, "%s\n", args);
-			int l_iErrorCode = luaL_loadbuffer(ai().script_engine().lua(), S, xr_strlen(S), "@console_command");
+			xr_string S = xr_string(args) + "\n";
+			int l_iErrorCode = luaL_loadbuffer(ai().script_engine().lua(), S.c_str(), S.size(), "@console_command");
 			if (!l_iErrorCode)
 			{
 				l_iErrorCode = lua_pcall(ai().script_engine().lua(), 0, 0, 0);
@@ -2768,6 +2786,12 @@ void CCC_RegisterCommands()
 	CMD4(CCC_Integer, "lua_parallel_gc_call_amount", &psLua_ParallelGC_CallAmount, 1, 50);
 	CMD4(CCC_Integer, "lua_parallel_gc_debug", &psLua_ParallelGC_debug, 0, 1);
 	CMD4(CCC_Integer, "lua_parallel_gc", &psLua_ParallelGC, 0, 1);
+	// for CPUs with few cores, both off at 0: docs/frame_probe.md
+	CMD4(CCC_Integer, "lua_parallel_gc_pause", &psLua_ParallelGCPause, 0, 400);
+	CMD4(CCC_Integer, "lua_parallel_gc_slack", &psLua_ParallelGCSlack, 0, 262144);
+	// where a frame's time goes, in the log: docs/frame_probe.md
+	CMD4(CCC_Integer, "mt_frame_spike_ms", &FrameProbe::spike_ms, 0, 1000);
+	CMD4(CCC_Integer, "mt_frame_summary_sec", &FrameProbe::summary_sec, 0, 600);
 
 	CMD4(CCC_Integer, "lua_debug", &lua_debug, 0, 1);
 	CMD4(CCC_Integer, "lua_use_functor_cache", &lua_use_functor_cache, 0, 1);
@@ -3066,6 +3090,7 @@ void CCC_RegisterCommands()
 	CMD3(CCC_Mask, "g_use_tracers", &psActorFlags, AF_USE_TRACERS);
 	CMD3(CCC_Mask, "g_autopickup", &psActorFlags, AF_AUTOPICKUP);
 	CMD3(CCC_Mask, "g_dynamic_music", &psActorFlags, AF_DYNAMIC_MUSIC);
+	CMD1(CCC_MusicNext, "snd_music_next");
 	psActorFlags.set(AF_IMPORTANT_SAVE, TRUE);
 	CMD3(CCC_Mask, "g_important_save", &psActorFlags, AF_IMPORTANT_SAVE);
 

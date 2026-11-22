@@ -29,6 +29,61 @@
 #include "lj_allocprof.h"
 #endif
 
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+
+/* -- X-Ray: time spent in the collector ---------------------------------- */
+
+/* Filled only while lj_xray_gc.on is set, which the engine's frame probe does
+** (xrCore/FrameProbe.h, console mt_frame_spike_ms / mt_frame_summary_sec).
+** Plain globals, not GCState fields, so global_State keeps its layout. Lua
+** runs on one thread at a time, so nothing here needs a lock. */
+lj_XrayGCStat lj_xray_gc = { 0, 0, 0, 0, 0, 0, 0 };
+
+/* Switch the timing on or off and name the thread whose steps count as "main". */
+LUA_API void lua_xray_gcprobe(int on, unsigned long main_thread_id)
+{
+  lj_xray_gc.main_tid = main_thread_id;
+  lj_xray_gc.on = on;
+}
+
+/* out[0..3]: timer ticks in GC steps on the main thread, on other threads and
+** in atomic phases, and the count of atomic phases, all since start.
+** out[4]: the longest single step since the last call (cleared here).
+** out[5]: timer ticks per second. */
+LUA_API void lua_xray_gcprobe_read(uint64_t *out)
+{
+  LARGE_INTEGER freq;
+  QueryPerformanceFrequency(&freq);
+  out[0] = lj_xray_gc.ticks_main;
+  out[1] = lj_xray_gc.ticks_other;
+  out[2] = lj_xray_gc.ticks_atomic;
+  out[3] = (uint64_t)lj_xray_gc.atomics;
+  out[4] = lj_xray_gc.step_max;
+  out[5] = (uint64_t)freq.QuadPart;
+  lj_xray_gc.step_max = 0;
+}
+
+/* While a collection is running, an allocation normally runs a GC step as soon
+** as about 1 KB has been allocated since the last one. This moves that point
+** kbytes further away, so the thread running Lua does no collector work until
+** it has allocated that much. The engine calls it after each of its own
+** explicit steps on a worker (console lua_parallel_gc_slack); if those stop
+** coming, the steps on allocation resume by themselves once the slack is used
+** up. Between collections it changes nothing. */
+LUA_API void lua_xray_gc_defer(lua_State *L, unsigned int kbytes)
+{
+  global_State *g = G(L);
+  if (g->gc.state != GCSpause) {
+    MSize slack = (kbytes >= (unsigned int)(LJ_MAX_MEM >> 10)) ? LJ_MAX_MEM : ((MSize)kbytes << 10);
+    MSize t = (g->gc.total >= (MSize)LJ_MAX_MEM - slack) ? LJ_MAX_MEM : g->gc.total + slack;
+    if (t > g->gc.threshold)
+      g->gc.threshold = t;
+  }
+}
+
 #define GCSTEPSIZE	1024u
 #define GCSWEEPMAX	40
 #define GCSWEEPCOST	10
@@ -622,7 +677,16 @@ static size_t gc_onestep(lua_State *L)
   case GCSatomic:
     if (gcref(g->jit_L))  /* Don't run atomic phase on trace. */
       return LJ_MAX_MEM;
-    atomic(g, L);
+    if (lj_xray_gc.on) {
+      LARGE_INTEGER t0, t1;
+      QueryPerformanceCounter(&t0);
+      atomic(g, L);
+      QueryPerformanceCounter(&t1);
+      lj_xray_gc.ticks_atomic += (uint64_t)(t1.QuadPart - t0.QuadPart);
+      lj_xray_gc.atomics++;
+    } else {
+      atomic(g, L);
+    }
     g->gc.state = GCSsweepstring;  /* Start of sweep phase. */
     g->gc.sweepstr = 0;
     return 0;
@@ -678,7 +742,7 @@ static size_t gc_onestep(lua_State *L)
 }
 
 /* Perform a limited amount of incremental GC steps. */
-int LJ_FASTCALL lj_gc_step(lua_State *L)
+static int gc_step_work(lua_State *L)
 {
   global_State *g = G(L);
   MSize lim;
@@ -707,6 +771,27 @@ int LJ_FASTCALL lj_gc_step(lua_State *L)
     g->vmstate = ostate;
     return 0;
   }
+}
+
+/* The step itself, timed for the engine's frame probe when that is on. */
+int LJ_FASTCALL lj_gc_step(lua_State *L)
+{
+  LARGE_INTEGER t0, t1;
+  uint64_t dt;
+  int res;
+  if (!lj_xray_gc.on)
+    return gc_step_work(L);
+  QueryPerformanceCounter(&t0);
+  res = gc_step_work(L);
+  QueryPerformanceCounter(&t1);
+  dt = (uint64_t)(t1.QuadPart - t0.QuadPart);
+  if (GetCurrentThreadId() == lj_xray_gc.main_tid)
+    lj_xray_gc.ticks_main += dt;
+  else
+    lj_xray_gc.ticks_other += dt;
+  if (dt > lj_xray_gc.step_max)
+    lj_xray_gc.step_max = dt;
+  return res;
 }
 
 /* Ditto, but fix the stack top first. */

@@ -159,7 +159,13 @@ void CRenderDevice::End(void)
 	// Present goes here, so call OA Frame end.
 	if (g_SASH.IsBenchmarkRunning())
 		g_SASH.DisplayFrame(Device.fTimeGlobal);
-	m_pRender->End();
+	{
+		// FrameProbe: the time the driver takes for the finished frame, apart from the rest of the drawing
+		const u64 present_start = FrameProbe::measuring ? FrameProbe::now() : 0;
+		m_pRender->End();
+		if (present_start)
+			FrameProbe::add_inside(FrameProbe::phPresent, FrameProbe::now() - present_start);
+	}
 
 # ifdef INGAME_EDITOR
     if (load_finished && m_editor)
@@ -363,6 +369,8 @@ void CRenderDevice::on_idle()
 		return;
 	}
 
+	FrameProbe::frame_begin();
+
 	if (!Device.dwPrecacheFrame && !g_SASH.IsBenchmarkRunning() && g_bLoaded)
 	{
 		PROF_EVENT("Start xrSASH Benchmark");
@@ -402,6 +410,7 @@ void CRenderDevice::on_idle()
         PROF_EVENT("Update Particles");
         g_pGamePersistent->UpdateParticles();
     }
+	FrameProbe::mark(FrameProbe::phUpdate);
     secondary_tasks.run(&XRay::Engine::PreRenderThread);
 
 	// Precache
@@ -519,6 +528,8 @@ void CRenderDevice::on_idle()
 	}
 #endif // ECO_RENDER END
 
+	FrameProbe::mark(FrameProbe::phPrep);
+
 #ifndef DEDICATED_SERVER
 	Statistic->RenderTOTAL_Real.FrameStart();
 	Statistic->RenderTOTAL_Real.Begin();
@@ -542,8 +553,13 @@ void CRenderDevice::on_idle()
 	Statistic->RenderTOTAL.accum = Statistic->RenderTOTAL_Real.accum;
 #endif 
 	Device.isRendering = false;
+	FrameProbe::mark(FrameProbe::phRender);
 
 	secondary_tasks.wait();
+
+	FrameProbe::mark(FrameProbe::phWait);
+	// only frames of running gameplay are reported: not the menu, a pause, the first frames after a load
+	FrameProbe::frame_end(b_is_Active && !Paused() && !dwPrecacheFrame && g_pGameLevel && g_pGameLevel->bReady && !IsMainMenuActive());
 
 	if (psLua_ParallelGC_debug && psLua_ParallelGC && Device.LuaGCDebug)
 	{

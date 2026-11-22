@@ -55,6 +55,18 @@ LJ_FUNC void lj_gc_finalize_cdata(lua_State *L);
 #endif
 LJ_FUNC void lj_gc_freeall(global_State *g);
 LJ_FUNCA int LJ_FASTCALL lj_gc_step(lua_State *L);
+
+/* X-Ray: time spent in GC steps, see lj_gc.c. */
+typedef struct lj_XrayGCStat {
+  int on;			/* Take the times at all. */
+  unsigned long main_tid;	/* Steps on this thread go to ticks_main. */
+  uint64_t ticks_main;		/* Timer ticks in steps on that thread, since start. */
+  uint64_t ticks_other;		/* Ditto, on any other thread. */
+  uint64_t ticks_atomic;	/* Part of the above spent in atomic phases. */
+  uint64_t step_max;		/* Longest single step since the engine last read it. */
+  uint32_t atomics;		/* Atomic phases run. */
+} lj_XrayGCStat;
+extern lj_XrayGCStat lj_xray_gc;
 LJ_FUNCA void LJ_FASTCALL lj_gc_step_fixtop(lua_State *L);
 #if LJ_HASJIT
 LJ_FUNC int LJ_FASTCALL lj_gc_step_jit(global_State *g, MSize steps);

@@ -1010,6 +1010,12 @@ void CLevel::MakeReconnect()
 	}
 }
 
+void CLevel::SkipMusicTrack()
+{
+	if (m_level_sound_manager)
+		m_level_sound_manager->SkipMusicTrack();
+}
+
 BOOL mt_ph_commander = FALSE;
 BOOL mt_TaskManager = FALSE;
 void CLevel::OnFrame()
@@ -1231,6 +1237,47 @@ int psLua_ParallelGCStep = 75;
 extern BOOL psLua_ParallelGC;
 extern BOOL psLua_ParallelGC_debug;
 
+// Two ways to make the parallel collector cheaper on a CPU with few cores. Both off (0) by default, and both only
+// act on the steps CLevel::LuaGC runs on a worker while the frame is drawn. See docs/frame_probe.md.
+//
+// lua_parallel_gc_pause, percent. As shipped, the worker starts the next collection the moment one ends, so the
+// collector never rests and one core is always walking the Lua heap. With 120 here it waits until the heap is 120 %
+// of what it was when the last collection ended. Values up to 100 mean "never wait".
+int psLua_ParallelGCPause = 0;
+// lua_parallel_gc_slack, KB. While a collection runs, every ~1 KB a script allocates makes the thread running that
+// script do a slice of collector work, which is how a long step lands in the middle of a script. With a value here
+// the scripts do none until they have allocated that many KB since the worker's last step; the worker does it all.
+int psLua_ParallelGCSlack = 0;
+
+extern "C"
+{
+	// 3rd party/luajit-2/src/lj_gc.c
+	void lua_xray_gcprobe(int on, unsigned long main_thread_id);
+	void lua_xray_gcprobe_read(u64* out);
+	void lua_xray_gc_defer(lua_State* L, unsigned int kbytes);
+}
+
+// FrameProbe asks here how long the collector ran (xrCore/FrameProbe.h, gc_hook). Main thread, no script running
+static void frame_probe_gc(bool on, u64 out[5])
+{
+	static bool was_on = false;
+	if (on != was_on)
+	{
+		lua_xray_gcprobe(on ? 1 : 0, GetCurrentThreadId());
+		was_on = on;
+	}
+	if (!on)
+		return;
+	u64 values[6];
+	lua_xray_gcprobe_read(values);
+	for (int i = 0; i < 5; ++i)
+		out[i] = values[i];
+}
+
+// lua_parallel_gc_pause: a collection has ended and the next has not been started yet, and the heap size then
+static bool s_parallel_gc_resting = false;
+static u32 s_parallel_gc_rest_kb = 0;
+
 void CLevel::script_gc()
 {
 	if (mt_ph_commander)
@@ -1256,13 +1303,39 @@ bool CLevel::Load(u32 dwNum)
     Msg("Device.LuaGC bind");
     Device.LuaGC.bind(&CLevel::LuaGC);
     Device.LuaGCDebug.bind(&CLevel::LuaGCDebug);
+    FrameProbe::gc_hook = &frame_probe_gc;
+    s_parallel_gc_resting = false;
     return true;
 }
 
 // demonized: called from Device, via Device.LuaGC pointer
 int CLevel::LuaGC()
 {
-    return lua_gc(ai().script_engine().lua(), LUA_GCSTEP, psLua_ParallelGCStep);
+    lua_State* L = ai().script_engine().lua();
+
+    if (psLua_ParallelGCPause > 100)
+    {
+        if (s_parallel_gc_resting)
+        {
+            // 1 = "nothing more to do this frame" for the caller, the same as a collection that just ended
+            const u64 heap_kb = u64(lua_gc(L, LUA_GCCOUNT, 0));
+            if (heap_kb * 100 < u64(s_parallel_gc_rest_kb) * u64(psLua_ParallelGCPause))
+                return 1;
+            s_parallel_gc_resting = false;
+        }
+    }
+    else
+        s_parallel_gc_resting = false;
+
+    const int res = lua_gc(L, LUA_GCSTEP, psLua_ParallelGCStep);
+    if (res == 1)
+    {
+        s_parallel_gc_rest_kb = u32(lua_gc(L, LUA_GCCOUNT, 0));
+        s_parallel_gc_resting = true;
+    }
+    else if (psLua_ParallelGCSlack > 0)
+        lua_xray_gc_defer(L, u32(psLua_ParallelGCSlack));
+    return res;
 }
 void CLevel::LuaGCDebug()
 {

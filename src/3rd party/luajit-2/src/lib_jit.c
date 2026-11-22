@@ -276,7 +276,12 @@ LJLIB_CF(jit_util_funcuvname)
 
 extern uint32_t lj_gc_cycles;  /* Defined in lj_gc.c: completed GC cycles since start. */
 
-/* local info = jit.util.gcstat() -- GC counters: total, threshold, estimate, debt (bytes) and cycles (completed collections) */
+LUA_API void lua_xray_gcprobe_read(uint64_t *out);  /* Defined in lj_gc.c. */
+
+/* local info = jit.util.gcstat() -- GC counters: total, threshold, estimate, debt (bytes) and cycles (completed collections).
+** Also the time spent collecting since start, in milliseconds: gc_ms_main (on the main thread), gc_ms_other (on a
+** worker), gc_ms_atomic (the part of both spent in atomic phases) and atomics (atomic phases run). These four only
+** advance while the engine's frame probe is on (mt_frame_spike_ms or mt_frame_summary_sec above 0). */
 LJLIB_CF(jit_util_gcstat)
 {
   global_State *g = G(L);
@@ -286,14 +291,24 @@ LJLIB_CF(jit_util_gcstat)
   lua_Number estimate = (lua_Number)g->gc.estimate;
   lua_Number debt = (lua_Number)g->gc.debt;
   lua_Number cycles = (lua_Number)lj_gc_cycles;
+  lua_Number tick_ms;
+  uint64_t xr[6];
+  uint64_t step_max = lj_xray_gc.step_max;
   GCtab *t;
-  lua_createtable(L, 0, 5);
+  lua_xray_gcprobe_read(xr);
+  lj_xray_gc.step_max = step_max;  /* The longest step is the engine's to clear, not a script's. */
+  tick_ms = xr[5] ? 1000.0 / (lua_Number)xr[5] : 0.0;
+  lua_createtable(L, 0, 9);
   t = tabV(L->top-1);
   setnumfield(L, t, "total", total);
   setnumfield(L, t, "threshold", threshold);
   setnumfield(L, t, "estimate", estimate);
   setnumfield(L, t, "debt", debt);
   setnumfield(L, t, "cycles", cycles);
+  setnumfield(L, t, "gc_ms_main", (lua_Number)xr[0] * tick_ms);
+  setnumfield(L, t, "gc_ms_other", (lua_Number)xr[1] * tick_ms);
+  setnumfield(L, t, "gc_ms_atomic", (lua_Number)xr[2] * tick_ms);
+  setnumfield(L, t, "atomics", (lua_Number)xr[3]);
   return 1;
 }
 

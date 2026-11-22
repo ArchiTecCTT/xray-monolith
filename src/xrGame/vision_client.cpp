@@ -69,6 +69,7 @@ void vision_client::eye_pp_s2()
 	Device.secondary_tasks.run([=]()
 	{
 		if (this_thread_id != GetCurrentThreadId()) { PROF_THREAD("X-Ray PPL Thread") }
+		FrameProbe::TaskScope probe(FrameProbe::tkVision);
 		feel_vision_update(m_position, float(dwDT) / 1000.f, visual().transparency_threshold());
 	});
 
