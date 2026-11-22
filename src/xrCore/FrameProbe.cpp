@@ -198,19 +198,28 @@ namespace FrameProbe
 		}
 	}
 
+	// Cuts the text off if it does not fit. xr_sprintf stops the game instead (vsprintf_s), which a log line must not
+	static void put_text(char* dest, size_t size, LPCSTR text, ...)
+	{
+		va_list args;
+		va_start(args, text);
+		_vsnprintf_s(dest, size, _TRUNCATE, text, args);
+		va_end(args);
+	}
+
 	// "workers: ... | lua gc: ... | loads ..." for one frame (counts are whole) or an average (counts have a decimal)
 	static void describe(string1024& out, const Row& r, bool average)
 	{
 		LPCSTR n = average ? "%.1f" : "%.0f";
 		string32 vision_n, gc_n, atomics, model_n, texture_n, sound_n;
-		xr_sprintf(vision_n, sizeof(vision_n), n, r.task_n[tkVision]);
-		xr_sprintf(gc_n, sizeof(gc_n), n, r.task_n[tkLuaGC]);
-		xr_sprintf(atomics, sizeof(atomics), average ? "%.2f" : "%.0f", r.gc_atomics);
-		xr_sprintf(model_n, sizeof(model_n), n, r.load_n[ldModel]);
-		xr_sprintf(texture_n, sizeof(texture_n), n, r.load_n[ldTexture]);
-		xr_sprintf(sound_n, sizeof(sound_n), n, r.load_n[ldSound]);
+		put_text(vision_n, sizeof(vision_n), n, r.task_n[tkVision]);
+		put_text(gc_n, sizeof(gc_n), n, r.task_n[tkLuaGC]);
+		put_text(atomics, sizeof(atomics), average ? "%.2f" : "%.0f", r.gc_atomics);
+		put_text(model_n, sizeof(model_n), n, r.load_n[ldModel]);
+		put_text(texture_n, sizeof(texture_n), n, r.load_n[ldTexture]);
+		put_text(sound_n, sizeof(sound_n), n, r.load_n[ldSound]);
 
-		xr_sprintf(out, sizeof(out),
+		put_text(out, sizeof(out),
 		           "main: update %.1f, prep %.1f, render %.1f, present %.1f, wait %.1f"
 		           " | workers: particles %.1f, occl+grass %.1f, bones %.1f, game %.1f (scheduler %.1f), vision %.1f x%s, lua gc %.1f x%s"
 		           " | lua gc: main thread %.1f, workers %.1f, atomic %.1f x%s"
@@ -287,10 +296,10 @@ namespace FrameProbe
 				describe(text, r, false);
 				string256 slowest = "";
 				if (s_load_max)
-					xr_sprintf(slowest, sizeof(slowest), " | slowest load %.1f %s", to_ms(s_load_max), s_load_name);
+					put_text(slowest, sizeof(slowest), " | slowest load %.1f %s", to_ms(s_load_max), s_load_name);
 				string64 hidden = "";
 				if (s_spike_hidden)
-					xr_sprintf(hidden, sizeof(hidden), " | +%u long frames not shown", s_spike_hidden);
+					put_text(hidden, sizeof(hidden), " | +%u long frames not shown", s_spike_hidden);
 				Msg("[frame] %.1f ms | %s | longest gc step %.1f%s%s", r.total, text, gc_step_max, slowest, hidden);
 				s_spike_last = t_end;
 				s_spike_hidden = 0;
