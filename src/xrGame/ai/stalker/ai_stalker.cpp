@@ -101,6 +101,7 @@ CAI_Stalker::CAI_Stalker() :
 	m_boneHitProtection = NULL;
 	m_power_fx_factor = flt_max;
 	m_wounded = false;
+	m_scripted_throw_restoring = false;
 #ifdef DEBUG
 	m_debug_planner					= 0;
 	m_dbg_hud_draw					= false;
@@ -970,6 +971,10 @@ void CAI_Stalker::update_object_handler()
 		return;
 	}
 
+	// ... and one that has just ended keeps him on the per-frame update until the gun is back
+	if (m_scripted_throw_restoring)
+		scripted_throw_restore();
+
 	try
 	{
 		try
@@ -1541,6 +1546,13 @@ void CAI_Stalker::aim_target(Fvector& result, const CGameObject* object)
 BOOL CAI_Stalker::AlwaysTheCrow()
 {
 	VERIFY(character_physics_support ());
+	// a script's grenade throw, and the gun coming back after it, are timed by his frame updates
+	if (m_scripted_throw.active)
+		return (TRUE);
+
+	if (m_scripted_throw_restoring && (Device.dwTimeGlobal - m_scripted_throw.end_time < scripted_throw::k_restore_ms))
+		return (TRUE);
+
 	return (character_physics_support()->interactive_motion());
 }
 

@@ -39,6 +39,7 @@ namespace scripted_throw
 		r_arc_blocked,
 		r_timeout,
 		r_cancelled,
+		r_prone, // he lies in a prone pose (a script animation): there is no throw from lying
 		r_count
 	};
 
@@ -47,7 +48,7 @@ namespace scripted_throw
 		static const char* const names[r_count] = {
 			"none", "not_stalker", "disabled", "dead", "busy", "wounded", "script_control", "smart_cover",
 			"animation", "no_grenade", "bad_target", "too_close", "too_far", "cooldown", "reloading",
-			"arc_blocked", "timeout", "cancelled"
+			"arc_blocked", "timeout", "cancelled", "prone"
 		};
 		return (r >= 0 && r < r_count) ? names[r] : "none";
 	}
@@ -55,8 +56,13 @@ namespace scripted_throw
 	const float k_min_distance = 5.f; // m, closer is refused
 	const float k_range_margin = 1.f; // m, kept free below the engine's range for its own miss offset
 	const unsigned k_cooldown_ms = 2000; // after any completed throw of this stalker
-	const unsigned k_prepare_timeout_ms = 3000; // to turn, get the grenade into the hand and find a clear arc
-	const unsigned k_total_timeout_ms = 8000; // the whole request, wind-up included; a safety net
+	// The time before the throw is ordered has two limits. The swap (gun away, grenade out) is timed by the two
+	// items' own animations, a machine gun's being the longest; turning and the arc tries need the grenade in the
+	// hand, so their limit counts from there.
+	const unsigned k_swap_timeout_ms = 4500; // from the accept: the grenade is in his hand and at rest
+	const unsigned k_aim_timeout_ms = 2000; // from "in his hand": he faces the target and the arc is found clear
+	const unsigned k_total_timeout_ms = 8000; // the whole request, wind-up included; the hard cap
+	const unsigned k_restore_ms = 4000; // after the end: he is kept on the per-frame update until the gun is back
 	const unsigned k_release_tail_ms = 1500; // after the release: wait for the thrown grenade to leave the slot
 	const unsigned k_overdue_ms = k_total_timeout_ms + 2000; // nobody ended it by then: see machine::overdue
 	const int k_arc_tries = 4; // the engine picks a new miss offset for each try
@@ -81,6 +87,7 @@ namespace scripted_throw
 		bool script_control;
 		bool smart_cover;
 		bool animation;
+		bool prone; // the script animation he plays is one of the lying poses
 		bool has_grenade; // a grenade in the grenade slot
 		bool grenade_in_hand; // ... and it is already the active item: somebody else is throwing it
 		bool target_valid;
@@ -101,6 +108,7 @@ namespace scripted_throw
 		if (f.script_control) return r_script_control;
 		if (f.smart_cover) return r_smart_cover;
 		if (f.animation) return r_animation;
+		if (f.prone) return r_prone;
 		if (!f.has_grenade) return r_no_grenade;
 		if (f.grenade_in_hand) return r_busy;
 		if (!f.target_valid) return r_bad_target;
@@ -134,6 +142,39 @@ namespace scripted_throw
 		s_throw, // throw
 	};
 
+	// where a request is (or was when it ended): the "phase" of the debug line
+	enum phase : int
+	{
+		p_hold = 0, // the grenade is not in his hand yet: the gun goes away, the grenade comes out
+		p_aim, // in his hand: turning to the target, trying the arc
+		p_throw, // the throw is ordered: wind-up, swing
+		p_tail, // the grenade has left his hand: waiting for it to leave the slot
+		p_count
+	};
+
+	inline const char* phase_name(int p)
+	{
+		static const char* const names[p_count] = {"hold", "aim", "throw", "tail"};
+		return (p >= 0 && p < p_count) ? names[p] : "hold";
+	}
+
+	// which time limit ended a request with "timeout": the "limit" of the debug line. The script sees "timeout" only.
+	enum limit : int
+	{
+		l_none = 0,
+		l_swap, // k_swap_timeout_ms
+		l_aim, // k_aim_timeout_ms
+		l_total, // k_total_timeout_ms
+		l_overdue, // k_overdue_ms: his frame updates had stopped
+		l_count
+	};
+
+	inline const char* limit_name(int l)
+	{
+		static const char* const names[l_count] = {"none", "swap", "aim", "total", "overdue"};
+		return (l >= 0 && l < l_count) ? names[l] : "none";
+	}
+
 	struct machine
 	{
 		bool active;
@@ -142,11 +183,18 @@ namespace scripted_throw
 		// the one way to give him back with a gun in his hands is to let the throw happen.
 		bool aimed;
 		bool released; // the grenade has left the hand
+		bool in_hand; // the grenade has been in his hand and at rest at least once
+		bool was_aligned; // he has faced the target at least once
 		int arc_tries;
 		unsigned start; // ms
 		unsigned release_time; // ms
+		unsigned in_hand_time; // ms, valid with in_hand
+		unsigned aligned_time; // ms, valid with was_aligned
+		unsigned end_time; // ms, of the last end
+		unsigned ticks; // frames the request was run for
 		int st; // state
 		int why; // reason of the last refusal / end
+		int lim; // limit: which timeout ended it, l_none for any other end
 
 		machine() { reset(); }
 
@@ -155,12 +203,33 @@ namespace scripted_throw
 			active = false;
 			aimed = false;
 			released = false;
+			in_hand = false;
+			was_aligned = false;
 			arc_tries = 0;
 			start = 0;
 			release_time = 0;
+			in_hand_time = 0;
+			aligned_time = 0;
+			end_time = 0;
+			ticks = 0;
 			st = st_idle;
 			why = r_none;
+			lim = l_none;
 		}
+
+		// the phase a request is in, or was in when it ended
+		int where() const
+		{
+			if (released) return p_tail;
+			if (aimed) return p_throw;
+			if (in_hand) return p_aim;
+			return p_hold;
+		}
+
+		// for the debug line, of the last accepted request: ms from the accept, -1 = never
+		int ms_total() const { return int(end_time - start); }
+		int ms_in_hand() const { return in_hand ? int(in_hand_time - start) : -1; }
+		int ms_aligned() const { return was_aligned ? int(aligned_time - start) : -1; }
 
 		// a request that was turned down. One that is running is not disturbed by it.
 		void refuse(reason r)
@@ -175,23 +244,32 @@ namespace scripted_throw
 			active = true;
 			aimed = false;
 			released = false;
+			in_hand = false;
+			was_aligned = false;
 			arc_tries = 0;
 			start = now;
 			release_time = 0;
+			in_hand_time = 0;
+			aligned_time = 0;
+			end_time = now;
+			ticks = 0;
 			st = st_preparing;
 			why = r_none;
+			lim = l_none;
 		}
 
-		void finish(bool ok, reason r)
+		void finish(bool ok, reason r, unsigned now, limit l = l_none)
 		{
 			active = false;
 			st = ok ? st_thrown : st_failed;
 			why = ok ? r_none : r;
+			lim = ok ? l_none : l;
+			end_time = now;
 		}
 
-		step fail(reason r)
+		step fail(reason r, unsigned now, limit l = l_none)
 		{
-			finish(false, r);
+			finish(false, r, now, l);
 			return s_end;
 		}
 
@@ -200,9 +278,11 @@ namespace scripted_throw
 			if (!active)
 				return s_end;
 
+			++ticks;
+
 			if (!f.alive)
 			{
-				on_death();
+				on_death(f.now);
 				return s_end;
 			}
 
@@ -211,27 +291,44 @@ namespace scripted_throw
 				// as the planner's action does: it is over when the thrown grenade is gone from the slot
 				if (!f.grenade_present || (f.now - release_time >= k_release_tail_ms))
 				{
-					finish(true, r_none);
+					finish(true, r_none, f.now);
 					return s_end;
 				}
 				return s_throw;
 			}
 
 			if (!f.grenade_present)
-				return fail(r_no_grenade);
+				return fail(r_no_grenade, f.now);
 
 			if (!aimed)
 			{
+				// the first time each: the clock of the aim limit, and the two times of the debug line
+				if (f.in_hand_idle && !in_hand)
+				{
+					in_hand = true;
+					in_hand_time = f.now;
+				}
+				if (f.aligned && !was_aligned)
+				{
+					was_aligned = true;
+					aligned_time = f.now;
+				}
+
 				// the throw is not ordered yet: these still call it off
-				if (f.wounded) return fail(r_wounded);
-				if (f.script_control) return fail(r_script_control);
-				if (f.smart_cover) return fail(r_smart_cover);
-				if (f.animation) return fail(r_animation);
-				if (f.now - start >= k_prepare_timeout_ms) return fail(r_timeout);
+				if (f.wounded) return fail(r_wounded, f.now);
+				if (f.script_control) return fail(r_script_control, f.now);
+				if (f.smart_cover) return fail(r_smart_cover, f.now);
+				if (f.animation) return fail(r_animation, f.now);
+				if (!in_hand)
+				{
+					if (f.now - start >= k_swap_timeout_ms) return fail(r_timeout, f.now, l_swap);
+				}
+				else if (f.now - in_hand_time >= k_aim_timeout_ms)
+					return fail(r_timeout, f.now, l_aim);
 			}
 
 			if (f.now - start >= k_total_timeout_ms)
-				return fail(r_timeout);
+				return fail(r_timeout, f.now, l_total);
 
 			if (aimed)
 				return s_throw;
@@ -243,7 +340,7 @@ namespace scripted_throw
 		}
 
 		// the answer to s_aim. in_range = false: the engine refused the distance, not the arc
-		step arc(bool clear, bool in_range)
+		step arc(bool clear, bool in_range, unsigned now)
 		{
 			if (!active)
 				return s_end;
@@ -255,7 +352,7 @@ namespace scripted_throw
 			}
 
 			if (++arc_tries >= k_arc_tries)
-				return fail(in_range ? r_arc_blocked : r_too_far);
+				return fail(in_range ? r_arc_blocked : r_too_far, now);
 
 			return s_hold;
 		}
@@ -270,10 +367,10 @@ namespace scripted_throw
 		}
 
 		// a grenade that has already left the hand was thrown, whatever happens to the thrower
-		void on_death()
+		void on_death(unsigned now)
 		{
 			if (active)
-				finish(released, r_dead);
+				finish(released, r_dead, now);
 		}
 
 		// The request is ended frame by frame (tick). If his frames stop coming while he is still thought about,
@@ -283,25 +380,25 @@ namespace scripted_throw
 			if (!active || (now - start < k_overdue_ms))
 				return false;
 
-			finish(released, r_timeout);
+			finish(released, r_timeout, now, l_overdue);
 			return true;
 		}
 
 		// true = a running request was stopped. Too late once the throw is ordered: it goes through.
-		bool cancel()
+		bool cancel(unsigned now)
 		{
 			if (!active || aimed)
 				return false;
 
-			finish(false, r_cancelled);
+			finish(false, r_cancelled, now);
 			return true;
 		}
 
 		// the engine side broke (an exception in his object handler): over, whatever the phase
-		void abort()
+		void abort(unsigned now)
 		{
 			if (active)
-				finish(released, r_cancelled);
+				finish(released, r_cancelled, now);
 		}
 	};
 }

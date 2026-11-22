@@ -293,9 +293,10 @@ float script_get_look_speed_factor()
 
 // The feature test for npc:throw_grenade and its companions (docs/npc_throw.md): on an exe without them
 // level.scripted_throw_version is nil. The number goes up when the script API changes.
+// 2: the reason "prone", the two limits before the throw in place of one, the long debug line.
 int script_scripted_throw_version()
 {
-	return 1;
+	return 2;
 }
 
 void set_game_difficulty(ESingleGameDifficulty dif)

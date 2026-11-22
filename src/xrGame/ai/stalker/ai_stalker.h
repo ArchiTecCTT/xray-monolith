@@ -766,12 +766,19 @@ private:
 	Fvector m_scripted_throw_aim; // the point the arc was computed for (the target plus the engine's miss offset)
 	u16 m_scripted_throw_grenade_id;
 	u8 m_scripted_throw_body; // EBodyState, 0xff = not decided yet (the body state hook is asked)
+	bool m_scripted_throw_restoring; // a request has ended and the gun is not back yet (scripted_throw_restore)
 
 	CInventoryItem* scripted_throw_grenade();
 	bool scripted_throw_wounded();
 	bool scripted_throw_smart_cover();
 	bool scripted_throw_animation_locked();
+	bool scripted_throw_prone();
+	float scripted_throw_yaw_error();
 	bool scripted_throw_aligned();
+	void scripted_throw_keep_updated();
+	void scripted_throw_plain_update();
+	void scripted_throw_restore();
+	void scripted_throw_log(LPCSTR result, int why, Fvector const& target, bool facts);
 	scripted_throw::step scripted_throw_aim();
 	void scripted_throw_ended();
 	void scripted_throw_disarm();

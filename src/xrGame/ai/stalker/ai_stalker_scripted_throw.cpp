@@ -12,7 +12,9 @@
 //	 - the movement manager (Think): stand, danger, the asked body state for the update, then the others' values
 //	   are put back.
 //	 - the sight manager (UpdateCL): look at the target point.
-//	Nothing here runs for a stalker without an active request.
+//	While a request is active, and until the gun is back after it, he and the items that are changing hands are also
+//	kept on the per-frame update (scripted_throw_keep_updated says why).
+//	Nothing here runs for a stalker without an active request, or one just ended.
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
@@ -35,6 +37,8 @@
 #include "../../sight_action.h"
 #include "../../game_cl_single.h"
 #include "../../sound_player.h"
+#include "../../stalker_animation_manager.h"
+#include "../../../Include/xrRender/KinematicsAnimated.h"
 #include "ai_stalker_space.h"
 
 // console vars (console_commands.cpp), saved in user.ltx
@@ -43,14 +47,73 @@ int g_ai_scripted_throw_debug = 0; // 1 = one log line per request start / end
 
 using namespace scripted_throw;
 
-// [THROW] id=.. sec=.. dist=.. result=.. reason=..
-static void scripted_throw_log(CAI_Stalker const& stalker, Fvector const& target, LPCSTR result, int why)
+static LPCSTR missile_state_name(u32 state)
+{
+	switch (state)
+	{
+	case CHUDState::eIdle: return "idle";
+	case CHUDState::eShowing: return "showing";
+	case CHUDState::eHiding: return "hiding";
+	case CHUDState::eHidden: return "hidden";
+	case CHUDState::eBore: return "bore";
+	case CMissile::eThrowStart: return "throw_start";
+	case CMissile::eReady: return "ready";
+	case CMissile::eThrow: return "throw";
+	case CMissile::eThrowEnd: return "throw_end";
+	}
+	return "other";
+}
+
+// ai_scripted_throw_debug 1. A refused request gets the short line:
+//	[THROW] id=.. sec=.. dist=.. result=refused reason=..
+// A request's start and its end get the facts as well (docs/npc_throw.md has the list):
+//	[THROW] id=.. sec=.. dist=.. result=start|thrown|failed reason=.. phase=.. limit=.. ms=.. in_hand_ms=..
+//	aligned_ms=.. active=.. astate=.. mstate=.. yaw_err=.. body=.. script_anim=.. arc_tries=.. crouch=.. op=..
+//	strap=.. frames=.. cam=..
+void CAI_Stalker::scripted_throw_log(LPCSTR result, int why, Fvector const& target, bool facts)
 {
 	if (!g_ai_scripted_throw_debug)
 		return;
 
-	Msg("[THROW] id=%u sec=%s dist=%.1f result=%s reason=%s", u32(stalker.ID()), stalker.cNameSect().c_str(),
-	    stalker.Position().distance_to(target), result, reason_name(why));
+	float const distance = Position().distance_to(target);
+	if (!facts)
+	{
+		Msg("[THROW] id=%u sec=%s dist=%.1f result=%s reason=%s", u32(ID()), cNameSect().c_str(), distance, result,
+		    reason_name(why));
+		return;
+	}
+
+	CInventoryItem* const active = inventory().ActiveItem();
+	CHudItem* const active_hud = active ? active->cast_hud_item() : nullptr;
+	CInventoryItem* const grenade = scripted_throw_grenade();
+	CMissile* const missile = grenade ? smart_cast<CMissile*>(grenade) : nullptr;
+
+	CObjectHandlerPlanner& planner = CObjectHandler::planner();
+	bool const planned = planner.initialized();
+	int const operator_id = planned ? int(planner.current_action_state_id()) : -1;
+	bool const strapped = planned && (planner.m_storage.property(ObjectHandlerSpace::eWorldPropertyStrapped)
+		|| planner.m_storage.property(ObjectHandlerSpace::eWorldPropertyStrapped2Idle));
+
+	LPCSTR const script_animation = animation().script_animations().empty()
+		                                ? "0"
+		                                : (scripted_throw_prone() ? "prone" : "1");
+	int const crouch = (m_scripted_throw_body == u8(MonsterSpace::eBodyStateCrouch))
+		                   ? 1
+		                   : ((m_scripted_throw_body == u8(MonsterSpace::eBodyStateStand)) ? 0 : -1);
+
+	Msg("[THROW] id=%u sec=%s dist=%.1f result=%s reason=%s phase=%s limit=%s ms=%d in_hand_ms=%d aligned_ms=%d "
+	    "active=%s astate=%d mstate=%s yaw_err=%.0f body=%s script_anim=%s arc_tries=%d crouch=%d op=%d strap=%d "
+	    "frames=%u cam=%.0f",
+	    u32(ID()), cNameSect().c_str(), distance, result, reason_name(why),
+	    phase_name(m_scripted_throw.where()), limit_name(m_scripted_throw.lim),
+	    m_scripted_throw.ms_total(), m_scripted_throw.ms_in_hand(), m_scripted_throw.ms_aligned(),
+	    active ? active->object().cNameSect().c_str() : "none",
+	    active_hud ? int(active_hud->GetState()) : -1,
+	    missile ? missile_state_name(missile->GetState()) : "none",
+	    rad2deg(scripted_throw_yaw_error()),
+	    (movement().body_state() == MonsterSpace::eBodyStateCrouch) ? "crouch" : "stand",
+	    script_animation, m_scripted_throw.arc_tries, crouch, operator_id, strapped ? 1 : 0,
+	    m_scripted_throw.ticks, Device.vCameraPosition.distance_to(Position()));
 }
 
 // the request's grenade, while it is still the one in his grenade slot
@@ -91,20 +154,92 @@ bool CAI_Stalker::scripted_throw_animation_locked()
 	return false;
 }
 
-// the planner action's test (stalker_combat_actions.cpp), on the horizontal plane only: at 5 m the eye looks down
-// at the target more steeply than its PI/8 allows
-bool CAI_Stalker::scripted_throw_aligned()
+// He lies in a prone pose: the script animation at the head of his queue is one of the state manager's "prone" /
+// "prone_idle" set (state_mgr_animation_list.script; they are the vanilla prone smart cover's animations). There is
+// no throw animation for a lying man: he would have to leave the pose for the whole throw, in a spot picked for
+// lying down. Such a request is refused at once.
+bool CAI_Stalker::scripted_throw_prone()
+{
+	if (animation().script_animations().empty())
+		return false;
+
+	IKinematicsAnimated* const skeleton = smart_cast<IKinematicsAnimated*>(Visual());
+	if (!skeleton)
+		return false;
+
+	static LPCSTR const prone_animations[] = {"loophole_9_idle_0", "loophole_9_in_front_0"};
+	MotionID const playing = animation().script_animations().front().animation();
+	for (LPCSTR const name : prone_animations)
+	{
+		MotionID const id = skeleton->ID_Cycle_Safe(name);
+		if (id.valid() && (id == playing))
+			return true;
+	}
+
+	return false;
+}
+
+// the angle between where his head points and the target, on the horizontal plane only: at 5 m the eye looks down
+// at the target more steeply than the planner action's PI/8 allows
+float CAI_Stalker::scripted_throw_yaw_error()
 {
 	Fvector to_target = Fvector().sub(m_scripted_throw_target, Position());
 	to_target.y = 0.f;
 	if (to_target.square_magnitude() < EPS_L)
-		return true;
+		return 0.f;
 
 	to_target.normalize();
 	Fvector const head = Fvector().setHP(-movement().m_head.current.yaw, 0.f);
 	float cos_alpha = head.dotproduct(to_target);
 	clamp(cos_alpha, -1.f, 1.f);
-	return acosf(cos_alpha) < k_aim_angle;
+	return acosf(cos_alpha);
+}
+
+// the planner action's test (stalker_combat_actions.cpp)
+bool CAI_Stalker::scripted_throw_aligned()
+{
+	return scripted_throw_yaw_error() < k_aim_angle;
+}
+
+// The hide, show and throw animations of an NPC's items are counted by the items' own frame updates: each one adds
+// one frame's time (CHudItem::UpdateCL). A grenade gets a frame update every frame (CMissile::AlwaysTheCrow), and so
+// does the man who has one in his slot. A gun does not: farther than 30 m from the camera and not drawn, it gets one
+// only after its scheduler update, a few times a second. Its half-second "put away" then takes many seconds, and so
+// does drawing it again. So during a request, and until the gun is back after it:
+//	- he and the items that are changing hands are put on the next frame's update list, wherever the camera is;
+//	- the inventory's own update, which makes the slot change once an item is hidden and which he otherwise gets from
+//	  the scheduler only, runs every frame (as the actor's does).
+void CAI_Stalker::scripted_throw_keep_updated()
+{
+	MakeMeCrow();
+
+	CInventory& items = inventory();
+	if (CInventoryItem* const active = items.ActiveItem())
+		active->object().MakeMeCrow();
+
+	u16 const next_slot = items.GetNextActiveSlot();
+	if (next_slot != NO_ACTIVE_SLOT)
+	{
+		if (CInventoryItem* const next = items.ItemFromSlot(next_slot))
+			next->object().MakeMeCrow();
+	}
+
+	items.Update();
+}
+
+// update_object_handler() after a request has ended, until the gun is back in his hands and at rest (or
+// k_restore_ms have passed: whoever runs him may want his hands empty)
+void CAI_Stalker::scripted_throw_restore()
+{
+	CWeapon* const weapon = smart_cast<CWeapon*>(inventory().ActiveItem());
+	bool const back = weapon && (weapon->GetState() == CHUDState::eIdle) && !weapon->IsPending();
+	if (back || (Device.dwTimeGlobal - m_scripted_throw.end_time >= k_restore_ms))
+	{
+		m_scripted_throw_restoring = false;
+		return;
+	}
+
+	scripted_throw_keep_updated();
 }
 
 bool CAI_Stalker::scripted_throw_request(const Fvector& target, int crouch)
@@ -123,6 +258,7 @@ bool CAI_Stalker::scripted_throw_request(const Fvector& target, int crouch)
 	facts.script_control = false;
 	facts.smart_cover = false;
 	facts.animation = false;
+	facts.prone = false;
 	facts.has_grenade = false;
 	facts.grenade_in_hand = false;
 	facts.reloading = false;
@@ -135,6 +271,7 @@ bool CAI_Stalker::scripted_throw_request(const Fvector& target, int crouch)
 		facts.script_control = !!GetScriptControl();
 		facts.smart_cover = scripted_throw_smart_cover();
 		facts.animation = scripted_throw_animation_locked();
+		facts.prone = scripted_throw_prone();
 
 		CInventoryItem* const item = inventory().ItemFromSlot(GRENADE_SLOT);
 		grenade = (item && smart_cast<CGrenade*>(item)) ? item : nullptr;
@@ -152,7 +289,7 @@ bool CAI_Stalker::scripted_throw_request(const Fvector& target, int crouch)
 	if (why != r_none)
 	{
 		m_scripted_throw.refuse(why);
-		scripted_throw_log(*this, facts.target_valid ? target : Position(), "refused", why);
+		scripted_throw_log("refused", why, facts.target_valid ? target : Position(), false);
 		return false;
 	}
 
@@ -172,13 +309,17 @@ bool CAI_Stalker::scripted_throw_request(const Fvector& target, int crouch)
 	// the planner's throw action shouts here too
 	sound().play(StalkerSpace::eStalkerSoundThrowGrenade);
 
-	scripted_throw_log(*this, target, "start", r_none);
+	// his next frame update is the request's first, wherever the camera is
+	m_scripted_throw_restoring = false;
+	MakeMeCrow();
+
+	scripted_throw_log("start", r_none, target, true);
 	return true;
 }
 
 bool CAI_Stalker::scripted_throw_cancel()
 {
-	if (!m_scripted_throw.cancel())
+	if (!m_scripted_throw.cancel(Device.dwTimeGlobal))
 		return false;
 
 	scripted_throw_ended();
@@ -215,14 +356,17 @@ void CAI_Stalker::scripted_throw_reset()
 	m_scripted_throw_aim.set(0.f, 0.f, 0.f);
 	m_scripted_throw_grenade_id = u16(-1);
 	m_scripted_throw_body = u8(0xff);
+	m_scripted_throw_restoring = false;
 }
 
 void CAI_Stalker::scripted_throw_on_death()
 {
+	m_scripted_throw_restoring = false;
+
 	if (!m_scripted_throw.active)
 		return;
 
-	m_scripted_throw.on_death();
+	m_scripted_throw.on_death(Device.dwTimeGlobal);
 	scripted_throw_ended();
 }
 
@@ -246,10 +390,14 @@ void CAI_Stalker::scripted_throw_ended()
 	if (ok && g_Alive())
 		on_throw_completed();
 
+	// the facts of the debug line are those of the moment it ended, before anything is put right
+	scripted_throw_log(ok ? "thrown" : "failed", why, m_scripted_throw_target, true);
+
 	if (!ok && g_Alive())
 		scripted_throw_disarm();
 
-	scripted_throw_log(*this, m_scripted_throw_target, ok ? "thrown" : "failed", why);
+	// the gun has to come back: he stays on the per-frame update until it has (scripted_throw_restore)
+	m_scripted_throw_restoring = !!g_Alive() && !getDestroy();
 
 	if (getDestroy())
 		return;
@@ -288,12 +436,36 @@ scripted_throw::step CAI_Stalker::scripted_throw_aim()
 	if (clear)
 		m_scripted_throw_aim = m_throw_target_position;
 
-	return m_scripted_throw.arc(clear, in_range);
+	return m_scripted_throw.arc(clear, in_range, Device.dwTimeGlobal);
+}
+
+// what update_object_handler() does for a stalker without a request
+void CAI_Stalker::scripted_throw_plain_update()
+{
+	try
+	{
+		CObjectHandler::update();
+	}
+	catch (...)
+	{
+		CObjectHandler::set_goal(MonsterSpace::eObjectActionIdle);
+		CObjectHandler::update();
+	}
 }
 
 // update_object_handler() while a request is active
 void CAI_Stalker::scripted_throw_update_object_handler()
 {
+	scripted_throw_keep_updated();
+
+	// the inventory's update calls a script on a slot change, and a script may call the request off
+	if (!m_scripted_throw.active)
+	{
+		if (g_Alive())
+			scripted_throw_plain_update();
+		return;
+	}
+
 	CInventoryItem* const grenade = scripted_throw_grenade();
 	CMissile* const missile = grenade ? smart_cast<CMissile*>(grenade) : nullptr;
 	bool const in_hand = missile && (inventory().ActiveItem() == grenade);
@@ -317,18 +489,9 @@ void CAI_Stalker::scripted_throw_update_object_handler()
 	if ((what == s_end) || !missile)
 	{
 		// over: the others' goal was never taken away, so this is the plain update again
-		m_scripted_throw.abort(); // does nothing after s_end
+		m_scripted_throw.abort(Device.dwTimeGlobal); // does nothing after s_end
 		scripted_throw_ended();
-
-		try
-		{
-			CObjectHandler::update();
-		}
-		catch (...)
-		{
-			CObjectHandler::set_goal(MonsterSpace::eObjectActionIdle);
-			CObjectHandler::update();
-		}
+		scripted_throw_plain_update();
 		return;
 	}
 
@@ -356,7 +519,7 @@ void CAI_Stalker::scripted_throw_update_object_handler()
 	if (failed)
 	{
 		// as update_object_handler does, and the request is off
-		m_scripted_throw.abort();
+		m_scripted_throw.abort(Device.dwTimeGlobal);
 		scripted_throw_ended();
 
 		CObjectHandler::set_goal(MonsterSpace::eObjectActionIdle);
