@@ -2,8 +2,9 @@
 // not an engine build.
 //
 // Part 1 runs the header the engine includes: every refusal of a request, in the order the engine checks them.
-// Part 2 plays requests frame by frame the way ai_stalker_scripted_throw.cpp does: a clean throw, the timeouts, a
-// blocked arc, a grenade that goes missing, a wound before and after the throw is ordered, death, cancel.
+// Part 2 plays requests frame by frame the way ai_stalker_scripted_throw.cpp does: a clean throw, the three time
+// limits, a blocked arc, a grenade that goes missing, a wound before and after the throw is ordered, death, cancel,
+// and what the debug line says about each end (phase, limit, times).
 // Part 3 reads the engine sources and the game data and checks the wiring: each hook is there once and only acts
 // for a stalker with an active request, the script calls, the vars and their defaults, the Lua glue.
 //
@@ -64,6 +65,7 @@ static request_facts good_request()
 	f.script_control = false;
 	f.smart_cover = false;
 	f.animation = false;
+	f.prone = false;
 	f.has_grenade = true;
 	f.grenade_in_hand = false;
 	f.target_valid = true;
@@ -86,6 +88,15 @@ static void test_requests()
 	{ request_facts f = good_request(); f.script_control = true; CHECK(check_request(f) == r_script_control); }
 	{ request_facts f = good_request(); f.smart_cover = true; CHECK(check_request(f) == r_smart_cover); }
 	{ request_facts f = good_request(); f.animation = true; CHECK(check_request(f) == r_animation); }
+	// lying in a prone pose: refused at once, before anything about the grenade or the target is looked at
+	{ request_facts f = good_request(); f.prone = true; CHECK(check_request(f) == r_prone); }
+	{
+		request_facts f = good_request();
+		f.prone = true; f.has_grenade = false; f.target_valid = false; f.distance = 1.f;
+		CHECK(check_request(f) == r_prone);
+		f.animation = true;
+		CHECK(check_request(f) == r_animation);
+	}
 	{ request_facts f = good_request(); f.has_grenade = false; CHECK(check_request(f) == r_no_grenade); }
 	// the grenade is already in his hand: the planner (or somebody) is throwing it
 	{ request_facts f = good_request(); f.grenade_in_hand = true; CHECK(check_request(f) == r_busy); }
@@ -136,6 +147,17 @@ static void test_requests()
 	CHECK(!std::strcmp(reason_name(r_busy), "busy"));
 	CHECK(!std::strcmp(reason_name(r_wounded), "wounded"));
 	CHECK(!std::strcmp(reason_name(r_disabled), "disabled"));
+	CHECK(!std::strcmp(reason_name(r_prone), "prone"));
+	// the numbers of the round 1 reasons have not moved: "prone" was added at the end
+	CHECK(r_cancelled == 17 && r_prone == 18 && r_count == 19);
+
+	// the debug line's phase and limit names
+	CHECK(!std::strcmp(phase_name(p_hold), "hold") && !std::strcmp(phase_name(p_aim), "aim"));
+	CHECK(!std::strcmp(phase_name(p_throw), "throw") && !std::strcmp(phase_name(p_tail), "tail"));
+	CHECK(!std::strcmp(phase_name(-1), "hold") && !std::strcmp(phase_name(p_count), "hold"));
+	CHECK(!std::strcmp(limit_name(l_none), "none") && !std::strcmp(limit_name(l_swap), "swap"));
+	CHECK(!std::strcmp(limit_name(l_aim), "aim") && !std::strcmp(limit_name(l_total), "total"));
+	CHECK(!std::strcmp(limit_name(l_overdue), "overdue") && !std::strcmp(limit_name(l_count), "none"));
 	CHECK(!std::strcmp(reason_name(-5), "none") && !std::strcmp(reason_name(r_count), "none"));
 }
 
@@ -188,7 +210,7 @@ struct sim
 		if (s == s_aim)
 		{
 			++arc_asked;
-			s = m.arc(arc_clear_on_try && arc_asked >= arc_clear_on_try, in_range);
+			s = m.arc(arc_clear_on_try && arc_asked >= arc_clear_on_try, in_range, now);
 		}
 		last = s;
 		if (s == s_end)
@@ -225,9 +247,9 @@ static void test_machine()
 		tick_facts f = sim().facts();
 		CHECK(m.tick(f) == s_end); // nothing asked: nothing to do
 		CHECK(m.st == st_idle);
-		CHECK(!m.cancel());
+		CHECK(!m.cancel(1));
 		m.on_release(1);
-		m.on_death();
+		m.on_death(1);
 		CHECK(m.st == st_idle && !m.released);
 	}
 
@@ -242,9 +264,31 @@ static void test_machine()
 		CHECK(s.arc_asked == 1);
 		CHECK(s.released_at != 0);
 		CHECK(took > 2400 && took < 3200); // 900 swap + 1500 wind-up + 300 until the grenade object is gone
+		// what the debug line says of it: ended in the tail, no limit, the two times, a frame count
+		CHECK(s.m.where() == p_tail && s.m.lim == l_none);
+		CHECK(s.m.ms_total() == int(took) + 16); // one frame was played before run()
+		CHECK(s.m.ms_in_hand() >= 900 && s.m.ms_in_hand() < 940);
+		CHECK(s.m.ms_aligned() >= 400 && s.m.ms_aligned() < 440);
+		CHECK(s.m.ticks == took / 16 + 1);
 	}
 
-	// the wind-up may run past the 3 s: the prepare timeout only counts until the throw is ordered
+	// the phases on the way: hold until the grenade is in his hand, aim, throw once ordered, tail once released
+	{
+		sim s;
+		s.turn_ms = 1500; // he faces the target after the grenade is out
+		s.m.accept(s.now);
+		CHECK(s.m.where() == p_hold && s.m.ms_in_hand() == -1 && s.m.ms_aligned() == -1 && s.m.ms_total() == 0);
+		while (!s.m.in_hand && s.frame()) {}
+		CHECK(s.m.where() == p_aim && s.last == s_hold && !s.m.was_aligned);
+		while (!s.m.aimed && s.frame()) {}
+		CHECK(s.m.where() == p_throw && s.m.was_aligned);
+		while (!s.released_at && s.frame()) {}
+		CHECK(s.m.where() == p_tail);
+		s.run();
+		CHECK(s.m.st == st_thrown && s.m.where() == p_tail);
+	}
+
+	// the wind-up may run past the limits of the preparation: they only count until the throw is ordered
 	{
 		sim s;
 		s.swap_ms = 2500;
@@ -254,25 +298,77 @@ static void test_machine()
 		CHECK(s.m.st == st_thrown);
 	}
 
-	// the gun never gets out of the way (a long reload, a stuck animation): timeout after 3 s, nothing thrown
+	// a slow swap (a machine gun's "put away", then the grenade's draw) that round 1's 3 s cut off: thrown
+	{
+		sim s;
+		s.swap_ms = 4000;
+		s.m.accept(s.now);
+		s.run();
+		CHECK(s.m.st == st_thrown && s.m.ms_in_hand() >= 4000);
+	}
+
+	// the gun never gets out of the way (a stuck animation): timeout at the swap limit, nothing thrown
 	{
 		sim s;
 		s.swap_ms = 100000;
 		s.m.accept(s.now);
 		const unsigned took = s.run();
 		CHECK(s.m.st == st_failed && s.m.why == r_timeout);
-		CHECK(took >= k_prepare_timeout_ms && took < k_prepare_timeout_ms + 40);
+		CHECK(took >= k_swap_timeout_ms && took < k_swap_timeout_ms + 40);
 		CHECK(!s.released_at && !s.primed);
+		CHECK(s.m.where() == p_hold && s.m.lim == l_swap && s.m.ms_in_hand() == -1);
+		CHECK(s.m.ms_aligned() >= 400 && s.m.ms_aligned() < 440); // he had turned meanwhile
+		CHECK(s.m.ms_total() == int(took));
 	}
 
-	// he never faces the target: the same
+	// he never faces the target: timeout at the aim limit, which counts from "in his hand", not from the accept
 	{
 		sim s;
 		s.turn_ms = 100000;
 		s.m.accept(s.now);
-		s.run();
+		const unsigned took = s.run();
 		CHECK(s.m.st == st_failed && s.m.why == r_timeout && s.arc_asked == 0);
+		CHECK(s.m.where() == p_aim && s.m.lim == l_aim && s.m.ms_aligned() == -1);
+		const unsigned held = unsigned(s.m.ms_in_hand());
+		CHECK(held >= 900 && held < 940);
+		CHECK(took >= held + k_aim_timeout_ms && took < held + k_aim_timeout_ms + 40);
 	}
+	// ... so a late grenade still leaves him the whole aim time: 4 s of swap, then 2 s to turn
+	{
+		sim s;
+		s.swap_ms = 4000;
+		s.turn_ms = 100000;
+		s.m.accept(s.now);
+		const unsigned took = s.run();
+		CHECK(s.m.why == r_timeout && s.m.lim == l_aim);
+		CHECK(took >= 4000 + k_aim_timeout_ms && took < 4000 + k_aim_timeout_ms + 60);
+	}
+	// ... and one that turns in that time throws
+	{
+		sim s;
+		s.swap_ms = 4000;
+		s.turn_ms = 5500;
+		s.windup_ms = 1000;
+		s.m.accept(s.now);
+		s.run();
+		CHECK(s.m.st == st_thrown && s.m.ms_aligned() >= 5500);
+	}
+	// "in his hand" is kept once seen: the grenade twitching out of its rest does not restart the aim clock
+	{
+		sim s;
+		s.turn_ms = 100000;
+		s.m.accept(s.now);
+		while (!s.m.in_hand && s.frame()) {}
+		const unsigned held = s.m.in_hand_time;
+		s.in_hand = false; s.swap_ms = 100000;
+		const unsigned t0 = s.now;
+		s.run();
+		CHECK(s.m.why == r_timeout && s.m.lim == l_aim && s.m.in_hand_time == held);
+		CHECK(s.now - t0 < k_aim_timeout_ms + 40);
+	}
+	// the limits fit under the hard cap
+	CHECK(k_swap_timeout_ms + k_aim_timeout_ms < k_total_timeout_ms);
+	CHECK(k_swap_timeout_ms > 3000);
 
 	// the release never comes (no throw mark in the animation): the hard cap ends it
 	{
@@ -282,6 +378,7 @@ static void test_machine()
 		const unsigned took = s.run();
 		CHECK(s.m.st == st_failed && s.m.why == r_timeout);
 		CHECK(took >= k_total_timeout_ms && took < k_total_timeout_ms + 40);
+		CHECK(s.m.where() == p_throw && s.m.lim == l_total && s.m.ms_in_hand() > 0);
 	}
 
 	// arc blocked on every try: four tries, then failed, and the pin was never pulled
@@ -293,6 +390,7 @@ static void test_machine()
 		CHECK(s.m.st == st_failed && s.m.why == r_arc_blocked);
 		CHECK(s.arc_asked == k_arc_tries);
 		CHECK(!s.primed && !s.released_at);
+		CHECK(s.m.where() == p_aim && s.m.lim == l_none && s.m.arc_tries == k_arc_tries);
 	}
 
 	// blocked twice, clear on the third miss offset: thrown
@@ -332,6 +430,7 @@ static void test_machine()
 		s.wounded = true;
 		CHECK(!s.frame());
 		CHECK(s.m.st == st_failed && s.m.why == r_wounded);
+		CHECK(s.m.where() == p_hold && s.m.lim == l_none && s.m.ms_total() == 11 * 16);
 	}
 	// the same for a script taking him over, a smart cover, an animation that moves him
 	{
@@ -358,7 +457,7 @@ static void test_machine()
 		s.script_control = true;
 		s.smart_cover = true;
 		s.animation = true;
-		CHECK(!s.m.cancel());
+		CHECK(!s.m.cancel(s.now));
 		CHECK(s.m.active && s.m.st == st_preparing);
 		s.run();
 		CHECK(s.m.st == st_thrown && s.m.why == r_none);
@@ -369,16 +468,16 @@ static void test_machine()
 		s.m.accept(s.now);
 		while (!s.m.aimed && s.frame()) {}
 		CHECK(!s.primed || s.throw_since == s.now); // the grenade itself has not moved yet
-		CHECK(!s.m.cancel());
+		CHECK(!s.m.cancel(s.now));
 	}
 	// the engine side breaks: over in any phase
 	{
 		sim s;
 		s.m.accept(s.now);
 		while (!s.m.aimed && s.frame()) {}
-		s.m.abort();
+		s.m.abort(s.now);
 		CHECK(!s.m.active && s.m.st == st_failed && s.m.why == r_cancelled);
-		s.m.abort();
+		s.m.abort(s.now);
 		CHECK(s.m.st == st_failed);
 	}
 
@@ -387,7 +486,7 @@ static void test_machine()
 		sim s;
 		s.m.accept(s.now);
 		for (int i = 0; i < 10; ++i) s.frame();
-		s.m.on_death();
+		s.m.on_death(s.now);
 		CHECK(!s.m.active && s.m.st == st_failed && s.m.why == r_dead);
 	}
 	{
@@ -395,7 +494,7 @@ static void test_machine()
 		s.m.accept(s.now);
 		while (!s.released_at && s.frame()) {}
 		CHECK(s.released_at && s.m.active);
-		s.m.on_death();
+		s.m.on_death(s.now);
 		CHECK(!s.m.active && s.m.st == st_thrown && s.m.why == r_none);
 	}
 	// ... and the same through a frame that sees him dead
@@ -426,9 +525,9 @@ static void test_machine()
 		s.m.accept(s.now);
 		s.frame();
 		CHECK(!s.m.aimed);
-		CHECK(s.m.cancel());
+		CHECK(s.m.cancel(s.now));
 		CHECK(!s.m.active && s.m.st == st_failed && s.m.why == r_cancelled);
-		CHECK(!s.m.cancel());
+		CHECK(!s.m.cancel(s.now));
 		CHECK(s.m.tick(s.facts()) == s_end);
 		CHECK(s.m.why == r_cancelled);
 	}
@@ -456,6 +555,7 @@ static void test_machine()
 		CHECK(s.m.why == r_arc_blocked);
 		s.m.accept(s.now);
 		CHECK(s.m.active && s.m.st == st_preparing && s.m.why == r_none && s.m.arc_tries == 0 && !s.m.aimed);
+		CHECK(!s.m.in_hand && !s.m.was_aligned && s.m.ticks == 0 && s.m.lim == l_none && s.m.where() == p_hold);
 		s.m.reset();
 		CHECK(!s.m.active && s.m.st == st_idle && s.m.why == r_none);
 	}
@@ -467,6 +567,7 @@ static void test_machine()
 		CHECK(!m.overdue(1000 + k_overdue_ms - 1) && m.active);
 		CHECK(m.overdue(1000 + k_overdue_ms));
 		CHECK(!m.active && m.st == st_failed && m.why == r_timeout);
+		CHECK(m.lim == l_overdue && m.ticks == 0 && m.ms_total() == int(k_overdue_ms));
 		CHECK(!m.overdue(1000 + 2 * k_overdue_ms));
 		CHECK(k_overdue_ms > k_total_timeout_ms);
 
@@ -480,7 +581,7 @@ static void test_machine()
 	{
 		machine m;
 		m.accept(10);
-		CHECK(m.cancel());
+		CHECK(m.cancel(15));
 		m.on_release(20);
 		CHECK(!m.released && m.st == st_failed);
 	}
@@ -493,8 +594,9 @@ static void test_machine()
 		s.m.accept(s.now);
 		const unsigned t0 = s.now;
 		while (s.frame()) {}
-		CHECK(s.m.why == r_timeout);
-		CHECK(s.now - t0 >= k_prepare_timeout_ms && s.now - t0 < k_prepare_timeout_ms + 40);
+		CHECK(s.m.why == r_timeout && s.m.lim == l_swap);
+		CHECK(s.now - t0 >= k_swap_timeout_ms && s.now - t0 < k_swap_timeout_ms + 40);
+		CHECK(s.m.ms_total() == int(s.now - t0));
 	}
 }
 
@@ -544,7 +646,7 @@ static void test_wiring(const std::string& root)
 		CHECK(has(f, "throw_target(m_scripted_throw_target, vertex_id, nullptr);"));
 		CHECK(before(f, "valid_vertex_position(m_scripted_throw_target)", "graph.vertex_id(m_scripted_throw_target)"));
 		CHECK(before(f, "update_throw_params();", "m_throw_enabled"));
-		CHECK(has(f, "m_scripted_throw.arc(clear, in_range)"));
+		CHECK(has(f, "m_scripted_throw.arc(clear, in_range, Device.dwTimeGlobal)"));
 	}
 	{
 		const std::string f = body(glue, "void CAI_Stalker::scripted_throw_update_object_handler()");
@@ -580,6 +682,74 @@ static void test_wiring(const std::string& root)
 		CHECK(before(f, "missile->StopCurrentAnimWithoutCallback();", "missile->SetState(CHUDState::eIdle);"));
 		CHECK(has(f, "missile->SetNextState(CHUDState::eIdle);"));
 	}
+	// During a request, and until the gun is back after it, he and the items changing hands get a frame update
+	// every frame and the inventory makes its slot change every frame: an NPC's gun counts its "put away" by its own
+	// frame updates, and far from the camera it gets only a few a second.
+	{
+		const std::string f = body(glue, "void CAI_Stalker::scripted_throw_keep_updated()");
+		CHECK(has(f, "MakeMeCrow();"));
+		CHECK(has(f, "active->object().MakeMeCrow();"));
+		CHECK(has(f, "next->object().MakeMeCrow();"));
+		CHECK(before(f, "next->object().MakeMeCrow();", "items.Update();"));
+		CHECK(count(glue, "scripted_throw_keep_updated();") == 2);
+
+		const std::string update = body(glue, "void CAI_Stalker::scripted_throw_update_object_handler()");
+		CHECK(before(update, "scripted_throw_keep_updated();", "scripted_throw_grenade();"));
+		// a script may call the request off from the inventory's slot callback: no second end
+		CHECK(before(update, "scripted_throw_keep_updated();", "if (!m_scripted_throw.active)"));
+		CHECK(before(update, "if (!m_scripted_throw.active)", "m_scripted_throw.tick(facts)"));
+
+		const std::string restore = body(glue, "void CAI_Stalker::scripted_throw_restore()");
+		CHECK(has(restore, "weapon && (weapon->GetState() == CHUDState::eIdle) && !weapon->IsPending()"));
+		CHECK(has(restore, "Device.dwTimeGlobal - m_scripted_throw.end_time >= k_restore_ms"));
+		CHECK(before(restore, "m_scripted_throw_restoring = false;", "scripted_throw_keep_updated();"));
+
+		const std::string handler = body(stalker, "void CAI_Stalker::update_object_handler()");
+		CHECK(before(handler, "scripted_throw_update_object_handler();",
+		             "if (m_scripted_throw_restoring)\n\t\tscripted_throw_restore();"));
+		CHECK(before(handler, "scripted_throw_restore();", "CObjectHandler::update();"));
+		CHECK(count(stalker, "scripted_throw_restore()") == 1);
+
+		const std::string crow = body(stalker, "BOOL CAI_Stalker::AlwaysTheCrow()");
+		CHECK(before(crow, "if (m_scripted_throw.active)\n\t\treturn (TRUE);", "interactive_motion()"));
+		CHECK(has(crow, "m_scripted_throw_restoring && (Device.dwTimeGlobal - m_scripted_throw.end_time < "
+		                "scripted_throw::k_restore_ms)"));
+
+		// the flag does not outlive him, a reinit or a new request, and a dead man is not kept updated
+		CHECK(has(body(glue, "void CAI_Stalker::scripted_throw_reset()"), "m_scripted_throw_restoring = false;"));
+		CHECK(before(body(glue, "void CAI_Stalker::scripted_throw_on_death()"), "m_scripted_throw_restoring = false;",
+		             "if (!m_scripted_throw.active)"));
+		CHECK(has(body(glue, "void CAI_Stalker::scripted_throw_ended()"),
+		          "m_scripted_throw_restoring = !!g_Alive() && !getDestroy();"));
+		CHECK(before(body(glue, "bool CAI_Stalker::scripted_throw_request(const Fvector& target, int crouch)"),
+		             "m_scripted_throw.accept(facts.now);", "m_scripted_throw_restoring = false;"));
+		CHECK(has(body(stalker, "CAI_Stalker::CAI_Stalker("), "m_scripted_throw_restoring = false;"));
+	}
+	// a lying man is refused at once: the script animation at the head of his queue is one of the prone set
+	{
+		const std::string f = body(glue, "bool CAI_Stalker::scripted_throw_prone()");
+		CHECK(before(f, "if (animation().script_animations().empty())\n\t\treturn false;", "ID_Cycle_Safe(name)"));
+		CHECK(has(f, "{\"loophole_9_idle_0\", \"loophole_9_in_front_0\"}"));
+		CHECK(has(f, "id.valid() && (id == playing)"));
+		CHECK(has(body(glue, "bool CAI_Stalker::scripted_throw_request(const Fvector& target, int crouch)"),
+		          "facts.prone = scripted_throw_prone();"));
+	}
+	// the debug line: the short one for a refusal, the facts for a start and an end, taken before the disarm
+	{
+		const std::string f = body(glue, "void CAI_Stalker::scripted_throw_log(");
+		CHECK(before(f, "if (!g_ai_scripted_throw_debug)\n\t\treturn;", "Msg("));
+		CHECK(has(f, "phase=%s limit=%s ms=%d in_hand_ms=%d aligned_ms=%d \"\n"));
+		CHECK(has(f, "\"active=%s astate=%d mstate=%s yaw_err=%.0f body=%s script_anim=%s arc_tries=%d crouch=%d "
+		             "op=%d strap=%d \"\n"));
+		CHECK(has(f, "\"frames=%u cam=%.0f\""));
+		CHECK(count(f, "Msg(") == 2);
+		const std::string ended = body(glue, "void CAI_Stalker::scripted_throw_ended()");
+		CHECK(before(ended, "scripted_throw_log(ok ? \"thrown\" : \"failed\", why, m_scripted_throw_target, true);",
+		             "scripted_throw_disarm();"));
+		CHECK(count(glue, "scripted_throw_log(\"refused\", why,") == 1);
+		CHECK(count(glue, "scripted_throw_log(\"start\", r_none, target, true);") == 1);
+	}
+
 	CHECK(has(glue, "int g_ai_scripted_throw = 1;"));
 	CHECK(has(glue, "int g_ai_scripted_throw_debug = 0;"));
 	CHECK(has(glue, "[THROW] id=%u sec=%s dist=%.1f result=%s reason=%s"));
@@ -689,6 +859,16 @@ static void test_wiring(const std::string& root)
 			if (!has(doc, ticked)) { std::printf("FAIL docs/npc_throw.md lacks %s\n", ticked.c_str()); ++g_fail; }
 		}
 		CHECK(has(doc, "level.scripted_throw_version ~= nil"));
+		// the doc names every field of the debug line, and the limits as the header has them
+		for (const char* field : {"phase=", "limit=", "ms=", "in_hand_ms=", "aligned_ms=", "active=", "astate=",
+		                          "mstate=", "yaw_err=", "body=", "script_anim=", "arc_tries=", "crouch=", "op=",
+		                          "strap=", "frames=", "cam="})
+		{
+			if (!has(doc, field)) { std::printf("FAIL docs/npc_throw.md lacks %s\n", field); ++g_fail; }
+		}
+		CHECK(k_swap_timeout_ms == 4500 && has(doc, "4.5 s"));
+		CHECK(k_aim_timeout_ms == 2000 && k_total_timeout_ms == 8000 && k_restore_ms == 4000);
+		CHECK(has(doc, "loophole_9_idle_0"));
 
 		const std::string labels = read(root + "/gamedata/configs/text/eng/ui_mm_modded_exes_scripted_throw.xml");
 		CHECK(has(labels, "ui_mm_modded_exes_gameplay_stalkers_ai_scripted_throw\""));
